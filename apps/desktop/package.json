@@ -1,0 +1,37 @@
+{
+  "name": "conxol-desktop",
+  "private": true,
+  "version": "0.1.31",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "check": "tsc -b --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test:unit": "node --experimental-strip-types test/session-folders.test.mjs && node --experimental-strip-types test/terminal-authentication.test.mjs && node --experimental-strip-types test/connection-attempt.test.mjs && node --experimental-strip-types test/ssh-host-trust.test.mjs && node --experimental-strip-types test/remote-editor-security.test.mjs && node --experimental-strip-types test/macro-recording.test.mjs && node --experimental-strip-types test/terminal-session-close.test.mjs && node --experimental-strip-types test/terminal-focus.test.mjs && node --experimental-strip-types test/network-diagnostic-lifecycle.test.mjs && node --experimental-strip-types test/saved-jump-alias.test.mjs && node --experimental-strip-types test/tunnel-port.test.mjs && node --experimental-strip-types test/text-prompt.test.mjs && node --experimental-strip-types test/terminal-paste-approval.test.mjs && node --experimental-strip-types test/terminal-input-queue.test.mjs && node --experimental-strip-types test/remote-desktop-framebuffer.test.mjs && node --experimental-strip-types test/operation-history.test.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "0.16.0",
+    "@xterm/xterm": "^5.3.0",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.35.0",
+    "@tauri-apps/cli": "^2.12.1",
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^5.0.4",
+    "eslint": "^9.35.0",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.4.20",
+    "globals": "^16.3.0",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.42.0",
+    "vite": "^7.1.3"
+  }
+}

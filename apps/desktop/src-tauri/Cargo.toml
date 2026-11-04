@@ -1,0 +1,44 @@
+[package]
+name = "conxol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2.4", features = [] }
+
+[dependencies]
+anyhow.workspace = true
+conxol-core = { path = "../../../crates/conxol-core" }
+conxol-telnet = { path = "../../../crates/conxol-telnet" }
+conxol-ssh = { path = "../../../crates/conxol-ssh" }
+conxol-serial = { path = "../../../crates/conxol-serial" }
+conxol-network = { path = "../../../crates/conxol-network" }
+conxol-remote-desktop = { path = "../../../crates/conxol-remote-desktop" }
+conxol-store = { path = "../../../crates/conxol-store" }
+conxol-vault = { path = "../../../crates/conxol-vault" }
+portable-pty = "0.9"
+rfd = "0.15.4"
+sha2.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2.12.1", features = [] }
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+zeroize = { workspace = true, features = ["serde"] }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+
+[dev-dependencies]
+tempfile = "3.23.0"
+russh.workspace = true
+russh-sftp.workspace = true

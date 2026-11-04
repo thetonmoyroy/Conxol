@@ -1,0 +1,50 @@
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
+
+const config = JSON.parse(readFileSync('apps/desktop/src-tauri/tauri.conf.json', 'utf8'));
+if (process.argv[2] === 'check-version') {
+  const tag = process.env.GITHUB_REF_NAME;
+  const frontend = JSON.parse(readFileSync('apps/desktop/package.json', 'utf8'));
+  const cargo = readFileSync('Cargo.toml', 'utf8').match(/\[workspace.package\]\s+version = "([^"]+)"/)[1];
+  if (tag !== `v${config.version}` || frontend.version !== config.version || cargo !== config.version) {
+    throw new Error('Tag, Tauri, Cargo, and frontend versions must match');
+  }
+} else if (process.argv[2] === 'collect') {
+  const platform = process.argv[3];
+  if (!['windows-x64', 'linux-x64', 'macos-arm64', 'macos-x64'].includes(platform)) throw new Error('Unknown platform');
+  const helperDir = 'apps/desktop/src-tauri/helpers';
+  const helper = `conxol-vnc-helper${platform.startsWith('windows') ? '.exe' : ''}`;
+  if (!existsSync(join(helperDir, helper)) || readdirSync(helperDir).some(name => name.includes('rdp'))) throw new Error('Invalid helper staging');
+  const extensions = platform.startsWith('windows') ? ['.exe'] : platform.startsWith('linux') ? ['.deb', '.AppImage'] : ['.dmg'];
+  function walk(dir) {
+    return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);
+  }
+  const files = walk(process.argv[4] ?? 'target/release/bundle').filter(path => extensions.some(ext => path.endsWith(ext)));
+  if (extensions.some(ext => files.filter(path => path.endsWith(ext)).length !== 1)) {
+    throw new Error(`Expected exactly one installer per format: ${extensions.join(', ')}`);
+  }
+  const stem = `${config.productName}_${config.version}`;
+  const expectedNames = platform === 'windows-x64' ? [`${stem}_x64-setup.exe`]
+    : platform === 'linux-x64' ? [`${stem}_amd64.deb`, `${stem}_amd64.AppImage`]
+      : [`${stem}_${platform === 'macos-arm64' ? 'aarch64' : 'x64'}.dmg`];
+  for (const path of files) {
+    if (!expectedNames.includes(basename(path))) {
+      throw new Error(`Installer name does not match ${platform} product, version or architecture: ${basename(path)}`);
+    }
+  }
+  const out = process.argv[5] ?? 'target/release-assets';
+  if (existsSync(out)) {
+    const stale = readdirSync(out).find(name => name.startsWith('Conxol-') && !name.startsWith(`Conxol-${config.version}-`));
+    if (stale) throw new Error(`Release output contains a different version: ${stale}`);
+  }
+  mkdirSync(out, { recursive: true });
+  const checksums = files.map(path => {
+    const name = `Conxol-${config.version}-${platform}${extensions.find(ext => path.endsWith(ext))}`;
+    copyFileSync(path, join(out, name));
+    return `${createHash('sha256').update(readFileSync(path)).digest('hex')}  ${basename(name)}`;
+  });
+  writeFileSync(join(out, `SHA256SUMS-${platform}.txt`), `${checksums.join('\n')}\n`);
+} else {
+  throw new Error('Use check-version or collect <platform>');
+}

@@ -1,0 +1,15 @@
+[package]
+name = "conxol-telnet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Native Telnet transport and bounded option negotiation for Conxol"
+
+[dependencies]
+encoding_rs.workspace = true
+conxol-core = { path = "../conxol-core" }
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

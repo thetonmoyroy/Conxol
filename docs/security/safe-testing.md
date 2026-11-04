@@ -1,0 +1,258 @@
+# Safe local testing policy
+
+Conxol protocol tests must be safe to run on a developer workstation. A
+green test run is not permission to inspect or alter the developer's personal
+configuration.
+
+## Hard boundaries
+
+- Tests use temporary directories created for the test process and remove only
+  files they created. The local SSH server also uses its fixture directory for
+  every remote path and directory listing; it never enumerates or writes the
+  system `/tmp` directory.
+- Network fixtures bind to `127.0.0.1` or `::1` on an OS-assigned port. Tests do not use
+  public hostnames, LAN addresses, cloud instances, or production endpoints.
+- SSH tests generate fixture host/client keys in the temporary test directory.
+  They pass an explicit fixture `known_hosts` path and never read `~/.ssh`,
+  `SSH_AUTH_SOCK`, GitHub keys, or a user's private key.
+- Fixture sshd sessions override HOME, ZDOTDIR, XDG_CONFIG_HOME, and XAUTHORITY
+  before the account shell starts, disable personal SSH rc/environment files,
+  and use a fixture PID file. X11 fixtures wrap xauth so it can only update
+  their temporary authority file. Changing the daemon's HOME alone would not
+  isolate the remote shell, since sshd normally obtains its home from the OS
+  account database.
+- OpenSSH import requires an explicit path and never falls back to
+  `~/.ssh/config`; tests and development runs must use a repository fixture or
+  an isolated temporary file.
+- Native GUI checks use a copied portable bundle, generated profiles and a
+  disposable HOME/ZDOTDIR/XDG environment with SSH-agent variables removed.
+  On macOS, verify the actual app PID's HOME/ZDOTDIR before connecting and after
+  selecting the app for automation: a Launch Services relaunch can discard the
+  original process environment. Stop a copy that fails this check. Keep the app
+  launch in a live foreground session; any `LSEnvironment` safeguard belongs
+  only in the copied test bundle. See the
+  [native renderer receipt](../testing/remote-desktop-renderer.md#fullscreen-recheck-with-tauri-2121).
+- SSH connection setup never falls back to `~/.ssh/known_hosts`. An explicit
+  known-hosts path or pinned fingerprint is required by the transport. The
+  desktop can inspect an unknown direct host without credentials and ask the
+  operator to accept and save its fingerprint in app-owned ssh-trust.json;
+  the authenticated handshake then verifies that exact pin. Changed stored
+  keys remain rejected. Tests use synthetic pins and temporary trust stores,
+  never real-server approval or personal files.
+- RDP/VNC tests use protocol-independent fixtures or an explicitly approved
+  disposable server. The isolated RDP helper can be compiled and exercised on
+  EOF without opening a socket; the VNC integration fixture binds only to
+  `127.0.0.1` and an OS-assigned port.
+- The optional real X11 fixture uses an already-installed Xvfb binary with
+  `-nolisten tcp` and `-nolock`, using only the system Unix-socket directory
+  when it already exists. It does not install an X server, inspect `DISPLAY` or
+  `.Xauthority`, use a personal display, open a TCP listener, create a system
+  directory, or change its permissions. If the system directory is absent or
+  is not a real directory, the optional fixture skips cleanly.
+- Serial tests use configuration plus a disposable Unix pseudo-terminal
+  fixture. They never enumerate host ports or open a physical adapter;
+  hardware interoperability requires a separate, explicit manual test
+  session.
+- WSL discovery and launch are compiled conditionally for Windows. macOS/Linux
+  tests do not invoke `wsl.exe`; the parser is tested with synthetic UTF-16
+  output and no local distribution is probed.
+- Explicit shell selection maps to a fixed platform allowlist. macOS/Linux
+  tests cover the shell-name contract without scanning for executables, and
+  Windows PowerShell/cmd/WSL runtime behavior remains a dedicated target test.
+- Tests do not install system packages, alter shell profiles, change firewall
+  rules, modify keychains, write outside the repository/temp directories, or
+  send credentials to a real host.
+
+## Review checklist for new tests
+
+Before merging a new integration test, verify that it:
+
+1. has an explicit target address and timeout;
+2. uses a temporary fixture path for keys, known-hosts, databases, and files;
+3. uses synthetic credentials held only for the test lifetime;
+4. does not inherit or query the SSH agent when agent behavior is not the
+   subject of the test; fixture child processes remove agent and Git SSH
+   environment variables explicitly;
+5. cleans up child processes and listening sockets on success, failure, and
+   cancellation;
+6. does not print passwords, private keys, tokens, or full environment values.
+
+## Safe commands
+
+The default local quality command is repository-scoped:
+
+```text
+cargo xtask check
+```
+
+The focused SSH command uses the same sanitized subprocess boundary:
+
+```text
+cargo xtask test-ssh
+```
+
+See the [OpenSSH lab guide](../testing/ssh-lab.md) for installed-tool
+requirements and the distinction between local fixture and platform evidence.
+Agent authentication uses a dedicated foreground agent and generated keys.
+Its temporary socket is passed only to an isolated child test; ambient agent
+state and fixture-child overrides are removed by the validation launcher.
+
+Before a user-authenticated push, the repository-only payload audit can be run
+without contacting GitHub:
+
+```text
+cargo xtask license-check
+cargo xtask pre-push-check
+```
+
+The license check requires the canonical Apache-2.0 heading and complete terms
+so GitHub can identify the repository license. The payload audit verifies `main`, both staged and unstaged Git whitespace checks, the ignored
+`base/` boundary, the explicit `quality.yml` and `release.yml` workflow
+allowlist, credential-like paths,
+and private-key PEM markers in the index. It reports the local
+`origin/main...HEAD` comparison but never invokes `git push`.
+
+All of its validation subprocesses also remove ambient SSH-agent, askpass, Git
+SSH configuration, Cargo Git transport, `NETRC`, `SSLKEYLOGFILE`, and TLS
+certificate override variables (`SSL_CERT_FILE`/`SSL_CERT_DIR`).
+The check deliberately keeps the normal Cargo/rustup/package cache environment,
+but redirects each child process's home and XDG configuration/data/cache
+directories to a unique temporary directory. This is an application-level
+safety boundary rather than an operating-system sandbox.
+When CARGO_HOME or RUSTUP_HOME is unset, the command explicitly retains the
+corresponding tool directory under the caller's OS profile before replacing
+HOME. This keeps rustup-installed compilers usable on clean CI runners.
+
+The isolated RDP helper check is also repository-scoped:
+
+```text
+cargo xtask check-rdp-helper
+```
+
+The real RDP protocol fixture is opt-in and remains loopback-only:
+
+```text
+cargo xtask check-rdp-fixture
+```
+
+It starts the official IronRDP server implementation inside a current-thread
+test, generates a short-lived CA and server identity under a disposable
+temporary directory, and passes the CA only to the test-feature helper. It
+does not modify the macOS trust store, inspect personal certificates, read SSH
+files, or connect to a remote host. The test-only CA feature is excluded from
+the normal helper and package paths; the fixture proves one local TLS/Hybrid
+engine/server pairing, a bounded monitor-layout request, and one controlled
+loss/recovery cycle, not cross-platform or production interoperability.
+
+The isolated VNC helper check is repository-scoped:
+
+```text
+cargo xtask check-vnc-helper
+```
+
+The isolated fuzz package can be format- and compile-checked without running
+the fuzzers or contacting a protocol server:
+
+```text
+cargo xtask check-fuzz
+```
+
+The synthetic benchmark probe is repository-scoped as well:
+
+```text
+cargo xtask benchmark
+```
+
+It uses in-memory fixtures only; it does not open sockets or inspect local
+configuration, credentials, SSH directories, or attached devices.
+
+The browser-preview responsive smoke check is also local-only. It uses the
+Vite server on `127.0.0.1` with synthetic preview sessions and does not invoke
+native protocol commands or inspect browser profiles, cookies, or clipboard
+contents. Its evidence and limitations are recorded in
+`docs/testing/responsive-ui.md`.
+
+The dependency-free frontend security regression is repository-scoped too:
+
+```text
+cd apps/desktop
+pnpm run test:unit
+```
+
+It checks that hostile remote editor content remains escaped before the
+fixed syntax-highlighting spans are inserted, and that the terminal paste
+policy distinguishes single-line input from CR/LF/Unicode multiline input
+while requiring confirmation by default. It does not open a browser, invoke
+Tauri, or contact a remote host.
+
+The native logger writes no log file by default. Test and development output is
+kept on the child process stderr, with credential fields represented only by a
+redacted marker.
+
+The desktop Settings view also provides an explicit sanitized diagnostic
+export. It is generated from fixed runtime metadata (product version, target
+platform, architecture, build profile, and native-boundary availability) and
+downloads through the renderer only after the user clicks the action. It does
+not read or include sessions, connection targets, commands, paths, environment
+values, terminal output, logs, or credential material.
+
+The SSH monitor is similarly quiet by default: opening it requests one bounded
+snapshot, while live refresh requires an explicit operator toggle. The only
+allowed refresh periods are 15, 30, and 60 seconds; each request finishes
+before the next timer is scheduled, and leaving the view or changing sessions
+stops future refreshes. The native six-second operation timeout remains the
+backstop for a host that stops responding.
+
+The dependency audit is also local and read-only when run with the cached
+advisory database:
+
+```text
+cargo audit --no-fetch
+```
+
+It does not inspect SSH files, the SSH agent, Keychain entries, or remote
+hosts. RSA support is disabled in the main SSH dependency until its known
+Marvin timing advisory has a maintained fixed implementation.
+
+The isolated RDP candidate has a separate lockfile and is audited separately:
+
+```text
+cargo audit --no-fetch --file tools/rdp-helper/Cargo.lock
+```
+
+At present this intentionally reports `RUSTSEC-2023-0071` through IronRDP's
+pinned `picky` chain; the candidate is therefore not staged into normal
+bundles.
+
+The helper EOF smoke test below emits its native handshake and exits without
+connecting:
+
+```text
+cargo run --manifest-path tools/rdp-helper/Cargo.toml -- \
+  --conxol-protocol rdp --host 127.0.0.1 --port 3389 \
+  --username fixture-user < /dev/null
+```
+
+`cargo xtask check` gives every validation subprocess, including formatters,
+linters, frontend commands, helper builds, and tests, an ephemeral `HOME` and
+isolated XDG configuration/data/cache directories (and the corresponding
+Windows profile variables). The normal Cargo, rustup, and package caches remain
+available for build performance, but validation commands cannot resolve a
+personal home configuration through the subprocess environment. The temporary
+directory is created with a unique process/time name and removed after each
+child exits.
+On Unix, the test shell is forced to `/bin/sh`; shell and interpreter startup
+variables such as `ZDOTDIR`, `BASH_ENV`, `ENV`, and `PYTHONSTARTUP` are removed
+so a personal startup file cannot be loaded indirectly.
+
+The `xtask` build, helper-staging, packaging, and test subprocesses also remove
+ambient SSH agent, askpass, Git SSH, Git global/system configuration, package
+registry authentication, compiler-wrapper, and dynamic-loader injection
+variables. This prevents a dependency or build hook from selecting a personal
+SSH transport, private package registry, compiler wrapper, or injected library
+while still allowing the ordinary compiler and package caches to be reused. It
+is an application-level boundary, not a replacement for an OS sandbox.
+
+These guarantees cover Conxol's test behavior. They cannot protect secrets
+from a fully compromised operating system, a malicious process with the same
+user privileges, or an operator who explicitly exports or pastes a secret.

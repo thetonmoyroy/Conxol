@@ -1,0 +1,12 @@
+[package]
+name = "conxol-benchmarks"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Reproducible synthetic local probes for Conxol"
+
+[dependencies]
+conxol-core = { path = "../crates/conxol-core" }
+serde_json.workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "conxol-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "State and transport primitives for Conxol"
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+proptest = "1.7.0"
+serde_json.workspace = true
