@@ -1,6 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod logging;
+mod notes;
+mod clipboard;
+use clipboard::{clipboard_read_text, clipboard_write_text};
+mod workspace_lock;
+use workspace_lock::{WorkspaceLock, workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure};
 mod network;
 mod output_batch;
 mod remote_desktop;
@@ -911,11 +916,7 @@ fn session_save_ssh(
         x11_display: x11.as_ref().map(|value| value.display.clone()),
         x11_single_connection: x11.as_ref().is_some_and(|value| value.single_connection),
         server_alive_interval,
-        folder: Some(
-            folder
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "Remote sessions".into()),
-        ),
+        folder: folder.filter(|value| !value.trim().is_empty()),
         tags: Vec::new(),
         favorite: false,
         startup_directory,
@@ -996,7 +997,7 @@ fn session_save_serial(
         x11_display: None,
         x11_single_connection: false,
         server_alive_interval: None,
-        folder: Some("Serial devices".into()),
+        folder: None,
         tags: vec!["serial".into()],
         favorite: false,
         startup_directory: None,
@@ -1062,7 +1063,7 @@ fn session_save_telnet(
         x11_display: None,
         x11_single_connection: false,
         server_alive_interval: None,
-        folder: Some("Telnet sessions".into()),
+        folder: None,
         tags: vec!["telnet".into(), "plaintext".into()],
         favorite: false,
         startup_directory: None,
@@ -1126,7 +1127,7 @@ fn session_save_remote_desktop(
         x11_display: None,
         x11_single_connection: false,
         server_alive_interval: None,
-        folder: Some("Remote desktops".into()),
+        folder: None,
         tags: vec![protocol_tag.into()],
         favorite: false,
         startup_directory: None,
@@ -1932,7 +1933,7 @@ fn main() {
         event = "runtime_start",
         platform = std::env::consts::OS,
     );
-    let builder = tauri::Builder::default();
+    let builder = tauri::Builder::default().plugin(tauri_plugin_clipboard_manager::init());
     #[cfg(target_os = "macos")]
     let builder = builder
         .menu(|app| {
@@ -2009,21 +2010,19 @@ fn main() {
                 path: data_dir.join("vault.bin"),
                 vault: portable_vault,
             });
-            let mut store = SessionStore::open(data_dir.join("sessions.json"))
+            let store = SessionStore::open(data_dir.join("sessions.json"))
                 .map_err(|error| error.to_string())?;
             let settings = SettingsStore::open(data_dir.join("settings.json"))
                 .map_err(|error| error.to_string())?;
             let snippets = SnippetStore::open(data_dir.join("snippets.json"))
                 .map_err(|error| error.to_string())?;
+            app.manage(Mutex::new(notes::NoteStore::open(data_dir.join("notes.json"))?));
             let macros = MacroStore::open(data_dir.join("macros.json"))
                 .map_err(|error| error.to_string())?;
             let audit =
                 AuditStore::open(data_dir.join("audit.json")).map_err(|error| error.to_string())?;
-            if store.list().is_empty() {
-                store
-                    .save(SessionRecord::local_terminal("Local workstation"))
-                    .map_err(|error| error.to_string())?;
-            }
+            app.manage(WorkspaceLock::open(data_dir.join("workspace-lock.json"))?);
+            workspace_lock::start_idle_monitor(app.handle().clone());
             app.manage(Mutex::new(store));
             app.manage(Mutex::new(settings));
             app.manage(Mutex::new(snippets));
@@ -2032,7 +2031,13 @@ fn main() {
             app.manage(RemoteDesktopManager::default());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(|invoke| {
+            let allowed = invoke.message.webview_ref().try_state::<WorkspaceLock>()
+                .is_some_and(|state| state.allows(invoke.message.command()));
+            if !allowed { invoke.resolver.reject("Workspace is locked. Enter your PIN to continue."); return true; }
+            let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+            workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure,
+            clipboard_read_text, clipboard_write_text,
             app_snapshot,
             diagnostic_export,
             session_list,
@@ -2062,6 +2067,9 @@ fn main() {
             snippet_list,
             snippet_save,
             snippet_delete,
+            notes::note_list,
+            notes::note_save,
+            notes::note_delete,
             macro_list,
             macro_save,
             macro_delete,
@@ -2130,7 +2138,9 @@ fn main() {
             terminal_write,
             terminal_resize,
             terminal_close
-        ])
+            ];
+            handler(invoke)
+        })
         .build(tauri::generate_context!())
         .expect("error while building Conxol");
     let exit_ready = Arc::new(AtomicBool::new(false));

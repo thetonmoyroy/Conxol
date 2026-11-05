@@ -19,6 +19,8 @@ pub struct GeneralSettings {
     pub theme: ThemePreference,
     #[serde(default = "default_true")]
     pub confirm_multiline_paste: bool,
+    #[serde(default = "default_true")]
+    pub paste_preview: bool,
 }
 
 impl Default for GeneralSettings {
@@ -26,6 +28,7 @@ impl Default for GeneralSettings {
         Self {
             theme: ThemePreference::default(),
             confirm_multiline_paste: true,
+            paste_preview: true,
         }
     }
 }
@@ -52,6 +55,8 @@ pub struct TerminalSettings {
     pub scrollback_lines: u32,
     #[serde(default = "default_true")]
     pub cursor_blink: bool,
+    #[serde(default)]
+    pub copy_on_select: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,6 +115,7 @@ impl Default for TerminalSettings {
         Self {
             scrollback_lines: default_scrollback(),
             cursor_blink: true,
+            copy_on_select: false,
         }
     }
 }

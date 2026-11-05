@@ -417,7 +417,7 @@ impl SessionRecord {
             x11_display: None,
             x11_single_connection: false,
             server_alive_interval: None,
-            folder: Some("Local terminals".into()),
+            folder: None,
             tags: vec!["local".into()],
             favorite: true,
             startup_directory: None,

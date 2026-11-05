@@ -1,0 +1,13 @@
+import assert from "node:assert/strict";
+import { pasteTerminalClipboard } from "../src/terminal-clipboard.ts";
+let owned = true, reads = 0;
+const sent = [];
+await pasteTerminalClipboard(async () => { reads++; return "show interfaces\n"; }, () => owned, async text => sent.push(text));
+assert.deepEqual(sent, ["show interfaces\n"]);
+owned = false;
+await pasteTerminalClipboard(async () => { reads++; return "must not read"; }, () => owned, async () => assert.fail());
+assert.equal(reads, 1);
+owned = true;
+await pasteTerminalClipboard(async () => { owned = false; return "must not send"; }, () => owned, async () => assert.fail());
+await assert.rejects(pasteTerminalClipboard(async () => { throw new Error("denied"); }, () => true, async () => assert.fail()), /denied/);
+await pasteTerminalClipboard(async () => "", () => true, async () => assert.fail());

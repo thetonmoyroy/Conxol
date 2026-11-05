@@ -24,7 +24,7 @@ export async function chooseOverwrite(message: string): Promise<boolean | null> 
 }
 
 function openDialogue(message: string, initialValue: string | undefined, options: { multiline?: boolean; readOnly?: boolean; createOnly?: boolean; secret?: boolean; signal?: AbortSignal; reviewText?: string; title?: string; acceptLabel?: string } = {}): Promise<string | null> {
-  if (pending || options.signal?.aborted) return Promise.resolve(null);
+  if (document.documentElement.dataset.workspaceLocked === "true" || pending || options.signal?.aborted) return Promise.resolve(null);
   return new Promise((resolve) => {
     const dialog = document.createElement("dialog");
     pending = dialog;
@@ -79,6 +79,7 @@ function openDialogue(message: string, initialValue: string | undefined, options
       if (settled) return;
       settled = true;
       window.removeEventListener("pagehide", cancel);
+      window.removeEventListener("conxol:workspace-locked", cancel);
       options.signal?.removeEventListener("abort", cancel);
       if (input) input.value = "";
       pending = null;
@@ -104,6 +105,7 @@ function openDialogue(message: string, initialValue: string | undefined, options
     // are handled in window capture; Escape still cancels the dialog normally.
     dialog.addEventListener("keydown", (event) => { if (event.key !== "Escape") event.stopPropagation(); });
     window.addEventListener("pagehide", cancel);
+    window.addEventListener("conxol:workspace-locked", cancel);
     options.signal?.addEventListener("abort", cancel, { once: true });
     try {
       document.body.append(dialog);

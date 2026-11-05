@@ -29,7 +29,7 @@ class Element extends EventTarget {
 }
 let failOpening = false;
 const body = new Element();
-globalThis.document = { body, createElement: () => new Element() };
+globalThis.document = { documentElement: { dataset: {} }, body, createElement: () => new Element() };
 const window = globalThis.window = new EventTarget();
 // Browser windows have no Node listener ceiling; cover 32 requests plus modal/overflow cleanup.
 setMaxListeners(34, window);
@@ -55,6 +55,18 @@ for (const action of ["cancel", "close", "button", "pagehide"]) {
   assert.equal(await cancelled, null, action);
   assert.equal(current.removed, true);
 }
+
+const lockingPrompt = promptText("Pending secret", "private value", { secret: true });
+const lockingDialog = latest();
+window.dispatchEvent(new Event("conxol:workspace-locked"));
+assert.equal(await lockingPrompt, null);
+assert.equal(input(lockingDialog).value, "");
+assert.equal(lockingDialog.removed, true);
+globalThis.document.documentElement.dataset.workspaceLocked = "true";
+const childrenBeforeLock = body.children.length;
+assert.equal(await promptText("Blocked while locked"), null);
+assert.equal(body.children.length, childrenBeforeLock);
+globalThis.document.documentElement.dataset.workspaceLocked = "false";
 
 const empty = promptText("Optional name");
 latest().querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));

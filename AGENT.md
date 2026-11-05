@@ -48,8 +48,10 @@ last terminal returns to Home. Recent/recovery lists use real saved history.
 SSH selection exposes a compact file browser in the sidebar alongside the
 terminal, reusing `RemoteFilesView` and its existing native safety callbacks.
 Session rows keep a fixed height and reserve action-button space while hidden,
-so hover/focus must not resize or shift host labels. User sessions use stable
-name ordering; only Recent sessions uses last-used ordering.
+so hover/focus must not resize or shift host labels. Sidebar folders always precede unfiled sessions. Folders and sessions use
+alphabetical name ordering, including the sidebar Recent filter. Drag and drop
+changes only the parent folder, never display order. Home recent/recovery lists
+retain last-used ordering.
 Right-click a saved row, press F2, or use its pencil to edit its custom name and
 folder. The folder input suggests existing groups and accepts a new group name;
 metadata persists through session_save. SSH tabs retain the saved custom name

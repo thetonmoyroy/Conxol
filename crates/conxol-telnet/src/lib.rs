@@ -68,7 +68,9 @@ pub enum TelnetError {
 #[serde(rename_all = "kebab-case")]
 pub enum TelnetEncoding {
     #[default]
+    #[serde(rename = "utf-8", alias = "utf8")]
     Utf8,
+    #[serde(rename = "windows-1252", alias = "windows1252")]
     Windows1252,
 }
 

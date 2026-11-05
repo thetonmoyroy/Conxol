@@ -1,0 +1,78 @@
+{
+  "cpuThrottle": 1,
+  "environment": "Headless Microsoft Edge, Windows; synthetic xterm renderer only; no SSH/Telnet/IPC",
+  "results": [
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 64.69999998807907,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.699999999999818,
+      "frameP95Ms": 16.700000000000728,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 65.69999998807907,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.69999999999891,
+      "frameP95Ms": 16.799999999999272,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 53.5,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.69999999999891,
+      "frameP95Ms": 16.700000000000728,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 52,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.700000000000728,
+      "frameP95Ms": 16.700000000000728,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 51.79999999701977,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.700000000000728,
+      "frameP95Ms": 16.799999999999272,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 56.599999994039536,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.09999999403953552,
+      "frameMedianMs": 16.69999999999709,
+      "frameP95Ms": 16.700000000004366,
+      "framesOver25Ms": 0,
+      "scrollFrames": 240
+    }
+  ]
+}

@@ -1,0 +1,79 @@
+{
+  "cpuThrottle": 4,
+  "renderer": "webgl",
+  "environment": "Headless Microsoft Edge, Windows; synthetic xterm renderer only; no SSH/Telnet/IPC",
+  "results": [
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 405.30000001192093,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.20000000298023224,
+      "frameMedianMs": 16.699999999999818,
+      "frameP95Ms": 33.399999999999636,
+      "framesOver25Ms": 50,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 782.2999999970198,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.29999999701976776,
+      "frameMedianMs": 33.30000000000109,
+      "frameP95Ms": 33.400000000001455,
+      "framesOver25Ms": 211,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 664.5999999940395,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.20000000298023224,
+      "frameMedianMs": 33.29999999999927,
+      "frameP95Ms": 50,
+      "framesOver25Ms": 211,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 473.3999999910593,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.20000000298023224,
+      "frameMedianMs": 16.700000000004366,
+      "frameP95Ms": 33.400000000001455,
+      "framesOver25Ms": 100,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": false,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 571.5,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.20000000298023224,
+      "frameMedianMs": 16.700000000004366,
+      "frameP95Ms": 33.400000000001455,
+      "framesOver25Ms": 95,
+      "scrollFrames": 240
+    },
+    {
+      "highlighting": true,
+      "lines": 12000,
+      "characters": 363899,
+      "parsedMs": 670.2000000029802,
+      "scrollCallMedianMs": 0,
+      "scrollCallP95Ms": 0.29999999701976776,
+      "frameMedianMs": 33.30000000000291,
+      "frameP95Ms": 33.400000000001455,
+      "framesOver25Ms": 213,
+      "scrollFrames": 240
+    }
+  ]
+}

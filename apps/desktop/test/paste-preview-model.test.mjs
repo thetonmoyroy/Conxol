@@ -1,0 +1,18 @@
+import assert from "node:assert/strict";
+import { EditorState, EditorSelection } from "@codemirror/state";
+import { history, undo, redo } from "@codemirror/commands";
+import { replacePreviewSelection } from "../src/paste-preview-model.ts";
+let state = EditorState.create({ doc: "peer 10.0.0.1 enable\npeer 10.0.0.2 enable\npeer 10.0.0.3 enable", extensions: [EditorState.allowMultipleSelections.of(true), history()] });
+const ranges = [1, 2, 3].map(number => { const line = state.doc.line(number); return EditorSelection.range(line.from + 5, line.from + 13); });
+state = state.update({ selection: EditorSelection.create(ranges) }).state;
+state = state.update(replacePreviewSelection(state, "192.0.2.1\n192.0.2.2\n192.0.2.3")).state;
+assert.equal(state.doc.toString(), "peer 192.0.2.1 enable\npeer 192.0.2.2 enable\npeer 192.0.2.3 enable");
+assert.equal(state.selection.ranges.length, 3);
+const target = { get state() { return state; }, dispatch: transaction => { state = transaction.state; } };
+assert(undo(target)); assert(state.doc.toString().includes("10.0.0.1"));
+assert(redo(target)); assert(state.doc.toString().includes("192.0.2.1"));
+state = state.update(replacePreviewSelection(state, "X")).state;
+assert.equal(state.doc.toString(), "peer X enable\npeer X enable\npeer X enable");
+let single = EditorState.create({ doc: "show ip interface brief\n" });
+single = single.update(replacePreviewSelection(single, "display ")).state;
+assert.equal(single.doc.toString(), "display show ip interface brief\n");

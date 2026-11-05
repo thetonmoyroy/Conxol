@@ -393,6 +393,29 @@ fn default_rows() -> u16 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn telnet_encoding_accepts_frontend_and_legacy_names() {
+        for (canonical, legacy, expected) in [
+            ("utf-8", "utf8", conxol_telnet::TelnetEncoding::Utf8),
+            ("windows-1252", "windows1252", conxol_telnet::TelnetEncoding::Windows1252),
+        ] {
+            for name in [canonical, legacy] {
+                let request: super::TelnetConnectRequest = serde_json::from_value(serde_json::json!({
+                    "host": "127.0.0.1", "port": 23, "encoding": name,
+                })).expect("frontend and legacy encodings must deserialize before any connection");
+                assert_eq!(request.encoding, expected);
+                assert_eq!(serde_json::to_value(request.encoding).unwrap(), canonical);
+            }
+        }
+        let default_request: super::TelnetConnectRequest = serde_json::from_value(serde_json::json!({
+            "host": "127.0.0.1", "port": 23,
+        })).unwrap();
+        assert_eq!(default_request.encoding, conxol_telnet::TelnetEncoding::Utf8);
+        assert!(serde_json::from_value::<super::TelnetConnectRequest>(serde_json::json!({
+            "host": "127.0.0.1", "port": 23, "encoding": "unsupported",
+        })).is_err());
+    }
+
     use super::{TelnetManager, TelnetManagerError};
 
     #[test]
