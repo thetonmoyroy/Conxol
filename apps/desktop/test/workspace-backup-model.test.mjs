@@ -1,0 +1,11 @@
+import assert from "node:assert/strict";
+import { captureWorkspacePreferences, applyWorkspacePreferences } from "../src/workspace-backup-model.ts";
+const storage = new Map([["conxol.sidebarWidth", "240"], ["conxol.folderStyles", "{}"], ["unrelated-secret", "must-stay-local"]]);
+globalThis.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) };
+assert.deepEqual(captureWorkspacePreferences(), { "conxol.sidebarWidth": "240", "conxol.folderStyles": "{}" });
+applyWorkspacePreferences({ workspaceId: "restored-fixture", preferences: { "conxol.sidebarWidth": "300", "conxol-theme": "dark", "arbitrary-injected-key": "ignored" } });
+assert.equal(storage.get("conxol.sidebarWidth"), "300");
+assert.equal(storage.has("conxol.folderStyles"), false, "restore clears an absent workspace preference");
+assert.equal(storage.get("unrelated-secret"), "must-stay-local");
+assert.equal(storage.has("arbitrary-injected-key"), false);
+assert.equal(storage.get("conxol.restoredWorkspace"), "restored-fixture");

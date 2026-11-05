@@ -70,6 +70,8 @@ const NATIVE_SHELL_CASES: [(&str, ShellReply); 3] = [
 #[derive(Clone, Copy)]
 enum Method {
     Password,
+    PasswordFallback,
+    PartialInteractive,
     Distinct {
         together: bool,
     },
@@ -406,7 +408,7 @@ impl server::Handler for Handler {
             .fetch_add(1, Ordering::SeqCst);
         self.stall_if_requested().await;
         Ok(
-            if matches!(self.method, Method::Password)
+            if matches!(self.method, Method::Password | Method::PasswordFallback)
                 && user == "fixture"
                 && password == self.expected.as_str()
             {
@@ -436,7 +438,8 @@ impl server::Handler for Handler {
                     (1, false, 2)
                 }
             }
-            Method::Password => return Ok(Auth::reject()),
+            Method::Password | Method::PasswordFallback => return Ok(Auth::reject()),
+            Method::PartialInteractive => return Ok(Auth::Reject { proceed_with_methods: Some(russh::MethodSet::from(&[russh::MethodKind::Password][..])), partial_success: true }),
         };
         if user != "fixture" {
             return Ok(Auth::reject());
@@ -541,6 +544,7 @@ impl Fixture {
             nodelay: true,
             ..Default::default()
         };
+        if matches!(method, Method::Password) { config.methods = russh::MethodSet::from(&[russh::MethodKind::Password][..]); }
         if matches!(
             shell_reply,
             ShellReply::StartupFlood | ShellReply::StartupPartialExit
@@ -612,7 +616,7 @@ impl Fixture {
             timeout: DEADLINE,
             keepalive_interval: None,
             credentials: match method {
-                Method::Password => SshCredentials::password_secret("fixture", secret),
+                Method::Password | Method::PasswordFallback | Method::PartialInteractive => SshCredentials::password_secret("fixture", secret),
                 Method::Interactive { .. } | Method::Distinct { .. } => {
                     SshCredentials::keyboard_interactive_secret("fixture", secret)
                 }
@@ -2230,5 +2234,58 @@ async fn timeout_and_cancellation_during_authentication_close_the_client_socket(
             }
             fixture.finish().await;
         }
+    }
+}
+
+
+#[tokio::test]
+async fn auto_authentication_selects_password_and_handles_misleading_interactive_advertisements() {
+    for method in [Method::Password, Method::PasswordFallback] {
+        for correct in [true, false] {
+            let fixture = Fixture::start(method, false).await;
+            let mut options = fixture.options(Method::Password, true);
+            let answer = if correct { fixture.secret.clone() } else { Zeroizing::new(Uuid::new_v4().to_string()) };
+            let calls = Arc::new(AtomicUsize::new(0)); let prompted = calls.clone();
+            options.credentials = SshCredentials::keyboard_interactive_prompt("fixture", move |challenge| {
+                assert_eq!(challenge.prompts, vec!["Password: "]); prompted.fetch_add(1, Ordering::SeqCst);
+                let answer = answer.clone(); async move { Ok(vec![Secret::from_zeroizing(answer)]) }
+            });
+            let result = SshConnection::connect(options).await;
+            if correct { let connection = result.expect("Auto must support password-only SSH"); connection.disconnect().await.unwrap(); drop(connection); }
+            else { assert!(matches!(result, Err(SshError::AuthenticationRejected))); }
+            assert_eq!(calls.load(Ordering::SeqCst),1);
+            assert_eq!(fixture.observations.password_requests.load(Ordering::SeqCst),1, "never retry a rejected password");
+            assert_eq!(fixture.observations.challenges.load(Ordering::SeqCst),0);
+            fixture.finish().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn auto_authentication_cancellation_sends_no_password() {
+    let fixture = Fixture::start(Method::Password, false).await;
+    let mut options = fixture.options(Method::Password,true);
+    options.credentials = SshCredentials::keyboard_interactive_prompt("fixture", |_| async { Err(SshError::AuthenticationCancelled) });
+    let result = SshConnection::connect(options).await;
+    assert!(matches!(result,Err(SshError::AuthenticationCancelled)));
+    assert_eq!(fixture.observations.password_requests.load(Ordering::SeqCst),0);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn auto_authentication_does_not_fall_back_after_rejected_secret_or_partial_mfa() {
+    for method in [Method::Interactive { prompts: 1, echo: false, rounds: 1 }, Method::PartialInteractive] {
+        let fixture = Fixture::start(method,false).await;
+        let mut options = fixture.options(Method::Password,true);
+        let calls = Arc::new(AtomicUsize::new(0)); let prompted = calls.clone();
+        options.credentials = SshCredentials::keyboard_interactive_prompt("fixture",move |_| {
+            prompted.fetch_add(1,Ordering::SeqCst);
+            async { Ok(vec![Secret::new("incorrect-fixture-response")]) }
+        });
+        let result = SshConnection::connect(options).await;
+        assert!(matches!(result,Err(SshError::AuthenticationRejected)));
+        assert_eq!(fixture.observations.password_requests.load(Ordering::SeqCst),0,"must not bypass MFA or retry a rejected secret");
+        assert_eq!(calls.load(Ordering::SeqCst),if matches!(method,Method::PartialInteractive) { 0 } else { 1 });
+        fixture.finish().await;
     }
 }

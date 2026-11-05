@@ -1,3 +1,4 @@
+use conxol_ssh::diagnostics::{self as ssh_diagnostics, Operation as DiagnosticOperation, Stage as DiagnosticStage};
 use conxol_core::{
     MAX_SERVER_ALIVE_INTERVAL_SECONDS, MAX_SSH_JUMP_HOSTS, TerminalInputError, TransferEvent,
     TransferLifecycle, TransferState, Utf8OutputDecoder, validate_terminal_input,
@@ -780,23 +781,33 @@ impl SshManager {
         request: SshConnectRequest,
         auth_events: Channel<SshAuthEvent>,
     ) -> Result<SshConnectResponse, SshManagerError> {
+        ssh_diagnostics::scope(DiagnosticOperation::Connect, request.connect_timeout_ms, request.jump_hosts.len(), self.connect_inner(app, vault, request, auth_events)).await
+    }
+
+    async fn connect_inner(
+        &self,
+        app: AppHandle,
+        vault: Arc<dyn CredentialLookup>,
+        request: SshConnectRequest,
+        auth_events: Channel<SshAuthEvent>,
+    ) -> Result<SshConnectResponse, SshManagerError> {
         let mut shutdown = self.shutdown.subscribe();
         if *shutdown.borrow() {
             return Err(SshManagerError::Closed);
         }
-        validate_ssh_connection_policy(&request)?;
+        validate_ssh_connection_policy(&request).inspect_err(|_| ssh_diagnostics::record_request_failure(DiagnosticStage::RequestValidation))?;
         let host = request.host.clone();
         let (size, size_receiver) = watch::channel((request.cols.max(1), request.rows.max(1)));
         let connection = tokio::select! {
             biased;
             _ = shutdown.changed() => return Err(SshManagerError::Closed),
-            result = connect_transport(vault.as_ref(), &request, self, &auth_events, None) => result?,
+            result = connect_transport(vault.as_ref(), &request, self, &auth_events, None) => result.inspect_err(record_connection_diagnostic)?,
         };
         let connection = Arc::new(connection);
         let shell = tokio::select! {
             biased;
             _ = shutdown.changed() => return Err(SshManagerError::Closed),
-            result = open_shell_at_current_size(&connection, &size_receiver) => result?,
+            result = open_shell_at_current_size(&connection, &size_receiver) => result.inspect_err(|error| ssh_diagnostics::record_error(DiagnosticStage::Shell, error))?,
         };
         let (reader, writer) = shell.split();
         let terminal_id = Uuid::new_v4().to_string();
@@ -1800,6 +1811,15 @@ impl SshManager {
     }
 }
 
+fn record_connection_diagnostic(error: &SshManagerError) {
+    match error {
+        SshManagerError::Transport(error) => ssh_diagnostics::record_error(DiagnosticStage::Connect, error),
+        SshManagerError::Vault(error) => ssh_diagnostics::record_vault_failure(error.diagnostic_kind()),
+        SshManagerError::InvalidRequest(_) | SshManagerError::Input(_) => ssh_diagnostics::record_request_failure(DiagnosticStage::RequestValidation),
+        _ => {},
+    }
+}
+
 async fn connect_transport(
     vault: &dyn CredentialLookup,
     request: &SshConnectRequest,
@@ -2218,7 +2238,7 @@ async fn run_remote_session(
                             Some(last_error.to_owned()),
                         );
                     },
-                    |_attempt| async {
+                    |_attempt| ssh_diagnostics::scope(DiagnosticOperation::Reconnect, request.connect_timeout_ms, request.jump_hosts.len(), async {
                         let new_connection = connect_transport(
                             vault.as_ref(),
                             &request,
@@ -2226,10 +2246,10 @@ async fn run_remote_session(
                             &auth_events,
                             Some(&terminal_id),
                         )
-                        .await?;
-                        let shell = open_shell_at_current_size(&new_connection, &size).await?;
+                        .await.inspect_err(record_connection_diagnostic)?;
+                        let shell = open_shell_at_current_size(&new_connection, &size).await.inspect_err(|error| ssh_diagnostics::record_error(DiagnosticStage::Shell, error))?;
                         Ok((new_connection, shell.split()))
-                    },
+                    }),
                     |attempt| Duration::from_secs(1_u64 << (attempt - 1).min(5)),
                 )
                 .await;

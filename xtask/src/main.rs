@@ -18,6 +18,36 @@ fn main() {
         "check" => check(),
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
+        "test-backup" => run_sanitized_test(
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "-p",
+                "conxol",
+                "backup::tests",
+                "--",
+                "--nocapture",
+            ],
+            None,
+        ),
+        "test-diagnostics" => run_sanitized_test(
+            "cargo",
+            [
+                "test",
+                "--locked",
+                "-p",
+                "conxol",
+                "-p",
+                "conxol-vault",
+                "-p",
+                "conxol-ssh",
+                "diagnostic",
+                "--",
+                "--nocapture",
+            ],
+            None,
+        ),
         "check-fuzz" => check_fuzz(),
         "check-rdp-helper" => check_rdp_helper(),
         "check-rdp-fixture" => check_rdp_fixture(),
@@ -40,6 +70,10 @@ fn main() {
                 "cargo xtask check-rust    Run sanitized workspace formatting, tests, and Clippy"
             );
             println!("cargo xtask test-ssh    Run isolated SSH tests and Unix OpenSSH fixtures");
+            println!("cargo xtask test-diagnostics    Run isolated diagnostic export regressions");
+            println!(
+                "cargo xtask test-backup    Run isolated encrypted workspace backup regressions"
+            );
             println!("cargo xtask check-fuzz    Compile and format-check isolated fuzz targets");
             println!("cargo xtask check-rdp-helper    Validate the isolated RDP helper locally");
             println!(

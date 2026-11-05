@@ -158,6 +158,35 @@ pub enum VaultError {
     PortableStateUnavailable(String),
 }
 
+impl VaultError {
+    /// Exact failure category for diagnostics, without backend payloads,
+    /// credential identifiers, stored bytes, or local filesystem paths.
+    pub fn diagnostic_kind(&self) -> &'static str {
+        match self {
+            Self::Backend(error) => match error {
+                keyring::Error::NoEntry => "keyring::Error::NoEntry",
+                keyring::Error::NoStorageAccess(_) => "keyring::Error::NoStorageAccess",
+                keyring::Error::PlatformFailure(_) => "keyring::Error::PlatformFailure",
+                keyring::Error::BadEncoding(_) => "keyring::Error::BadEncoding",
+                keyring::Error::BadDataFormat(_, _) => "keyring::Error::BadDataFormat",
+                keyring::Error::BadStoreFormat(_) => "keyring::Error::BadStoreFormat",
+                keyring::Error::TooLong(_, _) => "keyring::Error::TooLong",
+                keyring::Error::Invalid(_, _) => "keyring::Error::Invalid",
+                keyring::Error::Ambiguous(_) => "keyring::Error::Ambiguous",
+                keyring::Error::NoDefaultStore => "keyring::Error::NoDefaultStore",
+                keyring::Error::NotSupportedByStore(_) => "keyring::Error::NotSupportedByStore",
+                _ => "keyring::Error::<unknown>",
+            },
+            Self::InvalidCredentialId => "VaultError::InvalidCredentialId",
+            Self::PortableCredentialMissing(_) => "VaultError::PortableCredentialMissing",
+            Self::PortableStateUnavailable(_) => "VaultError::PortableStateUnavailable",
+            Self::SecretTooLarge | Self::PortableSecretTooLarge => "VaultError::SecretTooLarge",
+            Self::PortableIo { .. } => "VaultError::PortableIo",
+            _ => "VaultError::<additional details redacted>",
+        }
+    }
+}
+
 impl fmt::Debug for VaultError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Keep structured `?error` logging from exposing paths, backend
@@ -213,6 +242,35 @@ impl PlatformVault {
         match entry.delete_credential() {
             Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
             Err(error) => Err(VaultError::Backend(error)),
+        }
+    }
+
+    /// Enumerate only this application's namespace; never return secret values.
+    pub fn list_ids(&self) -> Result<Vec<String>, VaultError> {
+        self.entry(&CredentialId::new("backup-probe")?)?;
+        #[cfg(windows)]
+        {
+            let pattern = format!(r".*\.{}$", self.service.replace('.', r"\."));
+            let spec = std::collections::HashMap::from([("pattern", pattern.as_str())]);
+            let entries = keyring_core::Entry::search(&spec).map_err(VaultError::Backend)?;
+            let mut ids = Vec::new();
+            for entry in entries {
+                // Legacy Windows targets are `<id>.<service>`. The store's generic
+                // splitter is ambiguous when the service itself contains dots.
+                let attributes = entry.get_attributes().map_err(VaultError::Backend)?;
+                if let Some(id) = attributes
+                    .get("target_name")
+                    .and_then(|target| target.strip_suffix(&format!(".{}", self.service)))
+                    && CredentialId::new(id).is_ok()
+                {
+                    ids.push(id.to_owned());
+                }
+            }
+            Ok(ids)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Vec::new())
         }
     }
 
@@ -474,6 +532,75 @@ fn validate_secret_size(secret: &SecretMaterial) -> Result<(), VaultError> {
         return Err(VaultError::SecretTooLarge);
     }
     Ok(())
+}
+
+/// A versioned, bounded workspace archive. The format has fixed KDF parameters;
+/// untrusted input cannot select an excessive memory or iteration count.
+pub const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
+const BACKUP_MAGIC: &[u8; 8] = b"CXBKP001";
+pub fn encrypt_workspace_backup(
+    plaintext: &[u8],
+    passphrase: &SecretMaterial,
+) -> Result<Vec<u8>, VaultError> {
+    if plaintext.len() > MAX_BACKUP_BYTES {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+    if passphrase.as_str().chars().count() < 8 || passphrase.as_str().len() > 1024 {
+        return Err(VaultError::PortableFormat(
+            "Use a backup password of 8–1024 bytes.".into(),
+        ));
+    }
+    let salt = random_bytes::<16>()?;
+    let nonce_bytes = random_bytes::<12>()?;
+    let key = derive_portable_key(passphrase, &salt)?;
+    let nonce = Nonce::<U12>::try_from(nonce_bytes.as_slice())
+        .map_err(|_| VaultError::PortableEncryption)?;
+    let encrypted = cipher_from_key(&key)?
+        .encrypt(
+            &nonce,
+            aes_gcm::aead::Payload {
+                msg: plaintext,
+                aad: BACKUP_MAGIC,
+            },
+        )
+        .map_err(|_| VaultError::PortableEncryption)?;
+    let mut bytes = Vec::with_capacity(36 + encrypted.len());
+    bytes.extend_from_slice(BACKUP_MAGIC);
+    bytes.extend_from_slice(&salt);
+    bytes.extend_from_slice(&nonce_bytes);
+    bytes.extend_from_slice(&encrypted);
+    Ok(bytes)
+}
+pub fn decrypt_workspace_backup(
+    bytes: &[u8],
+    passphrase: &SecretMaterial,
+) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    if bytes.len() > MAX_BACKUP_BYTES + 52 {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+    if bytes.len() < 52 || &bytes[..8] != BACKUP_MAGIC {
+        return Err(VaultError::PortableFormat(
+            "Not a supported Conxol workspace backup.".into(),
+        ));
+    }
+    if passphrase.as_str().chars().count() < 8 || passphrase.as_str().len() > 1024 {
+        return Err(VaultError::PortableAuthenticationFailed);
+    }
+    let mut salt = [0u8; 16];
+    salt.copy_from_slice(&bytes[8..24]);
+    let key = derive_portable_key(passphrase, &salt)?;
+    let nonce = Nonce::<U12>::try_from(&bytes[24..36])
+        .map_err(|_| VaultError::PortableAuthenticationFailed)?;
+    cipher_from_key(&key)?
+        .decrypt(
+            &nonce,
+            aes_gcm::aead::Payload {
+                msg: &bytes[36..],
+                aad: BACKUP_MAGIC,
+            },
+        )
+        .map(Zeroizing::new)
+        .map_err(|_| VaultError::PortableAuthenticationFailed)
 }
 
 fn derive_portable_key(
@@ -925,5 +1052,45 @@ mod tests {
             Err(VaultError::PortablePathUnsafe(rejected)) if rejected == path
         ));
         assert_eq!(fs::read(&target).unwrap(), original);
+    }
+}
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn diagnostic_error_kind_keeps_categories_without_credential_bytes() {
+        let cases = [
+            (
+                VaultError::Backend(keyring::Error::NoEntry),
+                "keyring::Error::NoEntry",
+            ),
+            (
+                VaultError::Backend(keyring::Error::BadEncoding(
+                    b"fixture-secret-password".to_vec(),
+                )),
+                "keyring::Error::BadEncoding",
+            ),
+            (
+                VaultError::Backend(keyring::Error::Invalid(
+                    "fixture-user".into(),
+                    "fixture-secret-password".into(),
+                )),
+                "keyring::Error::Invalid",
+            ),
+            (
+                VaultError::PortableCredentialMissing("fixture-credential-id".into()),
+                "VaultError::PortableCredentialMissing",
+            ),
+            (
+                VaultError::PortableIo {
+                    path: PathBuf::from("C:/fixture/private-key"),
+                    source: io::Error::other("fixture-secret-password"),
+                },
+                "VaultError::PortableIo",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.diagnostic_kind(), expected);
+        }
     }
 }

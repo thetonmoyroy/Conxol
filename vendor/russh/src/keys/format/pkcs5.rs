@@ -14,7 +14,7 @@ pub fn decode_pkcs5(
     use aes::cipher::{block_padding::Pkcs7, BlockModeDecrypt, KeyIvInit};
 
     if let Some(pass) = password {
-        let sec = match enc {
+        let _sec = match enc {
             Encryption::Aes128Cbc(ref iv) => {
                 let mut c = md5::Context::new();
                 c.consume(pass.as_bytes());
@@ -31,7 +31,7 @@ pub fn decode_pkcs5(
         // TODO: presumably pkcs5 could contain non-RSA keys?
         #[cfg(feature = "rsa")]
         {
-            super::decode_rsa_pkcs1_der(&sec).map(Into::into)
+            super::decode_rsa_pkcs1_der(&_sec).map(Into::into)
         }
         #[cfg(not(feature = "rsa"))]
         {

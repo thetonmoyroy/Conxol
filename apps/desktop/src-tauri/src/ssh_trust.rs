@@ -40,6 +40,24 @@ impl SshTrustStore {
             Err(e) => Err(format!("Cannot read SSH trust store: {e}")),
         }
     }
+    pub(crate) fn validate_backup(&self) -> Result<(), String> {
+        let trust = self.read()?;
+        if trust.hosts.len() > 4096
+            || trust.hosts.iter().any(|(endpoint, fingerprint)| {
+                endpoint.len() > 300
+                    || endpoint.chars().any(char::is_control)
+                    || fingerprint.strip_prefix("SHA256:").is_none_or(|suffix| {
+                        suffix.len() != 43
+                            || !suffix
+                                .bytes()
+                                .all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/')
+                    })
+            })
+        {
+            return Err("Backup SSH trust data is invalid.".into());
+        }
+        Ok(())
+    }
     pub fn lookup(&self, host: &str, port: u16) -> Result<Option<String>, String> {
         Ok(self.read()?.hosts.get(&Self::key(host, port)?).cloned())
     }

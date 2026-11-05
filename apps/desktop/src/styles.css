@@ -515,6 +515,7 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .session-row { height: 28px; min-height: 28px; flex-shrink: 0; border: 0; }
 .app-shell .session-row.active { background: var(--mint-soft); }
 .app-shell .session-row-main { min-height: 28px; padding: 3px 3px 3px 17px; gap: 7px; }
+.app-shell .session-folder-group > .session-row > .session-row-main { padding-left: 31px; }
 .app-shell .session-icon { flex-basis: 16px; width: 16px; height: 18px; border: 0; background: transparent; color: var(--amber); }
 .app-shell .session-icon svg { width: 16px; height: 16px; }
 .app-shell .session-icon.local { color: var(--mint); }
@@ -559,28 +560,28 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .workspace-error, .app-shell .workspace-notice { flex-shrink: 0; margin: 4px 8px; }
 .app-shell .main-column > .empty-protocol { flex: 1; min-height: 250px; margin-top: 0; }
 .desktop-home { display: grid; flex: 1; min-height: 0; overflow: auto; place-items: center; padding: 30px; }
-.desktop-home-content { width: min(520px, 100%); text-align: center; }
-.desktop-home-brand { display: flex; align-items: center; justify-content: center; gap: 20px; margin-bottom: 25px; }
-.desktop-home-brand h1 { margin: 0; font-size: 29px; font-weight: 400; letter-spacing: -.03em; color: var(--text); }
+.desktop-home-content { width: min(600px, 100%); text-align: center; }
+.desktop-home-brand { display: flex; align-items: center; justify-content: center; gap: 22px; margin-bottom: 32px; }
+.desktop-home-brand h1 { margin: 0; font-size: 40px; font-weight: 400; letter-spacing: -.03em; color: var(--text); }
 .desktop-home-logo { display: grid; place-items: center; flex: 0 0 48px; width: 48px; height: 48px; }
 .desktop-home-logo svg { display: block; width: 48px; height: 48px; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
 .desktop-home-logo .conxol-mark-frame { stroke: var(--mint); }
 .desktop-home-logo .conxol-mark-prompt { stroke: var(--text); }
-.desktop-home-actions { display: flex; justify-content: space-between; gap: 30px; }
-.desktop-home-actions .outline-button { justify-content: center; min-width: 190px; height: 28px; font-size: 11px; font-weight: 400; }
+.desktop-home-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 16px; }
+.desktop-home-actions .outline-button { justify-content: center; flex: 1 1 220px; min-width: 0; height: 40px; font-size: 14px; font-weight: 400; }
 .desktop-home-actions .outline-button svg { color: var(--mint); }
-.desktop-home-search { display: flex; align-items: center; gap: 7px; width: 360px; max-width: 100%; height: 26px; margin: 12px auto 36px; padding: 0 6px; border: 1px solid var(--line-strong); color: var(--faint); background: var(--panel); }
+.desktop-home-search { display: flex; align-items: center; gap: 10px; width: 460px; max-width: 100%; height: 40px; margin: 18px auto 36px; padding: 0 12px; border: 1px solid var(--line-strong); color: var(--faint); background: var(--panel); }
 .desktop-home-search:focus-within { border-color: var(--amber); }
-.desktop-home-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 12px; }
+.desktop-home-search input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 14px; }
 .desktop-home-search input::placeholder { color: var(--muted); }
-.desktop-home-content h2 { margin: 0 0 10px; color: var(--text); font-size: 12px; font-weight: 700; }
+.desktop-home-content h2 { margin: 0 0 14px; color: var(--text); font-size: 15px; font-weight: 700; }
 .desktop-recent-sessions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px 12px; text-align: left; }
-.desktop-recent-sessions button { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; text-align: left; }
+.desktop-recent-sessions button { display: flex; align-items: center; gap: 8px; min-width: 0; min-height: 34px; padding: 5px 0; border: 0; background: transparent; color: var(--muted); font-size: 14px; text-align: left; }
 .desktop-recent-sessions button svg { flex-shrink: 0; color: var(--amber); }
 .desktop-recent-sessions button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .desktop-recent-sessions button:hover { color: var(--amber); }
 .desktop-recent-sessions button:focus-visible { outline: 1px solid var(--amber); }
-.desktop-home-empty { color: var(--faint); font-size: 11px; }
+.desktop-home-empty { color: var(--faint); font-size: 14px; }
 
 /* Compact SSH browser shares the existing transfer and file-operation handlers. */
 .app-shell .sidebar { flex-basis: 164px; }
@@ -608,10 +609,6 @@ button:not(:disabled) { cursor: pointer; }
 .sidebar-file-browser .remote-files-error { padding: 7px 3px; font-size: 9px; }
 .sidebar-monitor { display: flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 5px; min-height: 28px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--mint); font-size: 10px; }
 .sidebar-file-empty { padding: 25px 8px; color: var(--muted); font-size: 11px; text-align: center; }
-.desktop-home-content { width: min(440px, 100%); }
-.desktop-home-actions { gap: 45px; }
-.desktop-home-actions .outline-button { min-width: 170px; height: 27px; }
-.desktop-home-search { width: 335px; }
 .desktop-menu button { display: flex; align-items: center; gap: 7px; }
 .desktop-menu button svg { flex-shrink: 0; color: var(--mint); }
 .desktop-menu-note { padding: 8px 10px; max-width: 240px; color: var(--muted); font-size: 10px; line-height: 1.5; }
@@ -972,7 +969,10 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
   .macros-modal .macro-editor-footer { position: sticky; bottom: 0; background: var(--panel); }
 }
 
-/* Bookmark details stay visible before connection settings. */
+/* Bookmark disclosure remembers its last open state across app restarts. */
+.session-settings .session-bookmark > summary { cursor: pointer; }
+.session-settings .session-bookmark > summary:hover { color: var(--amber); }
+.session-settings .session-bookmark > summary:focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
 .session-settings .session-bookmark-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 12px 0; gap: 12px; }
 .session-settings .session-bookmark-grid .quick-connect-check-row { flex-direction: row; align-items: center; }
 .session-settings .session-bookmark-grid input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--amber); }
@@ -1038,3 +1038,31 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .theme-light .session-activity-strip .activity-notes { --activity-color: #865c88; }
 .theme-light .session-activity-strip .activity-files { --activity-color: #347b8c; }
 .theme-light .session-activity-strip .activity-settings { --activity-color: #a14d62; }
+
+.desktop-home .desktop-home-logo { flex-basis: 64px; width: 64px; height: 64px; }
+.desktop-home .desktop-home-logo svg { width: 64px; height: 64px; }
+.desktop-home-actions .outline-button svg, .desktop-home-search svg, .desktop-recent-sessions button svg { width: 18px; height: 18px; flex-shrink: 0; }
+@media (max-width: 700px) {
+  .desktop-recent-sessions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Keep every settings destination reachable on compact windows. */
+.workspace-settings-tabs { overflow-x: auto; scrollbar-width: thin; }
+.workspace-settings-tabs button { flex: 0 0 auto; white-space: nowrap; }
+
+.help-diagnostics { display: flex; align-items: center; gap: 18px; padding: 14px; margin-top: 16px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--panel-soft); }
+.help-diagnostics > div { flex: 1; min-width: 0; }
+.help-diagnostics h4 { margin: 0 0 5px; font-size: 12px; color: var(--text); }
+.help-diagnostics p { margin: 0; font-size: 11px; color: var(--muted); line-height: 1.6; }
+.help-diagnostics .outline-button { flex-shrink: 0; white-space: nowrap; font-size: 11px; }
+.help-diagnostics-error { color: var(--coral); font-size: 11px; line-height: 1.6; }
+@media (max-width: 600px) { .help-diagnostics { align-items: stretch; flex-direction: column; gap: 12px; } }
+.ssh-auth-override { width: 100%; min-width: 0; grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 5px; padding: 10px; }
+.ssh-auth-override summary { display: flex; justify-content: space-between; align-items: center; color: var(--muted); font-size: 12px; cursor: pointer; }
+.ssh-auth-override summary span { color: var(--mint); font-size: 11px; }
+.ssh-auth-override[open] { display: grid; gap: 12px; }
+.ssh-auth-override[open] summary { margin-bottom: 12px; }
+.ssh-auth-override summary { justify-content: flex-start; gap: 8px; }
+.ssh-auth-override summary::before { content: '›'; color: var(--faint); font-size: 16px; line-height: 1; }
+.ssh-auth-override[open] summary::before { transform: rotate(90deg); }
+.ssh-auth-override summary span { margin-left: auto; }

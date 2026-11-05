@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod logging;
+mod backup;
+use backup::{workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences};
 mod notes;
 mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
@@ -106,7 +108,7 @@ struct AppSnapshot {
     local_terminal_available: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DiagnosticExport {
     schema_version: u32,
@@ -117,6 +119,8 @@ struct DiagnosticExport {
     build_profile: &'static str,
     native_boundary: bool,
     local_terminal_available: bool,
+    ssh: conxol_ssh::diagnostics::Snapshot,
+    ssh_client_algorithms: conxol_ssh::SshAlgorithmPreferences,
 }
 
 #[derive(serde::Deserialize)]
@@ -398,11 +402,12 @@ fn app_snapshot() -> AppSnapshot {
 
 /// Return an explicit, sanitized diagnostic snapshot. This command has no
 /// inputs and deliberately does not read sessions, environment variables,
-/// logs, paths, terminal output, or credential stores.
+/// general logs, paths, terminal output, or credential stores. Recent typed SSH
+/// failures are collected separately with sensitive fields omitted.
 #[tauri::command]
 fn diagnostic_export() -> Result<String, String> {
     serde_json::to_string_pretty(&DiagnosticExport {
-        schema_version: 1,
+        schema_version: 2,
         product: "Conxol",
         version: env!("CARGO_PKG_VERSION"),
         platform: std::env::consts::OS,
@@ -414,8 +419,34 @@ fn diagnostic_export() -> Result<String, String> {
         },
         native_boundary: true,
         local_terminal_available: true,
+        ssh: conxol_ssh::diagnostics::snapshot(),
+        ssh_client_algorithms: conxol_ssh::diagnostic_algorithm_preferences(),
     })
     .map_err(|_| "could not create sanitized diagnostic export".to_owned())
+}
+
+// No renderer-supplied report or path: export only our allowlisted snapshot to
+// a destination explicitly chosen in the native Save dialog.
+#[tauri::command]
+async fn diagnostic_export_save() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = rfd::FileDialog::new()
+            .set_title("Save sanitized diagnostics")
+            .add_filter("JSON report", &["json"])
+            .set_file_name("conxol-diagnostics.json")
+            .save_file();
+        save_diagnostic_export(path)
+    })
+    .await
+    .map_err(|_| "diagnostic export could not open the Save dialog".to_owned())?
+}
+
+fn save_diagnostic_export(path: Option<PathBuf>) -> Result<bool, String> {
+    let Some(path) = path else { return Ok(false); };
+    let report = diagnostic_export()?;
+    std::fs::write(path, report.as_bytes())
+        .map_err(|_| "could not save diagnostics; choose a writable destination".to_owned())?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -630,7 +661,8 @@ fn audit_clear(store: State<'_, Mutex<AuditStore>>) -> Result<(), String> {
 /// returned to the renderer and is owned by a zeroizing native wrapper while
 /// the platform keyring call is in progress.
 #[tauri::command]
-fn vault_put(vault: State<'_, PlatformVault>, payload: VaultPutRequest) -> Result<String, String> {
+fn vault_put(vault: State<'_, PlatformVault>, backup: State<'_, backup::BackupState>, payload: VaultPutRequest) -> Result<String, String> {
+    let _operation = backup.operation()?;
     let credential_id =
         CredentialId::new(payload.credential_id).map_err(|error| error.to_string())?;
     if payload.secret.is_empty() {
@@ -640,6 +672,7 @@ fn vault_put(vault: State<'_, PlatformVault>, payload: VaultPutRequest) -> Resul
     vault
         .put(&credential_id, &secret)
         .map_err(|error| error.to_string())?;
+    backup.track(&credential_id.to_string(), false)?;
     Ok(credential_id.to_string())
 }
 
@@ -648,13 +681,16 @@ fn vault_put(vault: State<'_, PlatformVault>, payload: VaultPutRequest) -> Resul
 #[tauri::command]
 fn vault_delete(
     vault: State<'_, PlatformVault>,
+    backup: State<'_, backup::BackupState>,
     payload: VaultCredentialRequest,
 ) -> Result<String, String> {
+    let _operation = backup.operation()?;
     let credential_id =
         CredentialId::new(payload.credential_id).map_err(|error| error.to_string())?;
     vault
         .delete(&credential_id)
         .map_err(|error| error.to_string())?;
+    backup.track(&credential_id.to_string(), true)?;
     Ok(credential_id.to_string())
 }
 
@@ -1204,13 +1240,13 @@ async fn ssh_inspect_host_key(
     request: SshFingerprintRequest,
 ) -> Result<conxol_ssh::SshHostKeyInspection, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
-    inspect_host_key(SshFingerprintOptions {
-        host: request.host,
-        port: request.port,
-        timeout,
-    })
-    .await
-    .map_err(|error| error.to_string())
+    conxol_ssh::diagnostics::scope(conxol_ssh::diagnostics::Operation::HostKeyInspection, request.timeout_ms, 0, async {
+        inspect_host_key(SshFingerprintOptions {
+            host: request.host,
+            port: request.port,
+            timeout,
+        }).await.inspect_err(|error| conxol_ssh::diagnostics::record_error(conxol_ssh::diagnostics::Stage::Connect, error))
+    }).await.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -1995,6 +2031,9 @@ fn main() {
                     false,
                 ),
             };
+            let base_dir = data_dir;
+            let data_dir = backup::resolve_workspace(&base_dir)?;
+            app.manage(backup::BackupState::new(base_dir, data_dir.clone()));
             app.manage(Mutex::new(ssh_trust::SshTrustStore::new(
                 data_dir.join("ssh-trust.json"),
             )));
@@ -2034,12 +2073,16 @@ fn main() {
         .invoke_handler(|invoke| {
             let allowed = invoke.message.webview_ref().try_state::<WorkspaceLock>()
                 .is_some_and(|state| state.allows(invoke.message.command()));
+            let backup_allowed = invoke.message.webview_ref().try_state::<backup::BackupState>().is_none_or(|state| state.allows(invoke.message.command()));
+            if !backup_allowed { invoke.resolver.reject("Workspace restored. Restart Conxol to continue."); return true; }
             if !allowed { invoke.resolver.reject("Workspace is locked. Enter your PIN to continue."); return true; }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure,
             clipboard_read_text, clipboard_write_text,
             app_snapshot,
             diagnostic_export,
+            diagnostic_export_save,
+            workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences,
             session_list,
             session_save,
             session_import_openssh,
@@ -2210,17 +2253,33 @@ mod tests {
     }
 
     #[test]
-    fn diagnostic_export_contains_only_sanitized_runtime_metadata() {
+    fn diagnostic_export_save_writes_only_the_generated_report_and_handles_cancel() {
+        let root = tempfile::tempdir().expect("diagnostic fixture");
+        assert!(!super::save_diagnostic_export(None).unwrap());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        let output = root.path().join("diagnostics.json");
+        assert!(super::save_diagnostic_export(Some(output.clone())).unwrap());
+        assert_eq!(std::fs::read_to_string(&output).unwrap(), diagnostic_export().unwrap());
+        // A failed write is visible and must not expose the selected path.
+        let failure = super::save_diagnostic_export(Some(root.path().join("missing").join("report.json"))).unwrap_err();
+        assert_eq!(failure, "could not save diagnostics; choose a writable destination");
+    }
+
+    #[test]
+    fn diagnostic_export_contains_sanitized_runtime_and_ssh_troubleshooting_data() {
         let report = diagnostic_export().expect("diagnostic export should serialize");
         let value: serde_json::Value =
             serde_json::from_str(&report).expect("diagnostic export should be valid JSON");
 
-        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["schemaVersion"], 2);
+        assert!(value["ssh"]["failures"].is_array());
+        assert_eq!(value["ssh"]["maximumFailures"], 64);
+        assert!(value["sshClientAlgorithms"]["keyExchange"].as_array().is_some_and(|names| !names.is_empty()));
         assert_eq!(value["product"], "Conxol");
         assert_eq!(value["platform"], std::env::consts::OS);
         assert_eq!(value["architecture"], std::env::consts::ARCH);
         for forbidden in [
-            "password",
+            "fixture-secret",
             "private-key",
             "sessions.json",
             "/Users/",

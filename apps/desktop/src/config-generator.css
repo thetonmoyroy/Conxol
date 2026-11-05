@@ -1,0 +1,56 @@
+.config-generator { padding: 24px; overflow: auto; min-height: 0; height: 100%; color: var(--text); }
+.config-generator h2 { margin: 0 0 6px; font-size: 24px; }
+.config-generator p { color: var(--muted); line-height: 1.6; font-size: 12px; }
+.generator-columns { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 20px; margin-top: 22px; align-items: start; }
+.generator-builder { display: grid; gap: 16px; }
+.generator-card { border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--panel); }
+.generator-card h3 { margin: 0 0 14px; font-size: 15px; }
+.generator-range { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+.generator-range label { display: grid; gap: 8px; flex: 1; min-width: 65px; font-size: 12px; }
+.config-generator input, .config-generator textarea { width: 100%; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--panel-soft); color: var(--text); font-family: var(--mono); }
+.config-generator input:focus, .config-generator textarea:focus { outline: 2px solid var(--mint); outline-offset: 1px; }
+.generator-palette, .generator-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 12px 0; }
+.generator-number { display: inline-block; padding: 9px 12px; background: var(--panel-soft); color: var(--mint); border: 1px dashed var(--mint); border-radius: 7px; cursor: grab; font-size: 12px; }
+.generator-loop { border: 2px dashed var(--line-strong); border-radius: 10px; padding: 14px; display: grid; gap: 12px; }
+.generator-loop > strong { color: var(--mint); font-size: 12px; }
+.generator-command { border: 1px solid var(--line-strong); border-radius: 8px; padding: 10px; background: var(--panel-soft); }
+.generator-command-tools { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; font-size: 11px; }
+.generator-command-tools > span:first-child { cursor: grab; }
+.generator-command-tools > span:nth-child(2) { flex: 1; }
+.generator-command-tools button { border: 1px solid var(--line); border-radius: 4px; background: transparent; color: var(--text); padding: 5px; }
+.config-generator button { cursor: pointer; }
+.config-generator button:disabled { opacity: .4; cursor: default; }
+.generator-command textarea { resize: vertical; min-height: 58px; }
+.generator-preview textarea { min-height: 360px; height: 48vh; resize: vertical; line-height: 1.7; white-space: pre; }
+@media (max-width: 950px) { .generator-columns { grid-template-columns: 1fr; } .config-generator { padding: 16px; } }
+
+.generator-number, .generator-command-tools > span:first-child, .generator-palette button { touch-action: none; user-select: none; }
+.generator-number-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.generator-number-buttons button { padding: 5px 8px; font-size: 10px; }
+.generator-nested { border-color: var(--mint); }
+.generator-nested > .generator-loop { margin-top: 12px; }
+.generator-dragging .generator-loop { border-color: var(--mint); }
+.generator-command-tools > span:first-child { touch-action: none; user-select: none; }
+.generator-preview { position: sticky; top: 0; }
+.generator-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.generator-heading p { margin-bottom: 0; }
+.generator-simple-editor { min-height: 180px; resize: vertical; line-height: 1.8; }
+.generator-simple .generator-number-buttons { margin: 12px 0 24px; }
+.generator-simple .generator-number { padding: 8px 10px; font-size: 12px; }
+.generator-numbers-heading { margin-top: 24px !important; }
+.generator-simple-ranges { display: grid; gap: 12px; }
+.generator-simple-range { border-top: 1px solid var(--line); padding-top: 14px; }
+.generator-range-title { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; font-size: 12px; }
+.generator-range-title code { color: var(--mint); }
+.generator-range-title .text-button { margin: 0 0 0 auto; }
+.generator-simple-range p { margin: -4px 0 12px; }
+.config-generator [hidden] { display: none !important; }
+.generator-step { flex: 0 0 auto; min-width: 65px; align-self: end; padding-bottom: 10px; color: var(--muted); font-size: 12px; }
+.generator-step summary { cursor: pointer; }
+.generator-step[open] { flex: 1; min-width: 65px; padding-bottom: 0; }
+.generator-step[open] summary { margin-bottom: 8px; }
+.generator-simple-sections { display: grid; gap: 16px; margin-top: 16px; }
+.generator-simple-branch { border-left: 2px solid var(--mint); padding-left: 16px; min-width: 0; }
+.generator-simple-branch h4 { font-size: 12px; margin: 0 0 12px; }
+.generator-simple-section textarea { resize: vertical; line-height: 1.8; }
+.generator-simple-section .generator-number-buttons { margin-bottom: 0; }

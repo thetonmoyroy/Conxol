@@ -1,0 +1,24 @@
+.shortcut-center { width: min(680px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--panel); color: var(--text); box-shadow: 0 24px 80px #0008; }
+.shortcut-center header { display: flex; justify-content: space-between; gap: 16px; padding: 22px 24px 12px; }
+.shortcut-center h2 { margin: 0 0 6px; font-size: 20px; }
+.shortcut-center p, .shortcut-center small { color: var(--muted); font-size: 12px; line-height: 1.6; }
+.shortcut-center p { margin: 0; }
+.shortcut-center-search { display: flex; align-items: center; gap: 10px; padding: 12px 24px; border-bottom: 1px solid var(--line); }
+.shortcut-center input, .shortcut-center textarea, .shortcut-center select { background: var(--panel-soft); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 10px; min-width: 0; }
+.shortcut-center input:focus, .shortcut-center textarea:focus, .shortcut-center select:focus { outline: 2px solid var(--mint); }
+.shortcut-center-search input { flex: 1; }
+.shortcut-center-scope { padding: 12px 24px 4px; font-size: 11px; color: var(--mint); }
+.shortcut-center-results { max-height: 45vh; overflow: auto; padding: 8px 14px; }
+.shortcut-center-row { display: flex; align-items: center; border: 1px solid transparent; border-radius: 7px; }
+.shortcut-center-row.selected { border-color: var(--line-strong); background: var(--panel-soft); }
+.shortcut-center-paste { display: grid; gap: 4px; flex: 1; min-width: 0; padding: 12px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.shortcut-center-paste small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.shortcut-center-paste span { color: var(--muted); font-size: 10px; }
+.shortcut-center button:disabled { opacity: .45; cursor: default; }
+.shortcut-center footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--line); font-size: 11px; color: var(--muted); }
+.shortcut-center footer .text-button { margin: 0; }
+.shortcut-center-editor { display: grid; gap: 16px; padding: 8px 24px 0; }
+.shortcut-center-editor label { display: grid; gap: 8px; font-size: 12px; }
+.shortcut-center-editor textarea { font-family: var(--mono); line-height: 1.7; resize: vertical; }
+.shortcut-center-editor footer { padding-left: 0; padding-right: 0; justify-content: flex-end; }
+.shortcut-center .shortcut-center-message { padding: 10px 24px; color: var(--amber); }

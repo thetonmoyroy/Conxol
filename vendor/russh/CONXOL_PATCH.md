@@ -78,3 +78,9 @@ Regression: `cargo test --locked -p conxol-ssh --lib --test rsa_host_signature`.
 Synthetic OpenSSL-generated public-key/signature vectors cover RSA-SHA256,
 RSA-SHA512, modified messages/signatures, algorithm mismatches, and SHA-1
 refusal. No fixture private key is retained. No upstream result is claimed.
+
+## PKCS#5 feature-gated local variable
+
+`src/keys/format/pkcs5.rs` names its decrypted key buffer `_sec` because its
+consumer is compiled only with the disabled `rsa` feature. This suppresses the
+unused-variable warning without changing decryption or key-support behavior.

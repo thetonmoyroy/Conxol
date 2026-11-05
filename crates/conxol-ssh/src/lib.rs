@@ -1,6 +1,8 @@
 //! Rust-owned SSH transport. The crate deliberately keeps credential material
 //! out of serde models and out of the frontend-facing data types.
 
+pub mod diagnostics;
+
 use std::collections::VecDeque;
 use std::fmt;
 use std::future::Future;
@@ -12,6 +14,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use conxol_core::{ConnectionEvent, ConnectionLifecycle, ConnectionState, MAX_SSH_JUMP_HOSTS};
 use encoding_rs::WINDOWS_1252;
 use russh::client;
 use russh::keys::{HashAlg, PrivateKeyWithHashAlg, PublicKeyOrCertificate};
@@ -20,7 +23,6 @@ use russh::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use conxol_core::{ConnectionEvent, ConnectionLifecycle, ConnectionState, MAX_SSH_JUMP_HOSTS};
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, copy_bidirectional};
 use tokio::net::TcpStream;
@@ -74,10 +76,12 @@ pub enum SshError {
     )]
     Agent(String),
     #[error(
-        "No SSH agent is available; start Windows OpenSSH agent or Pageant, or choose Ask for password"
+        "No SSH agent is available; start Windows OpenSSH agent or Pageant, or select Private key in Advanced SSH"
     )]
     AgentUnavailable,
-    #[error("SSH agent has no loaded keys; add your key to the agent or choose Ask for password")]
+    #[error(
+        "SSH agent has no loaded keys; add your key to the agent or select Private key in Advanced SSH"
+    )]
     AgentEmpty,
     #[error("SSH keyboard-interactive authentication requires non-echo prompts")]
     KeyboardInteractiveEchoPrompt,
@@ -113,6 +117,10 @@ pub enum SshError {
     HostUnreachable,
     #[error("SSH network connection failed")]
     ConnectionFailed,
+    #[error(
+        "SSH connection closed during handshake, before authentication; check the device SSH service, connection limits, and SSH compatibility"
+    )]
+    HandshakeClosed,
     #[error("SSH private key could not be loaded")]
     PrivateKey(#[source] russh::keys::Error),
     #[error("SSH private key algorithm is unsupported: {0}")]
@@ -619,7 +627,7 @@ impl SshCredentials {
             Self::PrivateKey { .. } => "private-key",
             Self::Agent { .. } => "agent",
             Self::KeyboardInteractive { .. } => "keyboard-interactive",
-            Self::KeyboardInteractivePrompt { .. } => "keyboard-interactive-prompt",
+            Self::KeyboardInteractivePrompt { .. } => "auto",
         }
     }
 }
@@ -1191,7 +1199,11 @@ impl SshConnection {
             authenticate(&mut handle, options.credentials),
         )
         .await
-        .map_err(|_| SshError::Timeout)??;
+        .map_err(|_| SshError::Timeout)
+        .and_then(|result| result)
+        .inspect_err(|error| {
+            diagnostics::record_error(diagnostics::Stage::Authentication, error)
+        })?;
         if !authentication.success() {
             return Err(SshError::AuthenticationRejected);
         }
@@ -2069,6 +2081,44 @@ fn connection_parts_for(
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshAlgorithmPreferences {
+    key_exchange: Vec<String>,
+    host_keys: Vec<String>,
+    ciphers: Vec<String>,
+    macs: Vec<String>,
+}
+pub fn diagnostic_algorithm_preferences() -> SshAlgorithmPreferences {
+    let parts = connection_parts_for(
+        "diagnostic",
+        22,
+        HostKeyPolicy::RejectUnknown,
+        false,
+        None,
+        false,
+    );
+    let preferred = &parts.config.preferred;
+    SshAlgorithmPreferences {
+        key_exchange: preferred
+            .kex
+            .iter()
+            .map(|value| value.as_ref().to_owned())
+            .collect(),
+        host_keys: preferred.key.iter().map(ToString::to_string).collect(),
+        ciphers: preferred
+            .cipher
+            .iter()
+            .map(|value| value.as_ref().to_owned())
+            .collect(),
+        macs: preferred
+            .mac
+            .iter()
+            .map(|value| value.as_ref().to_owned())
+            .collect(),
+    }
+}
+
 fn map_connect_result(
     connect: Result<
         Result<client::Handle<ClientHandler>, anyhow::Error>,
@@ -2077,9 +2127,13 @@ fn map_connect_result(
     observed_fingerprint: Arc<Mutex<Option<String>>>,
 ) -> Result<client::Handle<ClientHandler>, SshError> {
     match connect {
-        Err(_) => Err(SshError::Timeout),
+        Err(_) => {
+            diagnostics::record_error(diagnostics::Stage::Handshake, &SshError::Timeout);
+            Err(SshError::Timeout)
+        }
         Ok(Ok(handle)) => Ok(handle),
         Ok(Err(error)) => {
+            diagnostics::record_handshake(&error);
             if matches!(
                 error.downcast_ref::<russh::Error>(),
                 Some(russh::Error::UnknownKey)
@@ -2132,7 +2186,7 @@ fn map_connect_error(error: anyhow::Error) -> SshError {
             | russh::Error::DecryptionError
             | russh::Error::SshEncoding(_)
             | russh::Error::Inconsistent => SshError::HandshakePacket,
-            russh::Error::HUP | russh::Error::Disconnect => SshError::ConnectionFailed,
+            russh::Error::HUP | russh::Error::Disconnect => SshError::HandshakeClosed,
             _ => SshError::Handshake("SSH handshake failed".into()),
         };
     }
@@ -2147,6 +2201,10 @@ fn map_io_connect_error(error: &std::io::Error) -> SshError {
             SshError::HostUnreachable
         }
         std::io::ErrorKind::TimedOut => SshError::Timeout,
+        std::io::ErrorKind::ConnectionReset
+        | std::io::ErrorKind::ConnectionAborted
+        | std::io::ErrorKind::UnexpectedEof
+        | std::io::ErrorKind::BrokenPipe => SshError::HandshakeClosed,
         _ => SshError::ConnectionFailed,
     }
 }
@@ -2248,7 +2306,8 @@ async fn authenticate(
         SshCredentials::Password { username, password } => handle
             .authenticate_password(username, password.as_str())
             .await
-            .map_err(SshError::Transport),
+            .map_err(SshError::Transport)
+            .inspect(|result| diagnostics::record_auth_failure("password", result)),
         SshCredentials::PrivateKey {
             username,
             path,
@@ -2264,15 +2323,18 @@ async fn authenticate(
                 .authenticate_publickey(username, PrivateKeyWithHashAlg::new(Arc::new(key), hash))
                 .await
                 .map_err(SshError::Transport)
+                .inspect(|result| diagnostics::record_auth_failure("publickey", result))
         }
-        SshCredentials::Agent { username } => authenticate_with_agent(handle, username).await,
+        SshCredentials::Agent { username } => authenticate_with_agent(handle, username)
+            .await
+            .inspect(|result| diagnostics::record_auth_failure("publickey", result)),
         SshCredentials::KeyboardInteractive { username, response } => {
             authenticate_keyboard_interactive(handle, username, Some(response), None).await
         }
         SshCredentials::KeyboardInteractivePrompt {
             username,
             responder,
-        } => authenticate_keyboard_interactive(handle, username, None, Some(responder)).await,
+        } => authenticate_auto(handle, username, responder).await,
     }
 }
 
@@ -2317,6 +2379,67 @@ fn map_private_key_error(error: russh::keys::Error) -> SshError {
     }
 }
 
+/// Query the server without sending a credential, then select a supported method.
+async fn authenticate_auto(
+    handle: &mut client::Handle<ClientHandler>,
+    username: String,
+    responder: InteractiveResponder,
+) -> Result<client::AuthResult, SshError> {
+    let probe = handle
+        .authenticate_none(username.clone())
+        .await
+        .map_err(SshError::Transport)?;
+    let client::AuthResult::Failure {
+        remaining_methods,
+        partial_success,
+    } = &probe
+    else {
+        return Ok(probe);
+    };
+    if *partial_success {
+        diagnostics::record_auth_failure("none", &probe);
+        return Ok(probe);
+    }
+    if remaining_methods.contains(&russh::MethodKind::KeyboardInteractive) {
+        return authenticate_keyboard_interactive(handle, username, None, Some(responder)).await;
+    }
+    if remaining_methods.contains(&russh::MethodKind::Password) {
+        return authenticate_prompt_password(handle, username, responder).await;
+    }
+    if remaining_methods.contains(&russh::MethodKind::PublicKey) {
+        return authenticate_with_agent(handle, username)
+            .await
+            .inspect(|result| diagnostics::record_auth_failure("publickey", result));
+    }
+    diagnostics::record_auth_failure("auto", &probe);
+    Ok(probe)
+}
+
+async fn authenticate_prompt_password(
+    handle: &mut client::Handle<ClientHandler>,
+    username: String,
+    mut responder: InteractiveResponder,
+) -> Result<client::AuthResult, SshError> {
+    let answer = responder(KeyboardInteractiveChallenge {
+        name: "SSH password login".into(),
+        instructions: String::new(),
+        prompts: vec!["Password: ".into()],
+    });
+    let answers = tokio::select! {
+        biased;
+        _ = &mut *handle => return Err(SshError::Transport(russh::Error::Disconnect)),
+        result = answer => result?,
+    };
+    if answers.len() != 1 || answers[0].len() > MAX_KEYBOARD_INTERACTIVE_RESPONSE_BYTES {
+        return Err(SshError::KeyboardInteractiveInvalidResponses);
+    }
+    handle
+        .authenticate_password(username, answers[0].as_str())
+        .await
+        .map_err(SshError::Transport)
+        .inspect(|result| diagnostics::record_auth_failure("password", result))
+}
+
 async fn authenticate_keyboard_interactive(
     handle: &mut client::Handle<ClientHandler>,
     username: String,
@@ -2324,7 +2447,7 @@ async fn authenticate_keyboard_interactive(
     mut responder: Option<InteractiveResponder>,
 ) -> Result<client::AuthResult, SshError> {
     let mut next = handle
-        .authenticate_keyboard_interactive_start(username, None::<String>)
+        .authenticate_keyboard_interactive_start(username.clone(), None::<String>)
         .await
         .map_err(SshError::Transport)?;
 
@@ -2338,10 +2461,27 @@ async fn authenticate_keyboard_interactive(
                 remaining_methods,
                 partial_success,
             } => {
-                return Ok(client::AuthResult::Failure {
+                // Fall back only before any challenge/secret was submitted. Never
+                // retry a rejected password or bypass a partial MFA success.
+                if rounds == 0
+                    && response.is_none()
+                    && responder.is_some()
+                    && !partial_success
+                    && remaining_methods.contains(&russh::MethodKind::Password)
+                {
+                    return authenticate_prompt_password(
+                        handle,
+                        username,
+                        responder.take().expect("interactive responder"),
+                    )
+                    .await;
+                }
+                let failure = client::AuthResult::Failure {
                     remaining_methods,
                     partial_success,
-                });
+                };
+                diagnostics::record_auth_failure("keyboard-interactive", &failure);
+                return Ok(failure);
             }
             client::KeyboardInteractiveAuthResponse::InfoRequest {
                 name,
@@ -4022,7 +4162,7 @@ mod tests {
             Ok(Err(anyhow::Error::new(russh::Error::Disconnect))),
             observation,
         );
-        assert!(matches!(result, Err(SshError::ConnectionFailed)));
+        assert!(matches!(result, Err(SshError::HandshakeClosed)));
     }
 
     #[test]
@@ -4276,6 +4416,56 @@ mod tests {
         assert!(matches!(error, SshError::PrivateKey(_)));
         assert_eq!(error.to_string(), "SSH private key could not be loaded");
         std::fs::remove_file(path).expect("remove disposable key fixture");
+    }
+
+    #[test]
+    fn early_handshake_disconnects_are_distinct_and_sanitized() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::BrokenPipe,
+        ] {
+            let error = map_connect_error(anyhow::Error::new(std::io::Error::new(
+                kind,
+                "private-device-details",
+            )));
+            assert!(matches!(error, SshError::HandshakeClosed));
+            assert!(!error.to_string().contains("private-device-details"));
+        }
+        for error in [russh::Error::HUP, russh::Error::Disconnect] {
+            assert!(matches!(
+                map_connect_error(anyhow::Error::new(error)),
+                SshError::HandshakeClosed
+            ));
+        }
+    }
+
+    #[tokio::test]
+    async fn host_inspection_reports_a_loopback_server_closing_before_key_exchange() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut byte = [0u8; 1];
+            // Read only the bounded client identification, then close before KEX.
+            for _ in 0..512 {
+                if socket.read_exact(&mut byte).await.is_err() || byte[0] == b'\n' {
+                    break;
+                }
+            }
+            socket.shutdown().await.unwrap();
+        });
+        let error = inspect_host_key(SshFingerprintOptions {
+            host: address.ip().to_string(),
+            port: address.port(),
+            timeout: Duration::from_secs(2),
+        })
+        .await
+        .err()
+        .expect("inspection must not succeed");
+        server.await.unwrap();
+        assert!(matches!(error, SshError::HandshakeClosed), "{error}");
     }
 
     #[test]

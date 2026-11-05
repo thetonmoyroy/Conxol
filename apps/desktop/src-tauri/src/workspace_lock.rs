@@ -131,6 +131,7 @@ impl WorkspaceLock {
                     | "workspace_unlock"
                     | "workspace_lock_now"
                     | "workspace_activity"
+                    | "workspace_backup_restart"
             )
     }
     fn status(&self) -> Result<LockStatus, String> {
