@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Conxol — Your network, in command",
+        "title": "Conxol - Your network, in command",
         "width": 1440,
         "height": 900,
         "minWidth": 1100,

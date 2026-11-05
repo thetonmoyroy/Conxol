@@ -183,7 +183,7 @@ type VaultBackend = "platform" | "portable";
 
 const defaultSettings: AppSettings = {
   general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true },
-  appearance: { fontSize: 13 },
+  appearance: { fontSize: 14 },
   terminal: { scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
   keyboard: {
     newTerminal: "Mod+N",
@@ -872,9 +872,12 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       convertEol: false,
       cursorBlink: terminalOptionsRef.current.cursorBlink,
       cursorStyle: "bar",
-      fontFamily: '"JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+      fontFamily: '"Conxol Terminal", Consolas, "SFMono-Regular", monospace',
+      fontWeight: "normal",
+      fontWeightBold: "bold",
+      minimumContrastRatio: 4.5,
       fontSize: terminalOptionsRef.current.fontSize,
-      lineHeight: 1.35,
+      lineHeight: 1.2,
       scrollback: terminalOptionsRef.current.scrollbackLines,
       theme: terminalThemes[terminalOptionsRef.current.colorTheme],
     });
@@ -918,6 +921,20 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(host);
     const initialFitFrame = window.requestAnimationFrame(fit);
+    // A fallback font has different cell metrics. Re-measure after the bundled
+    // faces load so glyphs and terminal columns stay aligned on first launch.
+    void Promise.all([
+      document.fonts.load(`400 ${terminalOptionsRef.current.fontSize}px "Conxol Terminal"`),
+      document.fonts.load(`700 ${terminalOptionsRef.current.fontSize}px "Conxol Terminal"`),
+    ]).then(() => {
+      if (disposed) return;
+      // Toggle the family to invalidate fallback measurements even when the
+      // configured family string has not changed.
+      terminal.options.fontFamily = "monospace";
+      terminal.options.fontFamily = '"Conxol Terminal", Consolas, "SFMono-Regular", monospace';
+      fit();
+      terminal.refresh(0, terminal.rows - 1);
+    }).catch(() => { /* The platform monospace fallback remains usable. */ });
 
     const sendTerminalInput = (data: string) => {
       const terminalId = terminalIdRef.current;
@@ -1736,11 +1753,11 @@ function App() {
   const remoteProtocol = activeTerminal?.remoteProtocol ?? null;
   const remoteHost = activeTerminal?.remoteHost ?? null;
   const terminalStatus = activeTerminal?.status ?? "closed";
-  const selectedWindowTitle = workspaceSecurity.status?.locked ? "Conxol — Workspace locked" : activeView === "home"
-    ? "Conxol — Your network, in command"
+  const selectedWindowTitle = workspaceSecurity.status?.locked ? "Conxol - Workspace locked" : activeView === "home"
+    ? "Conxol - Your network, in command"
     : activeView === "terminal"
-      ? `${sanitizeTerminalTitle(activeTerminal?.label ?? "") || sanitizeTerminalTitle(remoteHost ?? "") || "Terminal"} — Conxol`
-      : `${activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)} — Conxol`;
+      ? `${sanitizeTerminalTitle(activeTerminal?.label ?? "") || sanitizeTerminalTitle(remoteHost ?? "") || "Terminal"} - Conxol`
+      : `${activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)} - Conxol`;
   const windowTitleUpdate = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     document.title = selectedWindowTitle;
@@ -2625,7 +2642,7 @@ function App() {
       if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
       const authentication = new TerminalAuthentication();
       const pendingTerminal = createWorkspaceTerminal({
-        label: displayName ?? `${request.username}@${request.host}`,
+        label: `${displayName ?? request.username}@${request.host}`,
         customName: displayName,
         remoteProtocol: "ssh", remoteHost: request.host,
         authentication, connecting: true,
@@ -2661,7 +2678,7 @@ function App() {
       recordAudit("sessionOpened", "SSH");
       const terminal: WorkspaceTerminal = {
         ...pendingTerminal,
-        label: displayName ?? `${request.username}@${response.host}`,
+        label: `${displayName ?? request.username}@${response.host}`,
         remoteSessionId: response.terminalId,
         remoteProtocol: "ssh",
         remoteHost: response.host,
@@ -2679,7 +2696,7 @@ function App() {
         if (name?.trim()) {
           try {
             await invoke("session_save_ssh", { payload: { name: name.trim(), folder: folder?.trim() || null, request } });
-            setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, label: name.trim(), customName: name.trim() } : item));
+            setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, label: `${name.trim()}@${response.host}`, customName: name.trim() } : item));
             refreshSavedSessions();
           } catch (error) {
             setConnectionError(`Connected, but the session could not be saved: ${String(error)}`);
@@ -2704,7 +2721,7 @@ function App() {
     }
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus]);
 
-  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true) => {
+  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string) => {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2715,7 +2732,8 @@ function App() {
       const response = await invoke<TelnetConnectResponse>("telnet_connect", { request });
       recordAudit("sessionOpened", "TELNET");
       const terminal = createWorkspaceTerminal({
-        label: `Telnet · ${response.host}`,
+        label: displayName ? `${displayName}@${response.host}` : `Telnet · ${response.host}`,
+        customName: displayName,
         remoteSessionId: response.terminalId,
         remoteProtocol: "telnet",
         remoteHost: response.host,
@@ -2784,7 +2802,7 @@ function App() {
     }
   }, [recordAudit, refreshSavedSessions]);
 
-  const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true) => {
+  const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string) => {
     if (request.protocol === "vnc" && request.allowInsecureVnc && !await confirmAction("VNC over TCP is unencrypted. Continue only if this target is trusted or protected by an external tunnel?")) {
       return;
     }
@@ -2792,7 +2810,8 @@ function App() {
     setSessionNotice(null);
     recordAudit("sessionOpened", request.protocol.toUpperCase());
     const terminal = createWorkspaceTerminal({
-      label: `${request.protocol.toUpperCase()} · ${request.host}`,
+      label: displayName ? `${displayName}@${request.host}` : `${request.protocol.toUpperCase()} · ${request.host}`,
+      customName: displayName,
       remoteProtocol: request.protocol,
       remoteHost: request.host,
       remoteDesktopRequest: request,
@@ -2993,7 +3012,7 @@ function App() {
         encoding: profile.encoding,
         columns: profile.columns,
         rows: profile.rows,
-      }, false);
+      }, false, session.name);
     }
     if (session.protocol === "SERIAL") {
       const profile = session.serial_profile;
@@ -3042,7 +3061,7 @@ function App() {
         allowInsecureVnc: profile.allow_insecure_vnc ?? false,
         reconnectEnabled: profile.reconnect_enabled ?? true,
         reconnectAttempts: profile.reconnect_attempts ?? 3,
-      }, false);
+      }, false, session.name);
     }
     const request = requestFromSavedSession(session, savedSessions);
     if (!request) {

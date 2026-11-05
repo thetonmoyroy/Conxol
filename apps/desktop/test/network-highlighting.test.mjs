@@ -46,7 +46,7 @@ const buffer = { type: 'normal', viewportY: 10, baseY: 10, cursorY: 2, length: 4
 const terminal = {
   buffer: { active: buffer, onBufferChange: subscribe('buffer') }, rows: 3,
   options: { theme: { green: '#123456', red: '#654321' } },
-  onWriteParsed: subscribe('write'), onScroll: subscribe('scroll'), onResize: subscribe('resize'),
+  onWriteParsed: subscribe('write'), onScroll: subscribe('scroll'), onRender: subscribe('render'), onResize: subscribe('resize'),
   registerMarker: offset => {
     markerOffsets.push(offset); objectsLive++;
     const marker = { line: buffer.baseY + buffer.cursorY + offset, isDisposed: false, dispose: () => { if (!marker.isDisposed) { marker.isDisposed = true; objectsLive--; } } };
@@ -62,7 +62,8 @@ assert.deepEqual(markerOffsets, [-2, -1, 0]);
 assert.equal(decorationOptions[0].foregroundColor, '#123456');
 assert.equal(objectsLive, 6);
 buffer.viewportY = 0; callbacks.get('scroll')();
-await new Promise(resolve => setTimeout(resolve, 60));
+await Promise.resolve();
+assert.equal(objectsLive, 12, 'scroll colors must be ready before the next animation frame');
 assert.equal(objectsLive, 12, 'older rows receive color after the scroll burst');
 assert.deepEqual(markerOffsets.slice(-3), [-12, -11, -10]);
 buffer.viewportY = 10; callbacks.get('scroll')();
@@ -104,10 +105,19 @@ for (let y = 0; y < 30; y += 3) {
   await new Promise(resolve => setTimeout(resolve, 30));
   assert(objectsLive <= terminal.rows * 4, 'retained marker/decorations stay bounded while visiting history');
 }
+// Scrollbar/render movement may settle after the public scroll notification.
+buffer.viewportY = 0;
+callbacks.get('render')();
+await new Promise(resolve => setTimeout(resolve, 60));
+assert(decorationOptions.some(option => option.marker.line === 0 && !option.marker.isDisposed), 'painted history is recolored even without another scroll event');
+const readsAfterPaint = reads;
+for (let i = 0; i < 20; i++) callbacks.get('render')();
+await new Promise(resolve => setTimeout(resolve, 60));
+assert.equal(reads, readsAfterPaint, 'decoration paint must not schedule an endless highlighting loop');
 callbacks.get('write')(); highlighter.dispose();
 const finalReads = reads;
 await new Promise(resolve => setTimeout(resolve, 60));
-assert.equal(objectsLive, 0); assert.equal(subscriptionsDisposed, 4); assert.equal(reads, finalReads);
+assert.equal(objectsLive, 0); assert.equal(subscriptionsDisposed, 5); assert.equal(reads, finalReads);
 
 for (const text of ['Welcome to this session', 'Please copy this file and save it', 'The system is active', '#', '!']) assert.deepEqual(findUsefulNetworkHighlights(text), []);
 for (const text of ['peer 192.0.2.1 enable', 'GigabitEthernet0/0/1 up up', 'ip ip-prefix TEST permit 192.0.2.0 24', 'BGP neighbor failed', 'description Uplink to core', 'display ip interface brief']) assert(findUsefulNetworkHighlights(text).length > 0);

@@ -98,17 +98,21 @@ export function networkCellRanges(line: IBufferLine): Array<NetworkHighlight & {
 
 /** Decorations never alter output bytes, copy/search text, input, or ANSI parser state. */
 export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { refresh: () => void } {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let queued = false;
   let disposed = false;
   let generation = 0;
+  let renderedViewport = -1;
+  let renderedBuffer: Terminal["buffer"]["active"] | undefined;
   type Entry = { marker: ReturnType<Terminal["registerMarker"]>; signature: string; generation: number; paletteKey: string; items: IDisposable[] };
   let entries: Entry[] = [];
   const release = (entry: Entry) => { entry.items.forEach(item => item.dispose()); entry.marker.dispose(); };
   const clear = () => { entries.forEach(release); entries = []; };
   const render = () => {
-    if (timer !== undefined) { clearTimeout(timer); timer = undefined; }
+    queued = false;
     const buffer = terminal.buffer.active;
     if (disposed || buffer.type !== "normal") { clear(); return; }
+    renderedViewport = buffer.viewportY;
+    renderedBuffer = buffer;
     const theme = terminal.options.theme ?? {};
     const palette: Record<NetworkHighlightKind, string> = {
       good: theme.green ?? "#9bc48a", bad: theme.red ?? "#ee8d78", warning: theme.yellow ?? "#e8b45c",
@@ -162,10 +166,21 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       release(entry);
     }
   };
-  const refresh = () => { if (!disposed && timer === undefined) timer = setTimeout(render, 16); };
+  const refresh = () => {
+    if (disposed || queued) return;
+    queued = true;
+    // Coalesce a whole parser/scroll burst, but finish before xterm's next
+    // animation frame so history never paints once with plain foreground.
+    queueMicrotask(() => { if (!disposed) render(); });
+  };
   // onScroll also fires for each output line while xterm parses a write. Never
   // scan/decorate synchronously there: coalesce the burst and color its final viewport.
-  const subscriptions = [terminal.onWriteParsed(() => { generation++; refresh(); }), terminal.onScroll(refresh), terminal.onResize(() => { clear(); refresh(); }), terminal.buffer.onBufferChange(() => { clear(); refresh(); })];
+  const subscriptions = [terminal.onWriteParsed(() => { generation++; refresh(); }), terminal.onScroll(refresh), terminal.onRender(() => {
+    // A scroll notification can precede the final rendered viewport. Recheck
+    // after paint, including scrollbar jumps and cached history revisits.
+    // Decoration updates also paint: only schedule when the viewport changed.
+    if (terminal.buffer.active !== renderedBuffer || terminal.buffer.active.viewportY !== renderedViewport) refresh();
+  }), terminal.onResize(() => { clear(); refresh(); }), terminal.buffer.onBufferChange(() => { clear(); refresh(); })];
   refresh();
-  return { refresh, dispose: () => { disposed = true; if (timer !== undefined) clearTimeout(timer); subscriptions.forEach(item => item.dispose()); clear(); } };
+  return { refresh, dispose: () => { disposed = true; subscriptions.forEach(item => item.dispose()); clear(); } };
 }

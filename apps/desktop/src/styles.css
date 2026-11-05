@@ -1,3 +1,17 @@
+@font-face {
+  font-family: "Conxol Terminal";
+  src: url("./assets/fonts/JetBrainsMono-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "Conxol Terminal";
+  src: url("./assets/fonts/JetBrainsMono-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
 :root {
   color: #dce8dc;
   background: #0b100f;
@@ -491,7 +505,7 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .list-actions { gap: 0; }
 .app-shell .list-actions button { width: 16px; height: 20px; padding: 0; }
 .app-shell .list-actions svg { width: 11px; height: 11px; }
-.app-shell .folder-heading { min-height: 21px; padding: 2px 3px; gap: 4px; font-size: 10px; font-weight: 400; cursor: pointer; list-style: none; }
+.app-shell .folder-heading { min-height: 28px; padding: 2px 3px; gap: 4px; cursor: pointer; list-style: none; }
 .app-shell summary.folder-heading::-webkit-details-marker { display: none; }
 .app-shell details:not([open]) > summary.folder-heading > svg:first-child { transform: rotate(-90deg); }
 .app-shell .folder-heading > svg { color: var(--mint); flex-shrink: 0; }
@@ -504,7 +518,7 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .session-icon { flex-basis: 16px; width: 16px; height: 18px; border: 0; background: transparent; color: var(--amber); }
 .app-shell .session-icon svg { width: 16px; height: 16px; }
 .app-shell .session-icon.local { color: var(--mint); }
-.app-shell .session-copy strong { font-size: 12px; font-weight: 400; }
+.app-shell .folder-heading, .app-shell .session-copy strong { color: var(--text); font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1.4; letter-spacing: normal; }
 .app-shell .session-copy small, .app-shell .session-type { display: none; }
 .app-shell .session-row-actions { display: flex; visibility: hidden; pointer-events: none; }
 .app-shell .session-row:hover .session-row-actions, .app-shell .session-row:focus-within .session-row-actions { visibility: visible; pointer-events: auto; }
@@ -980,3 +994,6 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .workspace-pin-operation h3 { margin: 0 0 12px; font-size: 13px; color: var(--text); }
 .workspace-pin-operation .workspace-pin-current { margin: 12px 0; }
 .workspace-pin-actions button[aria-pressed="true"] { border-color: var(--amber); color: var(--amber); }
+
+/* Keep terminal glyphs on their measured monospace grid. */
+.terminal-host .xterm { text-rendering: auto; font-kerning: none; font-variant-ligatures: none; letter-spacing: normal; }
