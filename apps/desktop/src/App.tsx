@@ -1,3 +1,4 @@
+import { SyntaxHighlightSettings } from "./SyntaxHighlightSettings";
 import { WorkspaceBackup } from "./WorkspaceBackup";
 import { applyWorkspacePreferences } from "./workspace-backup-model";
 import { handleTerminalFindKey } from "./terminal-find";
@@ -7,7 +8,7 @@ import { ConfigGenerator } from "./ConfigGenerator";
 import { defaultTerminalAppearance, resolveTerminalTheme, terminalSurface, type TerminalAppearance } from "./terminal-appearance";
 import { FolderCustomization, SessionFolderIcon } from "./FolderCustomization";
 import { readFolderStyles, defaultFolderStyle, type FolderStyle } from "./folder-appearance";
-import { Save, ArrowRight } from "lucide-react";
+import { Save, ArrowRight, FolderInput } from "lucide-react";
 import { FileText } from "lucide-react";
 import { NotesModal } from "./NotesModal";
 import { useCallback, useEffect, useRef, useState, type ClipboardEvent as ReactClipboardEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type UIEvent as ReactUIEvent, type WheelEvent as ReactWheelEvent } from "react";
@@ -96,7 +97,6 @@ import {
   ChevronLeft,
   ChevronRight,
   List,
-  FolderOpen,
   ChevronsDownUp,
   ChevronsUpDown,
   CircleHelp,
@@ -1589,7 +1589,6 @@ function App() {
   const [settings, setSettings] = useState<AppSettings>(() => ({ ...defaultSettings, general: { ...defaultSettings.general, theme: cachedTheme() } }));
   const [systemDark, setSystemDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
   const colorTheme: ColorTheme = settings.general.theme === "system" ? (systemDark ? "dark" : "light") : settings.general.theme;
-  const [themeSaving, setThemeSaving] = useState(false);
   useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => setSystemDark(media.matches);
@@ -1645,6 +1644,7 @@ function App() {
   const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<SessionNotice | null>(null);
   const [closing, setClosing] = useState(false);
+  const [syntaxSettingsOpen, setSyntaxSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" || !window.matchMedia("(max-width: 720px)").matches);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -2502,21 +2502,6 @@ function App() {
       setSettingsError(`Settings could not be saved: ${String(error)}`);
     }
   }, []);
-
-  const toggleTheme = async () => {
-    if (themeSaving) return;
-    const next = { ...settingsRef.current, general: { ...settingsRef.current.general, theme: colorTheme === "dark" ? "light" as const : "dark" as const } };
-    setThemeSaving(true);
-    try {
-      const saved = IS_TAURI ? await invoke<AppSettings>("settings_save", { settings: next }) : next;
-      settingsRef.current = saved;
-      setSettings(saved);
-    } catch (error) {
-      setConnectionError(`Theme could not be saved: ${String(error)}`);
-    } finally {
-      setThemeSaving(false);
-    }
-  };
 
   const adjustTerminalFontSize = useCallback((action: "increase" | "decrease" | "reset") => {
     const current = settingsRef.current;
@@ -4395,11 +4380,28 @@ function App() {
 
   return (
     <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
+      {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
       <nav className="desktop-menubar" aria-label="Application menu" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onKeyDown={(event) => { if (event.key === "Escape") { const menu = (event.target as HTMLElement).closest("details"); menu?.removeAttribute("open"); menu?.querySelector("summary")?.focus(); } }}>
-        <details name="desktop-menu"><summary>Terminal</summary><div className="desktop-menu"><button onClick={() => startNewTerminal()}><Plus size={14} />Open new tab</button><button disabled={!selectedTerminalId} onClick={() => closeTerminal(selectedTerminalId)}><CircleX size={14} />Close current tab</button><hr /><button disabled={!selectedTerminalId} onClick={() => { openTerminalSearch(); }}><Search size={14} />Find in terminal…</button><button disabled={!selectedTerminalId} onClick={() => void copyTerminalSelection()}><Copy size={14} />Copy terminal selection</button><button onClick={openWslTerminalPicker}><TerminalIcon size={14} />Start WSL terminal</button><button onClick={() => openSplit("right")}><PanelRight size={14} />Split right</button><button onClick={() => openSplit("down")}><PanelBottom size={14} />Split down</button><button onClick={() => setBroadcastOpen(true)}><Radio size={14} />Broadcast input…</button></div></details>
-        <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu"><button onClick={() => setQuickConnectOpen(true)}>New session…</button><button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}>User sessions</button><button onClick={importOpenSshConfig}>Import OpenSSH config…</button><button onClick={importSessions}>Import sessions…</button><button onClick={exportSessions}>Export sessions…</button></div></details>
-        <details name="desktop-menu"><summary>View</summary><div className="desktop-menu"><button onClick={() => setActiveView("home")}>Home</button><button onClick={() => setSidebarOpen((open) => !open)}>Toggle session sidebar</button><button onClick={() => setActiveView("terminal")}>Terminal</button><button onClick={() => setActiveView("files")}>Remote files</button><button disabled={themeSaving} onClick={() => void toggleTheme()}>{colorTheme === "dark" ? "Light mode" : "Dark mode"}</button></div></details>
-        <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu"><button onClick={() => setActiveView("diagnostics")}>Network diagnostics</button><button onClick={() => setActiveView("tunnels")}>SSH tunnels</button><button onClick={() => setActiveView("transfers")}>Transfers</button><button onClick={() => setActiveView("audit")}>Audit history</button><button onClick={() => setSnippetsOpen(true)}>Snippets…</button><button onClick={() => setCredentialsOpen(true)}>Credential vault…</button><button onClick={() => setPaletteOpen(true)}>Command palette…</button></div></details>
+        <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
+          <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}>All sessions</button>
+          <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}>Favorites</button>
+          <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(true); }}>Recent sessions</button>
+          <hr />
+          <button onClick={importOpenSshConfig}>Import OpenSSH config…</button>
+        </div></details>
+        <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu">
+          <button onClick={() => setActiveView("files")}>Remote files</button>
+          <button onClick={() => setActiveView("diagnostics")}>Network diagnostics</button>
+          <button onClick={() => setActiveView("tunnels")}>SSH tunnels</button>
+          <button onClick={() => setActiveView("transfers")}>Transfers</button>
+          <button onClick={() => setActiveView("audit")}>Audit history</button>
+          <hr />
+          <button onClick={() => setSyntaxSettingsOpen(true)}>Syntax highlighting…</button>
+          <button onClick={() => setSnippetsOpen(true)}>Snippets…</button>
+          <hr />
+          <button onClick={() => setCredentialsOpen(true)}>Credential vault…</button>
+          <button onClick={() => setPaletteOpen(true)}>Command palette…</button>
+        </div></details>
         <button onClick={() => setActiveView("generator")}>Generator</button>
         <button onClick={openSettings}>Settings</button>
         <button onClick={() => setMacrosOpen(true)}>Macros</button>
@@ -4412,11 +4414,7 @@ function App() {
       <div className="app-body">
         <nav className="session-activity-strip" aria-label="Sidebar tools">
           <button className="activity-sessions" title="User sessions" aria-label="User sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}><List size={16} strokeWidth={1.5} /></button>
-          <button className="activity-favorites" title="Favorites" aria-label="Favorite sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}><Star size={16} strokeWidth={1.5} /></button>
-          <button className="activity-recent" title="Recent sessions" aria-label="Recent sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(true); }}><History size={16} strokeWidth={1.5} /></button>
-          <button className="activity-macros" title="Macros" aria-label="Macros" onClick={() => setMacrosOpen(true)}><Play size={16} strokeWidth={1.5} /></button>
-          <button className="activity-notes" title="Notes" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={16} strokeWidth={1.5} /></button>
-          <button className="activity-files" title="Remote files" aria-label="Remote files" onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderOpen size={16} strokeWidth={1.5} /></button>
+          <button className="activity-files" title="Remote files" aria-label="Remote files" onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderInput size={16} strokeWidth={1.5} /></button>
           <button title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarOpen} aria-controls="session-sidebar" onClick={() => setSidebarOpen((open) => !open)}>{sidebarOpen ? <ChevronLeft size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}</button>
           <button className="activity-settings" title="Settings" aria-label="Settings" onClick={openSettings}><Settings2 size={16} strokeWidth={1.5} /></button>
         </nav>

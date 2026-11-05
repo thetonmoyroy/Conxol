@@ -1023,19 +1023,11 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 
 /* Muted tool colors distinguish the sidebar actions at a glance. */
 .session-activity-strip .activity-sessions { --activity-color: #4b93bd; }
-.session-activity-strip .activity-favorites { --activity-color: #b49a62; }
-.session-activity-strip .activity-recent { --activity-color: #a48e89; }
-.session-activity-strip .activity-macros { --activity-color: #7c9d59; }
-.session-activity-strip .activity-notes { --activity-color: #a17ba3; }
 .session-activity-strip .activity-files { --activity-color: #4f9fb1; }
 .session-activity-strip .activity-settings { --activity-color: #b76578; }
 .session-activity-strip button { color: var(--activity-color, var(--muted)); cursor: pointer; }
 .session-activity-strip button:hover, .session-activity-strip button:focus-visible { color: var(--activity-color, var(--text)); background: color-mix(in srgb, var(--activity-color, var(--muted)) 15%, transparent); }
 .theme-light .session-activity-strip .activity-sessions { --activity-color: #30749b; }
-.theme-light .session-activity-strip .activity-favorites { --activity-color: #8c7136; }
-.theme-light .session-activity-strip .activity-recent { --activity-color: #876e68; }
-.theme-light .session-activity-strip .activity-macros { --activity-color: #5d7b3e; }
-.theme-light .session-activity-strip .activity-notes { --activity-color: #865c88; }
 .theme-light .session-activity-strip .activity-files { --activity-color: #347b8c; }
 .theme-light .session-activity-strip .activity-settings { --activity-color: #a14d62; }
 
@@ -1066,3 +1058,28 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .ssh-auth-override summary::before { content: '›'; color: var(--faint); font-size: 16px; line-height: 1; }
 .ssh-auth-override[open] summary::before { transform: rotate(90deg); }
 .ssh-auth-override summary span { margin-left: auto; }
+
+.syntax-settings { box-sizing: border-box; width: calc(100vw - 32px); max-width: none; max-height: calc(100vh - 32px); display: flex; flex-direction: column; gap: 10px; padding: 16px 20px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); }
+.syntax-settings > :not(.syntax-rules) { flex-shrink: 0; }
+.syntax-settings .quick-connect-heading { align-items: center; padding: 0 0 8px; margin: 0; }
+.syntax-settings .quick-connect-heading h2 { margin: 0; font-size: 16px; }
+.syntax-settings p { margin: 0; color: var(--muted); font-size: 12px; }
+.syntax-rules { overflow-y: auto; min-height: 0; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; padding-right: 8px; }
+.syntax-rule { display: grid; grid-template-columns: minmax(0, 1fr) 55px 70px; align-items: start; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.syntax-rule:last-child { border-bottom: 0; }
+.syntax-rule label { display: flex; flex-direction: column; gap: 5px; min-width: 0; font-size: 11px; color: var(--muted); }
+.syntax-list-label { display: flex; justify-content: space-between; gap: 10px; }
+.syntax-list-label small { color: var(--faint); font-size: 10px; }
+.syntax-rule :is(input, textarea) { box-sizing: border-box; width: 100%; min-height: 32px; border: 1px solid var(--line); background: var(--panel); color: var(--text); padding: 5px 8px; font-family: var(--mono); font-size: 12px; }
+.syntax-rule input { height: 32px; }
+.syntax-rule input[type="color"] { padding: 4px; }
+.syntax-rule textarea { resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.syntax-rule > button { margin-top: 18px; }
+.syntax-rule-actions, .syntax-footer { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.syntax-rule-actions span { flex: 1; color: var(--muted); font-size: 11px; }
+.syntax-footer { justify-content: flex-end; border-top: 1px solid var(--line); padding-top: 10px; }
+.syntax-settings button { min-height: 32px; }
+.syntax-settings :is(button, input, textarea):focus-visible { outline: 1px solid var(--amber); outline-offset: 2px; }
+.syntax-default-group { display: flex; flex-direction: column; justify-content: center; gap: 4px; min-height: 50px; min-width: 0; }
+.syntax-default-group strong { color: var(--text); font-size: 12px; font-weight: 500; }
+.syntax-default-group small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }

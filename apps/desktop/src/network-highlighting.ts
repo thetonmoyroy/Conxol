@@ -1,7 +1,7 @@
 import type { IBufferLine, IDisposable, Terminal } from "@xterm/xterm";
 
 export type NetworkHighlightKind = "good" | "bad" | "warning" | "address" | "interface" | "keyword" | "command" | "comment";
-export type NetworkHighlight = { start: number; end: number; kind: NetworkHighlightKind };
+export type NetworkHighlight = { start: number; end: number; kind: NetworkHighlightKind; color?: string };
 const RULES: Array<[NetworkHighlightKind, RegExp]> = [
   ["good", /\b(?:no shutdown|undo shutdown)\b/gi],
   ["bad", /\b(?:not[ _-]+connected|not[ _-]+established|not[ _-]*permitted|not[ _-]*allowed|disable|deactivate|unavailable|fault|disallowed|refused|problem|notconnect|reject|deny|administratively down|admin(?:istratively)?[ -]down|error-disabled|err-disabled|down|disconnected|unreachable|failed|failure|denied|invalid|inactive|disabled|shutdown|critical|error)\b/gi],
@@ -11,6 +11,74 @@ const RULES: Array<[NetworkHighlightKind, RegExp]> = [
   ["command", /\b(?:set|undo|delete|edit|show|display|commit|rollback|compare|load|save|exit|run|configure|unset|rename|copy|monitor|request|reset|clear|system-view)\b/gi],
   ["keyword", /\b(?:forwarding-options|routing-instances|class-of-service|policy-statement|logical-systems|security-policy|routing-options|traffic-policy|address-family|ospf(?:v[23])?|policy-options|event-options|security-zone|configuration|interface[s]?|vpn-instance|greater-equal|less-equal|ip-prefix|system-view|description|access-list|prefix-list|router-id|protocols|route-map|firewall|security|ip-route|protocol|rollback|hostname|neighbor|vlan[s]?|next-hop|chassis|session|sysname|system|policy|delete|commit|router|inet6?|static|permit|is-is|vxlan|route|vrrp|peer|ipv6|isis|mpls|rsvp|evpn|lacp|rstp|mstp|snmp|lldp|dhcp|deny|set|bgp|ldp|vrf|bfd|stp|ntp|cdp|arp|acl|ip)\b/gi],
 ];
+
+export const MAX_HIGHLIGHT_RULES = 64;
+export const MAX_HIGHLIGHT_TEXT = 80;
+export type HighlightRule = { id: string; text: string; color: string; builtin?: number; words?: string };
+export const MAX_GROUP_WORDS = 96;
+/** Plain-language spellings of the built-in word groups. Port names are detected automatically. */
+export function builtinHighlightWords(index: number): string {
+  const lists: Record<number, string> = {
+    0: "no shutdown|undo shutdown",
+    1: "not connected|not established|not permitted|not allowed|disable|deactivate|unavailable|fault|disallowed|refused|problem|notconnect|reject|deny|administratively down|admin down|error-disabled|err-disabled|down|disconnected|unreachable|failed|failure|denied|invalid|inactive|disabled|shutdown|critical|error",
+    2: "up|yes|ok|enable|permit|forwarding|connected|established|enabled|reachable|success|successful|full|active",
+    3: "warning|warn|flapping|timeout|timed out|dropped|discard|discards|discarded|idle|init|attempt|opensent|openconfirm|loading|blocking",
+    5: "set|undo|delete|edit|show|display|commit|rollback|compare|load|save|exit|run|configure|unset|rename|copy|monitor|request|reset|clear|system-view",
+    6: "forwarding-options|routing-instances|class-of-service|policy-statement|logical-systems|security-policy|routing-options|traffic-policy|address-family|ospf|ospfv2|ospfv3|policy-options|event-options|security-zone|configuration|interface|interfaces|vpn-instance|greater-equal|less-equal|ip-prefix|system-view|description|access-list|prefix-list|router-id|protocols|route-map|firewall|security|ip-route|protocol|rollback|hostname|neighbor|vlan|vlans|next-hop|chassis|session|sysname|system|policy|delete|commit|router|inet|inet6|static|permit|is-is|vxlan|route|vrrp|peer|ipv6|isis|mpls|rsvp|evpn|lacp|rstp|mstp|snmp|lldp|dhcp|deny|set|bgp|ldp|vrf|bfd|stp|ntp|cdp|arp|acl|ip",
+  };
+  return (lists[index] ?? "").split("|").join(", ");
+}
+const escapeLiteral = (text: string) => Array.from(text, character => "\\^$.*+?()[]{}|".includes(character) ? "\\" + character : character).join("");
+export function normalizeHighlightWords(text: string): string[] {
+  return [...new Set(text.replace(/[\r\n]+/g, " ").split(",").map(word => word.trim().slice(0, MAX_HIGHLIGHT_TEXT)).filter(Boolean))].slice(0, MAX_GROUP_WORDS);
+}
+const colors: Record<NetworkHighlightKind, string> = { good: "#9bc48a", bad: "#ee8d78", warning: "#e8b45c", address: "#e8b45c", interface: "#e8b45c", keyword: "#c9a3c7", command: "#77c4bb", comment: "#86a9cc" };
+export const defaultHighlightRules = (): HighlightRule[] => RULES.map(([kind, pattern], builtin) => ({ id: `builtin-${builtin}`, text: pattern.source, color: colors[kind], builtin }));
+export function parseHighlightRules(value: unknown): HighlightRule[] {
+  if (!Array.isArray(value)) return defaultHighlightRules();
+  const seen = new Set<string>();
+  return value.slice(0, MAX_HIGHLIGHT_RULES).flatMap(item => {
+    if (!item || typeof item !== "object" || typeof item.id !== "string" || !/^#[0-9a-f]{6}$/i.test(item.color)) return [];
+    const builtin = Number.isInteger(item.builtin) && item.builtin >= 0 && item.builtin < RULES.length ? item.builtin as number : undefined;
+    if (item.builtin !== undefined && builtin === undefined) return [];
+    const id = builtin === undefined ? item.id.slice(0, 80) : `builtin-${builtin}`;
+    const text = builtin === undefined ? (typeof item.text === "string" ? item.text.trim().slice(0, MAX_HIGHLIGHT_TEXT) : "") : RULES[builtin][1].source;
+    if (!text || !id || seen.has(id)) return [];
+    seen.add(id);
+    const words = builtin !== undefined && builtin !== 4 && typeof item.words === "string" ? normalizeHighlightWords(item.words).join(", ") : undefined;
+    return [{ id, text, color: item.color, ...(builtin === undefined ? {} : { builtin }), ...(words === undefined || words === builtinHighlightWords(builtin!) ? {} : { words }) }];
+  });
+}
+let configuredRules: HighlightRule[] | null = null;
+try {
+  const saved = globalThis.localStorage?.getItem("conxol.syntaxHighlightRules");
+  if (saved && saved.length < 100000) {
+    const value: unknown = JSON.parse(saved);
+    // Preserve lists saved by the earlier newline-based editor.
+    if (Array.isArray(value)) for (const rule of value) {
+      if (rule && typeof rule.words === "string") rule.words = rule.words.replace(/\r?\n/g, ",");
+    }
+    configuredRules = parseHighlightRules(value);
+  }
+} catch { /* Use defaults when storage is unavailable. */ }
+const compileCustomRules = () => (configuredRules ?? []).filter(rule => rule.builtin === undefined).map(rule => ({ ...rule, pattern: new RegExp(escapeLiteral(rule.text), "gi") }));
+const compileWordGroups = () => new Map((configuredRules ?? []).flatMap(rule => {
+  if (rule.builtin === undefined || rule.words === undefined) return [];
+  const words = normalizeHighlightWords(rule.words).sort((a, b) => b.length - a.length);
+  return [[rule.builtin, words.length ? new RegExp("(?<!\\w)(?:" + words.map(escapeLiteral).join("|") + ")(?!\\w)", "gi") : null] as const];
+}));
+let customRules = compileCustomRules();
+let wordGroups = compileWordGroups();
+export const getHighlightRules = () => (configuredRules ?? defaultHighlightRules()).map(rule => ({ ...rule }));
+const ruleListeners = new Set<() => void>();
+export function saveHighlightRules(rules: HighlightRule[]): void {
+  const next = parseHighlightRules(rules);
+  globalThis.localStorage?.setItem("conxol.syntaxHighlightRules", JSON.stringify(next));
+  configuredRules = next;
+  customRules = compileCustomRules();
+  wordGroups = compileWordGroups();
+  ruleListeners.forEach(listener => listener());
+}
 
 function ipv4(value: string): boolean {
   const parts = value.split(".");
@@ -29,9 +97,16 @@ export function findNetworkHighlights(text: string): NetworkHighlight[] {
   text = text.slice(0, 16384);
   const spans: NetworkHighlight[] = [];
   const plainTerms = [...text.matchAll(/\broute-policy\b/gi)].map(match => ({ start: match.index, end: match.index + match[0].length }));
-  const add = (start: number, end: number, kind: NetworkHighlightKind) => {
-    if (spans.length < 128 && !plainTerms.some(span => start < span.end && end > span.start) && !spans.some(span => start < span.end && end > span.start)) spans.push({ start, end, kind });
+  const add = (start: number, end: number, kind: NetworkHighlightKind, color?: string) => {
+    if (spans.length < 128 && !plainTerms.some(span => start < span.end && end > span.start) && !spans.some(span => start < span.end && end > span.start)) spans.push({ start, end, kind, ...(color ? { color } : {}) });
   };
+  // Custom rules use bounded literal searches, never user-provided regular expressions.
+  for (const rule of customRules) {
+    for (const match of text.matchAll(rule.pattern)) {
+      add(match.index, match.index + match[0].length, "keyword", rule.color);
+      if (spans.length >= 128) break;
+    }
+  }
   // Whole-line comments and descriptive configuration retain their own color.
   for (const match of text.matchAll(/^\s*(?:!|#(?:\s|$))[^\r\n]*/g)) add(match.index, match.index + match[0].length, "comment");
   for (const match of text.matchAll(/\b(?:description|hostname|sysname|nameif|version)\s+[^\r\n;{}]+/gi)) add(match.index, match.index + match[0].length, "good");
@@ -58,8 +133,13 @@ export function findNetworkHighlights(text: string): NetworkHighlight[] {
     if ((v4 || ipv6(address)) && (prefix === undefined || Number(prefix) <= (v4 ? 32 : 128))) add(match.index, match.index + match[0].length, "address");
   }
   for (const match of text.matchAll(/\b(?:[\da-f]{2}(?::[\da-f]{2}){5}|[\da-f]{2}(?:-[\da-f]{2}){5}|[\da-f]{4}(?:\.[\da-f]{4}){2}|[\da-f]{4}(?:-[\da-f]{4}){2})\b/gi)) add(match.index, match.index + match[0].length, "address");
-  for (const [kind, pattern] of RULES) {
-    for (const match of text.matchAll(pattern)) add(match.index, match.index + match[0].length, kind);
+  for (let index = 0; index < RULES.length; index++) {
+    const rule = configuredRules?.find(item => item.builtin === index);
+    if (configuredRules && !rule) continue;
+    const [kind, originalPattern] = RULES[index];
+    const pattern = wordGroups.has(index) ? wordGroups.get(index) : originalPattern;
+    if (!pattern) continue;
+    for (const match of text.matchAll(pattern)) add(match.index, match.index + match[0].length, kind, rule?.color);
   }
   return spans.sort((a, b) => a.start - b.start);
 }
@@ -67,7 +147,7 @@ export function findNetworkHighlights(text: string): NetworkHighlight[] {
 /** Keep ordinary prose and separator lines plain; emphasize operational content. */
 export function findUsefulNetworkHighlights(text: string): NetworkHighlight[] {
   const spans = findNetworkHighlights(text);
-  const meaningful = spans.some(span => span.kind === "address" || span.kind === "interface" || span.kind === "bad" || span.kind === "warning")
+  const meaningful = spans.some(span => span.color || span.kind === "address" || span.kind === "interface" || span.kind === "bad" || span.kind === "warning")
     || /^\s*(?:(?:[\w.@:-]+(?:\([^\r\n)]*\))?[>#]|<[^>]+>|\[[^\]]+\])\s*)?(?:show|display|set|undo|delete|edit|commit|rollback|configure|system-view|interface|interfaces|description|hostname|sysname|nameif|version|ip|ipv6|peer|neighbor|router|bgp|ospf|isis|mpls|vlan|vrrp|vrf|vpn-instance|protocols|policy-options|routing-options|routing-instances|security|firewall|acl|snmp|ntp|lldp|traffic-policy|port|no shutdown|shutdown)\b/i.test(text)
     || /^\s*(?:up|down|enabled|disabled|connected|disconnected|established|active|inactive|forwarding|blocking)(?:\s+(?:up|down))?\s*$/i.test(text);
   return meaningful ? spans : [];
@@ -138,7 +218,7 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       const line = buffer.getLine(y);
       if (!line) continue;
       const ranges = networkCellRanges(line);
-      const signature = JSON.stringify(ranges.map(range => [range.x, range.width, palette[range.kind]]));
+      const signature = JSON.stringify(ranges.map(range => [range.x, range.width, (range.color ?? palette[range.kind])]));
       if (previous?.signature === signature) {
         previous.generation = generation;
         previous.paletteKey = paletteKey;
@@ -151,7 +231,7 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       if (!marker) continue;
       const entry: Entry = { marker, signature, generation, paletteKey, items: [] };
       for (const range of ranges) {
-        const decoration = terminal.registerDecoration({ marker, x: range.x, width: range.width, foregroundColor: palette[range.kind], layer: "bottom" });
+        const decoration = terminal.registerDecoration({ marker, x: range.x, width: range.width, foregroundColor: (range.color ?? palette[range.kind]), layer: "bottom" });
         if (decoration) entry.items.push(decoration);
       }
       current.push(entry);
@@ -181,6 +261,8 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
     // Decoration updates also paint: only schedule when the viewport changed.
     if (terminal.buffer.active !== renderedBuffer || terminal.buffer.active.viewportY !== renderedViewport) refresh();
   }), terminal.onResize(() => { clear(); refresh(); }), terminal.buffer.onBufferChange(() => { clear(); refresh(); })];
+  const rulesChanged = () => { generation++; clear(); refresh(); };
+  ruleListeners.add(rulesChanged);
   refresh();
-  return { refresh, dispose: () => { disposed = true; subscriptions.forEach(item => item.dispose()); clear(); } };
+  return { refresh, dispose: () => { disposed = true; ruleListeners.delete(rulesChanged); subscriptions.forEach(item => item.dispose()); clear(); } };
 }

@@ -154,3 +154,58 @@ assert.deepEqual(tokens('ip ip-prefix TEST permit 192.0.2.0/24'), [
 ]);
 assert.deepEqual(tokens('192.0.2.1 24'), [['192.0.2.1', 'address']]);
 assert(!tokens('ip ip-prefix BAD permit 192.0.2.0 33 greater-equal 99').some(([text]) => text === '192.0.2.0 33' || text === '99'));
+
+// Configuration is bounded and custom matches remain literal, even for regex syntax.
+const { parseHighlightRules, defaultHighlightRules, getHighlightRules, saveHighlightRules, MAX_HIGHLIGHT_RULES } = await import('../src/network-highlighting.ts');
+const defaults = defaultHighlightRules();
+assert.equal(parseHighlightRules(null).length, defaults.length);
+assert.deepEqual(parseHighlightRules([{ id: 'bad', text: 'x', color: 'red' }]), []);
+assert.equal(parseHighlightRules(Array.from({ length: 100 }, (_, i) => ({ id: String(i), text: 'a'.repeat(100), color: '#123456' }))).length, MAX_HIGHLIGHT_RULES);
+assert.equal(parseHighlightRules([{ id: 'long', text: 'a'.repeat(100), color: '#123456' }])[0].text.length, 80);
+assert.equal(parseHighlightRules([defaults[0], defaults[0]]).length, 1);
+let stored;
+Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { setItem: (_key, value) => { stored = value; } } });
+saveHighlightRules([{ id: 'custom', text: '[a+].*', color: '#123456' }]);
+assert.equal(JSON.parse(stored)[0].text, '[a+].*');
+assert.equal(getHighlightRules().length, 1);
+assert.equal(findUsefulNetworkHighlights('İ [A+].*')[0].start, 2);
+assert.equal(findUsefulNetworkHighlights('İ [A+].*')[0].color, '#123456');
+assert.deepEqual(tokens('DOWN'), [], 'removed built-ins no longer highlight');
+assert.equal(findNetworkHighlights('[a+].* '.repeat(1000)).length, 128);
+saveHighlightRules(defaults);
+assert.equal(findNetworkHighlights('DOWN')[0].color, '#ee8d78');
+const live = attachNetworkHighlighting(terminal);
+await Promise.resolve();
+saveHighlightRules([{ id: 'down', text: 'UP', color: '#112233' }]);
+await Promise.resolve();
+assert.equal(decorationOptions.at(-1).foregroundColor, '#112233', 'saving rules refreshes live terminal caches');
+live.dispose();
+console.log('Custom highlighting: persistence, bounds, literal matching, removal and live refresh passed');
+
+const { builtinHighlightWords, MAX_GROUP_WORDS } = await import('../src/network-highlighting.ts');
+assert(builtinHighlightWords(2).split(', ').includes('successful'));
+assert(builtinHighlightWords(6).split(', ').includes('ospfv3'));
+const edited = defaults.map(rule => rule.builtin === 1 ? { ...rule, words: 'broken, port[1], a+b' } : rule);
+saveHighlightRules(edited);
+assert.deepEqual(tokens('DOWN'), [], 'deleting a default word removes its highlighting');
+assert.equal(findUsefulNetworkHighlights('broken')[0].color, '#ee8d78');
+assert.deepEqual(tokens('unbroken'), [], 'edited default words retain whole-word matching');
+assert.equal(findNetworkHighlights('port[1]')[0].color, '#ee8d78');
+assert.equal(findNetworkHighlights('a+b')[0].color, '#ee8d78', 'edited lists treat regex punctuation literally');
+assert.equal(getHighlightRules().find(rule => rule.builtin === 1).words, 'broken, port[1], a+b');
+const overfull = parseHighlightRules([{ ...defaults[1], words: Array.from({ length: 200 }, (_, i) => `word${i}`).join(', ') }]);
+assert.equal(overfull[0].words.split(', ').length, MAX_GROUP_WORDS);
+saveHighlightRules(defaults.map(rule => rule.builtin === 1 ? { ...rule, words: '' } : rule));
+assert.deepEqual(tokens('DOWN'), [], 'an empty default list disables that group');
+saveHighlightRules(defaults);
+assert.equal(findNetworkHighlights('DOWN')[0].color, '#ee8d78');
+console.log('Editable defaults: complete lists, literal edits, removal, empty lists, persistence and caps passed');
+
+const { normalizeHighlightWords } = await import('../src/network-highlighting.ts');
+assert.deepEqual(normalizeHighlightWords('up, connected, successful, up, ,'), ['up', 'connected', 'successful']);
+saveHighlightRules(defaults.map(rule => rule.builtin === 1 ? { ...rule, words: 'broken, offline, not ready' } : rule));
+assert.equal(getHighlightRules().find(rule => rule.builtin === 1).words, 'broken, offline, not ready');
+for (const text of ['broken', 'offline', 'not ready']) assert.equal(findUsefulNetworkHighlights(text)[0].color, '#ee8d78');
+saveHighlightRules(defaults);
+assert.deepEqual(normalizeHighlightWords('up\ndown'), ['up down'], 'newlines do not separate words');
+console.log('Comma-only word lists and whitespace handling passed');

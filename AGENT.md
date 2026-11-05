@@ -59,7 +59,7 @@ instead of overwriting it with remote terminal-title sequences. Folder open stat
 persists in conxol.sessionFolders; the local/remote roots and individual groups
 support toggling, Expand all, and Collapse all. Saving a folder assignment opens
 the destination group so the moved session is visible.
-The full file workspace remains available through View. X11 needs an external
+The full file workspace remains available through Tools > Remote files. X11 needs an external
 X server; the menu does not start an embedded server.
 
 If the first SFTP listing fails, the sidebar returns to sessions and remembers
@@ -265,3 +265,17 @@ tests; 44 SSH library tests and RSA signature test; app-data migration,
 SSH trust-store, and credential namespace regressions; locked Cargo metadata
 for the main and both helper workspaces; native desktop build. Existing
 vendor unused-variable and previously recorded Clippy limitations remain.
+
+## Custom terminal highlighting
+
+Tools > Custom syntax highlighting opens `SyntaxHighlightSettings.tsx`.
+Built-in word groups show complete editable plain-text lists, comma-separated words or phrases
+with automatic text wrapping, with colors and removal (up to 96 terms per list). Port-name detection
+remains automatic;
+additional matches are case-insensitive literal text, never user regexes.
+`network-highlighting.ts` validates persisted rules (64 total, 80 characters per
+custom match) under `conxol.syntaxHighlightRules`. Saving refreshes live terminal
+caches; existing 16 KiB line, 128-span, viewport and decoration bounds remain.
+Structured addresses/descriptive lines stay automatic and ANSI colors retain
+priority. Restore defaults resets the editable rule list. Unit coverage includes
+bounds, literal regex characters, persistence, removal and live refresh.
