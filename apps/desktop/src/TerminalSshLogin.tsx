@@ -1,9 +1,10 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { TerminalAuthentication } from "./terminal-authentication";
-import { terminalThemes, type ColorTheme } from "./theme";
+import type { ColorTheme } from "./theme";
+import { resolveTerminalTheme, type TerminalAppearance } from "./terminal-appearance";
 
-export function TerminalSshLogin({ authentication, connecting, label, colorTheme, fontSize }: {
-  authentication: TerminalAuthentication; connecting: boolean; label: string; colorTheme: ColorTheme; fontSize: number;
+export function TerminalSshLogin({ authentication, connecting, label, colorTheme, terminalAppearance, fontSize }: {
+  authentication: TerminalAuthentication; connecting: boolean; label: string; colorTheme: ColorTheme; terminalAppearance: TerminalAppearance; fontSize: number;
 }) {
   const question = useSyncExternalStore(authentication.subscribe, authentication.getSnapshot);
   const input = useRef<HTMLInputElement>(null);
@@ -13,7 +14,8 @@ export function TerminalSshLogin({ authentication, connecting, label, colorTheme
     return () => { if (field) field.value = ""; };
   }, [question]);
   if (!connecting && !question) return null;
-  return <section className="terminal-ssh-login" aria-label={`SSH login for ${label}`} style={{ background: terminalThemes[colorTheme].background, color: terminalThemes[colorTheme].foreground, fontSize }}>
+  const theme = resolveTerminalTheme(colorTheme, terminalAppearance);
+  return <section className="terminal-ssh-login" aria-label={`SSH login for ${label}`} style={{ background: theme.background, color: theme.foreground, fontSize }}>
     <p>{question ? "Password required" : `Connecting to ${label}…`}</p>
     {question ? <form key={question.message} onSubmit={event => {
       event.preventDefault();

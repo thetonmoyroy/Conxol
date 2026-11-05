@@ -1,3 +1,6 @@
+import { defaultTerminalAppearance, resolveTerminalTheme, terminalSurface, type TerminalAppearance } from "./terminal-appearance";
+import { FolderCustomization, SessionFolderIcon } from "./FolderCustomization";
+import { readFolderStyles, defaultFolderStyle, type FolderStyle } from "./folder-appearance";
 import { Save, ArrowRight } from "lucide-react";
 import { FileText } from "lucide-react";
 import { NotesModal } from "./NotesModal";
@@ -46,7 +49,7 @@ import { parseTunnelPort } from "./tunnel-port";
 import { retainOperationHistory } from "./operation-history";
 import { chooseOverwrite, confirmAction, confirmSessionStartup, promptText } from "./text-prompt";
 import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "./terminal-session-close";
-import { cachedTheme, terminalThemes, type ColorTheme } from "./theme";
+import { cachedTheme, type ColorTheme } from "./theme";
 import { boundedRemoteDesktopSize, enqueueRemoteDesktopPointer, mapRemoteDesktopPoint, remoteDesktopKeyCode, remoteDesktopKeyState, remoteDesktopPointerPoint, remoteDesktopSizeChanged, type RemoteDesktopPointerQueueItem, type RemoteDesktopPoint, type RemoteDesktopSize } from "./remote-desktop-input";
 import { isRemoteMonitorRefreshInterval, REMOTE_MONITOR_REFRESH_INTERVALS } from "./remote-monitor";
 import { remoteChildPath, remoteParentPath } from "./remote-path";
@@ -141,7 +144,7 @@ type AppSettings = {
   appearance: {
     fontSize: number;
   };
-  terminal: {
+  terminal: TerminalAppearance & {
     scrollbackLines: number;
     cursorBlink: boolean;
     copyOnSelect: boolean;
@@ -184,7 +187,7 @@ type VaultBackend = "platform" | "portable";
 const defaultSettings: AppSettings = {
   general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true },
   appearance: { fontSize: 14 },
-  terminal: { scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
+  terminal: { ...defaultTerminalAppearance, scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
   keyboard: {
     newTerminal: "Mod+N",
     quickConnect: "Mod+K",
@@ -299,6 +302,7 @@ type TerminalViewportProps = {
   remoteProtocol: "ssh" | "telnet" | "serial" | DesktopProtocol | null;
   localTarget: LocalTerminalTarget;
   remoteDesktopRequest?: RemoteDesktopConnectRequest | null;
+  terminalAppearance: TerminalAppearance;
   fontSize: number;
   scrollbackLines: number;
   cursorBlink: boolean;
@@ -806,11 +810,11 @@ function auditProtocol(protocol: string | null | undefined): AuditProtocol | nul
     : null;
 }
 
-function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange, onBell }: TerminalViewportProps) {
+function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange, onBell }: TerminalViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
-  const terminalOptionsRef = useRef({ fontSize, scrollbackLines, cursorBlink, colorTheme });
+  const terminalOptionsRef = useRef({ fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance });
   const confirmMultilinePasteRef = useRef(confirmMultilinePaste);
   const copyOnSelectRef = useRef(copyOnSelect);
   useEffect(() => { copyOnSelectRef.current = copyOnSelect; }, [copyOnSelect]);
@@ -833,14 +837,15 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
 
 
   useEffect(() => {
-    terminalOptionsRef.current = { fontSize, scrollbackLines, cursorBlink, colorTheme };
+    terminalOptionsRef.current = { fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance };
     if (terminalRef.current) {
       terminalRef.current.options.fontSize = fontSize;
       terminalRef.current.options.cursorBlink = cursorBlink;
-      terminalRef.current.options.theme = terminalThemes[colorTheme];
+      terminalRef.current.options.theme = resolveTerminalTheme(colorTheme, terminalAppearance);
+      terminalRef.current.options.scrollback = scrollbackLines;
       networkHighlightingRef.current?.refresh();
     }
-  }, [colorTheme, cursorBlink, fontSize, scrollbackLines]);
+  }, [colorTheme, cursorBlink, fontSize, scrollbackLines, terminalAppearance]);
 
   useEffect(() => {
     confirmMultilinePasteRef.current = confirmMultilinePaste;
@@ -879,7 +884,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       fontSize: terminalOptionsRef.current.fontSize,
       lineHeight: 1.2,
       scrollback: terminalOptionsRef.current.scrollbackLines,
-      theme: terminalThemes[terminalOptionsRef.current.colorTheme],
+      theme: resolveTerminalTheme(terminalOptionsRef.current.colorTheme, terminalOptionsRef.current.terminalAppearance),
     });
     terminalRef.current = terminal;
     const fitAddon = new FitAddon();
@@ -1606,6 +1611,11 @@ function App() {
   useEffect(() => {
     try { localStorage.setItem("conxol.createdSessionFolders", JSON.stringify(createdSessionFolders)); } catch { /* Keep folders in memory if storage is unavailable. */ }
   }, [createdSessionFolders]);
+  const [folderStyles, setFolderStyles] = useState<Record<string, FolderStyle>>(() => {
+    try { return readFolderStyles(localStorage.getItem("conxol.folderStyles")); } catch { return {}; }
+  });
+  useEffect(() => { try { localStorage.setItem("conxol.folderStyles", JSON.stringify(folderStyles)); } catch { /* Keep in memory. */ } }, [folderStyles]);
+  const [customizingFolder, setCustomizingFolder] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ folder: string; x: number; y: number } | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const folderDeletionInProgress = useRef(false);
@@ -2964,6 +2974,7 @@ function App() {
       if (members.length && !IS_TAURI) throw new Error("Moving saved sessions requires the desktop runtime.");
       await unfileSessionFolder(folder, savedSessions, session => invoke("session_save", { session }));
       setCreatedSessionFolders(current => current.filter(name => name !== folder));
+      setFolderStyles(current => { const next = { ...current }; delete next[folder]; return next; });
       setSessionFolderState(current => {
         const next = { ...current };
         delete next[`folder:${folder}`];
@@ -2979,6 +2990,31 @@ function App() {
       setDeletingFolder(null);
       folderDeletionInProgress.current = false;
     }
+  };
+
+  const saveFolderCustomization = async (name: string, style: FolderStyle) => {
+    const original = customizingFolder;
+    if (!original) return;
+    if (name !== original && [...createdSessionFolders, ...savedSessions.map(item => item.folder?.trim())].includes(name)) throw new Error("A folder with that name already exists.");
+    const moved: SavedSession[] = [];
+    try {
+      if (name !== original) {
+        for (const session of savedSessions.filter(item => item.folder?.trim() === original)) {
+          await invoke("session_save", { session: { ...session, folder: name } });
+          moved.push(session);
+        }
+      }
+    } catch (error) {
+      const rollback = await Promise.allSettled(moved.map(session => invoke("session_save", { session })));
+      refreshSavedSessions();
+      throw new Error(`Could not rename folder: ${String(error)}${rollback.some(result => result.status === "rejected") ? ". Some sessions could not be restored; review both folders." : ""}`);
+    }
+    setCreatedSessionFolders(current => [...new Set([...current.filter(folder => folder !== original), name])]);
+    setFolderStyles(current => { const next = { ...current }; delete next[original]; next[name] = style; return next; });
+    setSessionFolderState(current => { const next = { ...current }; delete next[`folder:${original}`]; next[`folder:${name}`] = current[`folder:${original}`] ?? true; return next; });
+    setEditingSession(current => current?.folder?.trim() === original ? { ...current, folder: name } : current);
+    refreshSavedSessions();
+    setCustomizingFolder(null);
   };
 
   const deleteSavedSession = useCallback(async (session: SavedSession) => {
@@ -4267,14 +4303,14 @@ function App() {
 
   const renderTerminalPane = useCallback((terminal: WorkspaceTerminal) => {
     const isDesktop = (terminal.remoteProtocol === "rdp" || terminal.remoteProtocol === "vnc") && terminal.remoteDesktopRequest;
-    const viewport = terminal.connecting ? null : isDesktop ? <RemoteDesktopViewport workspaceId={terminal.id} instanceKey={terminal.instanceKey} request={terminal.remoteDesktopRequest!} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} /> : <TerminalViewport label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} onBell={handleTerminalBell} />;
-    return <div className="terminal-login-container">{viewport}{terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} fontSize={settings.appearance.fontSize} />}</div>;
-  }, [colorTheme, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalBell, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.terminal.cursorBlink, settings.terminal.copyOnSelect, settings.terminal.scrollbackLines]);
+    const viewport = terminal.connecting ? null : isDesktop ? <RemoteDesktopViewport workspaceId={terminal.id} instanceKey={terminal.instanceKey} request={terminal.remoteDesktopRequest!} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} /> : <TerminalViewport label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} onBell={handleTerminalBell} />;
+    return <div className="terminal-login-container">{viewport}{terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}</div>;
+  }, [colorTheme, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalBell, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.terminal]);
 
   if (closing) return <main className={`app-shell shutdown-state theme-${colorTheme}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
   return (
-    <main className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
+    <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
       <nav className="desktop-menubar" aria-label="Application menu" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onKeyDown={(event) => { if (event.key === "Escape") { const menu = (event.target as HTMLElement).closest("details"); menu?.removeAttribute("open"); menu?.querySelector("summary")?.focus(); } }}>
         <details name="desktop-menu"><summary>Terminal</summary><div className="desktop-menu"><button onClick={() => startNewTerminal()}><Plus size={14} />Open new tab</button><button disabled={!selectedTerminalId} onClick={() => closeTerminal(selectedTerminalId)}><CircleX size={14} />Close current tab</button><hr /><button disabled={!selectedTerminalId} onClick={() => { setActiveView("terminal"); setTerminalSearchOpen(true); }}><Search size={14} />Find in terminal…</button><button disabled={!selectedTerminalId} onClick={() => void copyTerminalSelection()}><Copy size={14} />Copy terminal selection</button><button onClick={openWslTerminalPicker}><TerminalIcon size={14} />Start WSL terminal</button><button onClick={() => openSplit("right")}><PanelRight size={14} />Split right</button><button onClick={() => openSplit("down")}><PanelBottom size={14} />Split down</button><button onClick={() => setBroadcastOpen(true)}><Radio size={14} />Broadcast input…</button></div></details>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu"><button onClick={() => setQuickConnectOpen(true)}>New session…</button><button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}>User sessions</button><button onClick={importOpenSshConfig}>Import OpenSSH config…</button><button onClick={importSessions}>Import sessions…</button><button onClick={exportSessions}>Export sessions…</button></div></details>
@@ -4289,12 +4325,12 @@ function App() {
 
       <div className="app-body">
         <nav className="session-activity-strip" aria-label="Sidebar tools">
-          <button title="User sessions" aria-label="User sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}><List size={16} strokeWidth={1.5} /></button>
-          <button title="Favorites" aria-label="Favorite sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}><Star size={16} strokeWidth={1.5} /></button>
-          <button title="Recent sessions" aria-label="Recent sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(true); }}><History size={16} strokeWidth={1.5} /></button>
-          <button title="Macros" aria-label="Macros" onClick={() => setMacrosOpen(true)}><Play size={16} strokeWidth={1.5} /></button>
-          <button title="Notes" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={16} strokeWidth={1.5} /></button>
-          <button title="Remote files" aria-label="Remote files" onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderOpen size={16} strokeWidth={1.5} /></button>
+          <button className="activity-sessions" title="User sessions" aria-label="User sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}><List size={16} strokeWidth={1.5} /></button>
+          <button className="activity-favorites" title="Favorites" aria-label="Favorite sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}><Star size={16} strokeWidth={1.5} /></button>
+          <button className="activity-recent" title="Recent sessions" aria-label="Recent sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(true); }}><History size={16} strokeWidth={1.5} /></button>
+          <button className="activity-macros" title="Macros" aria-label="Macros" onClick={() => setMacrosOpen(true)}><Play size={16} strokeWidth={1.5} /></button>
+          <button className="activity-notes" title="Notes" aria-label="Notes" onClick={() => setNotesOpen(true)}><FileText size={16} strokeWidth={1.5} /></button>
+          <button className="activity-files" title="Remote files" aria-label="Remote files" onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderOpen size={16} strokeWidth={1.5} /></button>
           <button title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarOpen} aria-controls="session-sidebar" onClick={() => setSidebarOpen((open) => !open)}>{sidebarOpen ? <ChevronLeft size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}</button>
           <button className="activity-settings" title="Settings" aria-label="Settings" onClick={openSettings}><Settings2 size={16} strokeWidth={1.5} /></button>
         </nav>
@@ -4355,14 +4391,14 @@ function App() {
                 <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={sessionFolderState[`folder:${folder}`] ?? true} onToggle={event => changeSessionFolder(`folder:${folder}`, event.currentTarget.open)}>
                   <summary className="folder-heading session-folder-heading" onContextMenu={event => {
                     event.preventDefault(); event.stopPropagation();
-                    if (!folderHasHosts) setFolderContextMenu({ folder, x: event.clientX, y: event.clientY });
+                    setFolderContextMenu({ folder, x: event.clientX, y: event.clientY });
                   }} onKeyDown={event => {
-                    if (!folderHasHosts && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
+                    if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
                       event.preventDefault();
                       const rect = event.currentTarget.getBoundingClientRect();
                       setFolderContextMenu({ folder, x: rect.left, y: rect.bottom });
                     }
-                  }}><ChevronDown size={11} /><Folder size={13} /> {folder} <span>{sessions.length}</span>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
+                  }}><ChevronDown size={11} /><SessionFolderIcon appearance={folderStyles[folder]} /> {folder} <span>{sessions.length}</span><button type="button" className="session-folder-edit" aria-label={`Customize folder ${folder}`} title="Customize folder" onClick={event => { event.preventDefault(); event.stopPropagation(); setCustomizingFolder(folder); }}><Pencil size={12} /></button>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
                   {rows}
                 </details>
               ) : <div key="unfiled">{rows}</div>;
@@ -4513,7 +4549,8 @@ function App() {
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
       {helpOpen && <HelpModal keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
       {recoveryOpen && <div className="palette-backdrop" role="presentation" onMouseDown={() => setRecoveryOpen(false)}><section className="session-recovery-dialog" role="dialog" aria-modal="true" aria-label="Recover previous sessions" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setRecoveryOpen(false); }}><header><h2>Recover previous sessions</h2><button autoFocus aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}><X size={16} /></button></header><p>Select a recently used session to reconnect.</p>{sessionRows.filter((session) => session.lastUsedAt != null).sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)).map((session) => <button className="recovery-session" disabled={pendingSavedSession !== null && session.type !== "LOCAL"} key={session.id ?? session.name} onClick={() => { setRecoveryOpen(false); const saved = savedSessions.find((item) => item.id === session.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (session.type === "LOCAL") startNewTerminal(); else setQuickConnectOpen(true); }}><TerminalIcon size={15} /><span>{session.name}<small>{session.detail}</small></span></button>)}{!sessionRows.some((session) => session.lastUsedAt != null) && <p>No previous sessions yet. Start a local terminal or create a session with the + tab.</p>}</section></div>}
-      {folderContextMenu && !sessionRows.some(session => session.folder.trim() === folderContextMenu.folder) && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} disabled={deletingFolder !== null} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
+      {folderContextMenu && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} disabled={deletingFolder !== null || sessionRows.some(session => session.folder.trim() === folderContextMenu.folder)} onCustomize={() => { setCustomizingFolder(folderContextMenu.folder); setFolderContextMenu(null); }} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
+      {customizingFolder && <FolderCustomization key={customizingFolder} folder={customizingFolder} appearance={folderStyles[customizingFolder] ?? defaultFolderStyle} onClose={() => setCustomizingFolder(null)} onSave={saveFolderCustomization} />}
       {quickConnectOpen && <QuickConnectDialog error={connectionError} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder).filter((folder): folder is string => !!folder)])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder)} onConnectTelnet={connectTelnet} onConnectSerial={connectSerial} onConnectRemoteDesktop={connectRemoteDesktop} onShell={() => startNewTerminal()} onWsl={openWslTerminalPicker} />}
       {tunnelDraft && <TunnelDialog kind={tunnelDraft.kind} onClose={() => setTunnelDraft(null)} onStart={startTunnel} />}
       {wslTerminalOpen && <WslTerminalDialog onClose={() => setWslTerminalOpen(false)} onSelect={startWslTerminal} />}
@@ -4642,7 +4679,7 @@ function groupSessionsByFolder(sessions: SessionListItem[], folders: string[] = 
   });
 }
 
-function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete }: { folder: string; x: number; y: number; disabled: boolean; onClose: () => void; onDelete: () => void }) {
+function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustomize }: { folder: string; x: number; y: number; disabled: boolean; onClose: () => void; onDelete: () => void; onCustomize: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previousFocus = document.activeElement;
@@ -4662,7 +4699,8 @@ function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete }: { fold
       if (menu?.contains(document.activeElement) && previousFocus instanceof HTMLElement && previousFocus.isConnected) previousFocus.focus();
     };
   }, [onClose]);
-  return <div ref={menuRef} className="session-folder-menu" role="menu" aria-label={`Folder ${folder}`} style={{ left: Math.max(4, Math.min(x, window.innerWidth - 228)), top: Math.max(4, Math.min(y, window.innerHeight - 70)) }}>
+  return <div ref={menuRef} className="session-folder-menu" role="menu" aria-label={`Folder ${folder}`} style={{ left: Math.max(4, Math.min(x, window.innerWidth - 228)), top: Math.max(4, Math.min(y, window.innerHeight - 120)) }}>
+    <button type="button" role="menuitem" onClick={onCustomize}><Pencil size={14} /><span>Customize folder<small>Name, icon and color</small></span></button>
     <button type="button" role="menuitem" disabled={disabled} onClick={onDelete}><Trash2 size={14} /><span>Delete folder<small>Keep sessions in the main list</small></span></button>
   </div>;
 }
@@ -5510,6 +5548,7 @@ function SnippetForm({ snippet, isNew, onSave, onDelete, onCopy }: { snippet: Sn
 function SettingsModal({ settings, error, portableVaultStatus, onClose, onSave, onReset, onExport, onImport, onExportDiagnostics, onPortableCreate, onPortableUnlock, onPortableLock }: { settings: AppSettings; error: string | null; portableVaultStatus: PortableVaultStatus | null; onClose: () => void; onSave: (settings: AppSettings) => void; onReset: () => void; onExport: () => Promise<void>; onImport: () => Promise<void>; onExportDiagnostics: () => Promise<void>; onPortableCreate: (passphrase: string) => Promise<void>; onPortableUnlock: (passphrase: string) => Promise<void>; onPortableLock: () => Promise<void> }) {
   const settingsTabs = [
     { id: "general", label: "General", icon: Settings2 },
+    { id: "terminal", label: "Terminal", icon: TerminalIcon },
     { id: "shortcuts", label: "Shortcuts", icon: Command },
     { id: "network", label: "Network", icon: Network },
     { id: "security", label: "Screen lock", icon: LockKeyhole },
@@ -5521,6 +5560,7 @@ function SettingsModal({ settings, error, portableVaultStatus, onClose, onSave, 
   const [confirmMultilinePaste, setConfirmMultilinePaste] = useState(settings.general.confirmMultilinePaste);
   const [pastePreview, setPastePreview] = useState(settings.general.pastePreview);
   const [copyOnSelect, setCopyOnSelect] = useState(settings.terminal.copyOnSelect);
+  const [terminalAppearance, setTerminalAppearance] = useState<TerminalAppearance>({ ...defaultTerminalAppearance, ...settings.terminal });
   const [fontSize, setFontSize] = useState(String(settings.appearance.fontSize));
   const [scrollbackLines, setScrollbackLines] = useState(String(settings.terminal.scrollbackLines));
   const [cursorBlink, setCursorBlink] = useState(settings.terminal.cursorBlink);
@@ -5557,7 +5597,7 @@ function SettingsModal({ settings, error, portableVaultStatus, onClose, onSave, 
     onSave({
       general: { theme, confirmMultilinePaste, pastePreview },
       appearance: { fontSize: Number(fontSize) },
-      terminal: { scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
+      terminal: { ...terminalAppearance, scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
       keyboard,
       ssh: { reconnectEnabled, reconnectAttempts: Number(reconnectAttempts), connectTimeoutMs: Number(connectTimeoutMs) },
       network: { diagnosticTimeoutMs: Number(diagnosticTimeoutMs), scanConcurrency: Number(scanConcurrency) },
@@ -5603,10 +5643,23 @@ function SettingsModal({ settings, error, portableVaultStatus, onClose, onSave, 
           <span className="settings-section-label">General & appearance</span>
           <div className="settings-grid settings-appearance-grid">
             <label>Theme<select value={theme} onChange={(event) => setTheme(event.target.value as AppSettings["general"]["theme"])}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
-            <label>Font size<input type="number" min="8" max="32" value={fontSize} onChange={(event) => setFontSize(event.target.value)} /><small>8–32 px.</small></label>
-            <label>Scrollback lines<input type="number" min="100" max="100000" value={scrollbackLines} onChange={(event) => setScrollbackLines(event.target.value)} /><small>100–100,000 lines.</small></label>
           </div>
         </div>
+          </section>
+          <section id="settings-panel-terminal" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-terminal" data-settings-panel="terminal" hidden={activeSettingsTab !== "terminal"}>
+            <div className="settings-section">
+              <span className="settings-section-label">Terminal appearance</span>
+              <div className="settings-grid">
+                <label>Color theme<select value={terminalAppearance.colorTheme} onChange={event => setTerminalAppearance(current => ({ ...current, colorTheme: event.target.value, background: "", foreground: "" }))}><option value="">Follow app theme</option><option value="dark">Conxol dark</option><option value="light">Light</option><option value="midnight">Midnight</option></select></label>
+                <label>Background<input type="color" value={resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).background} onChange={event => setTerminalAppearance(current => ({ ...current, background: event.target.value }))} /></label>
+                <label>Text color<input type="color" value={resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).foreground} onChange={event => setTerminalAppearance(current => ({ ...current, foreground: event.target.value }))} /><small>Device ANSI colors and syntax highlights keep their own colors.</small></label>
+            <label>Font size<input type="number" min="8" max="32" value={fontSize} onChange={(event) => setFontSize(event.target.value)} /><small>8–32 px.</small></label>
+            <label>Scrollback lines<input type="number" min="100" max="100000" value={scrollbackLines} onChange={(event) => setScrollbackLines(event.target.value)} /><small>100–100,000 lines.</small></label>
+
+                <div className="terminal-color-reset"><button type="button" className="outline-button" onClick={() => setTerminalAppearance(current => ({ ...current, background: "", foreground: "" }))}>Reset colors to theme</button></div>
+              </div>
+            </div>
+            <pre className="terminal-appearance-preview" style={{ background: resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).background, color: resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).foreground, fontSize: `${Math.max(8, Math.min(32, Number(fontSize) || 14))}px` }}>router&gt; show interfaces brief{"\n"}GigabitEthernet0/0/1  192.0.2.1  UP</pre>
         <div className="settings-section">
           <span className="settings-section-label">Terminal & clipboard</span>
           <div className="settings-grid settings-toggle-grid">

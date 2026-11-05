@@ -57,6 +57,17 @@ pub struct TerminalSettings {
     pub cursor_blink: bool,
     #[serde(default)]
     pub copy_on_select: bool,
+    #[serde(default)]
+    pub color_theme: String,
+    #[serde(default)]
+    pub background: String,
+    #[serde(default)]
+    pub foreground: String,
+    // Read and discard settings from the removed transparency experiment.
+    #[serde(default, skip_serializing, rename = "backgroundOpacity")]
+    legacy_background_opacity: Option<u8>,
+    #[serde(default, skip_serializing, rename = "blurredTransparency")]
+    legacy_blurred_transparency: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +127,11 @@ impl Default for TerminalSettings {
             scrollback_lines: default_scrollback(),
             cursor_blink: true,
             copy_on_select: false,
+            color_theme: String::new(),
+            background: String::new(),
+            foreground: String::new(),
+            legacy_background_opacity: None,
+            legacy_blurred_transparency: None,
         }
     }
 }
@@ -182,6 +198,8 @@ pub enum SettingsValidationError {
     InvalidFontSize,
     #[error("terminal scrollback must be between 100 and 100000 lines")]
     InvalidScrollback,
+    #[error("invalid terminal colors or theme")]
+    InvalidTerminalAppearance,
     #[error("SSH reconnect attempts must be between 0 and 10")]
     InvalidReconnectAttempts,
     #[error("SSH connect timeout must be between 100 and 60000 milliseconds")]
@@ -203,6 +221,19 @@ impl AppSettings {
         }
         if !(100..=100_000).contains(&self.terminal.scrollback_lines) {
             return Err(SettingsValidationError::InvalidScrollback);
+        }
+        let terminal = &self.terminal;
+        let color_valid = |value: &str| {
+            value.is_empty()
+                || (value.len() == 7
+                    && value.starts_with('#')
+                    && value[1..].bytes().all(|b| b.is_ascii_hexdigit()))
+        };
+        if !["", "dark", "light", "midnight"].contains(&terminal.color_theme.as_str())
+            || !color_valid(&terminal.background)
+            || !color_valid(&terminal.foreground)
+        {
+            return Err(SettingsValidationError::InvalidTerminalAppearance);
         }
         if self.ssh.reconnect_attempts > 10 {
             return Err(SettingsValidationError::InvalidReconnectAttempts);
@@ -376,6 +407,49 @@ fn default_shortcut_emergency_broadcast_disable() -> String {
 #[cfg(test)]
 mod tests {
     use super::{AppSettings, SettingsValidationError};
+
+    #[test]
+    fn retired_transparency_settings_are_discarded_on_save() {
+        let old: super::TerminalSettings =
+            serde_json::from_str(r#"{"backgroundOpacity":40,"blurredTransparency":true}"#).unwrap();
+        let json = serde_json::to_string(&old).unwrap();
+        assert!(!json.contains("backgroundOpacity"));
+        assert!(!json.contains("blurredTransparency"));
+    }
+
+    #[test]
+    fn terminal_appearance_migrates_and_round_trips() {
+        let old: super::TerminalSettings = serde_json::from_str(
+            r#"{"scrollbackLines":5000,"cursorBlink":true,"copyOnSelect":false}"#,
+        )
+        .unwrap();
+        assert_eq!(old.legacy_background_opacity, None);
+        assert_eq!(old.legacy_blurred_transparency, None);
+        assert!(old.color_theme.is_empty());
+        let mut settings = AppSettings::default();
+        settings.terminal.background = "#123abc".into();
+        settings.terminal.foreground = "#ffffff".into();
+        settings.terminal.color_theme = "midnight".into();
+        assert!(settings.validate().is_ok());
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AppSettings>(&json).unwrap(),
+            settings
+        );
+        for color in ["red", "#123", "#xyzxyz", "#12345678"] {
+            settings.terminal.background = color.into();
+            assert_eq!(
+                settings.validate(),
+                Err(SettingsValidationError::InvalidTerminalAppearance)
+            );
+        }
+        settings.terminal.background.clear();
+        settings.terminal.color_theme = "unknown".into();
+        assert_eq!(
+            settings.validate(),
+            Err(SettingsValidationError::InvalidTerminalAppearance)
+        );
+    }
 
     #[test]
     fn defaults_are_safe_and_valid() {

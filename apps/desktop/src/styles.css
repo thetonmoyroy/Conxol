@@ -538,7 +538,7 @@ button:not(:disabled) { cursor: pointer; }
 .desktop-session-tabs > button:hover { color: var(--amber); background: var(--amber-soft); }
 .desktop-session-tabs > button:focus-visible { outline: 1px solid var(--amber); outline-offset: -2px; }
 .app-shell .desktop-session-tabs .terminal-tab-strip { flex: 0 1 auto; min-width: 0; scrollbar-width: thin; }
-.app-shell .terminal-tab { min-width: 100px; max-width: 190px; margin-top: 3px; padding: 0 5px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 10px; gap: 3px; }
+.app-shell .terminal-tab { min-width: 100px; max-width: 240px; margin-top: 3px; padding: 0 7px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 12px; gap: 5px; }
 .app-shell .terminal-tab.selected { border-color: var(--line-strong); background: var(--bg); color: var(--text); }
 .app-shell .terminal-tab-meta { display: none; }
 .app-shell .terminal-tab-close { width: 16px; flex-basis: 16px; }
@@ -652,12 +652,12 @@ button:not(:disabled) { cursor: pointer; }
 .quick-connect-simple .quick-connect-footer > span { font-family: inherit; font-size: 10px; }
 .connection-pending { color: var(--amber); }
 .terminal-login-container { position: relative; width: 100%; height: 100%; min-height: 0; }
-.terminal-ssh-login { position: absolute; inset: 0; z-index: 3; padding: 12px; overflow: auto; font-family: var(--mono); line-height: 1.5; }
+.terminal-ssh-login { position: absolute; inset: 0; z-index: 3; padding: 12px; overflow: auto; font-family: "Conxol Terminal", Consolas, monospace; line-height: 1.2; }
 .terminal-ssh-login p { margin: 0 0 12px; }
 .terminal-ssh-login pre { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .terminal-ssh-login label { display: flex; align-items: baseline; gap: 8px; }
 .terminal-ssh-login input { flex: 1; min-width: 0; padding: 0; border: 0; border-radius: 0; outline: none; background: transparent; color: inherit; font: inherit; caret-color: var(--amber); }
-.terminal-ssh-login .terminal-login-help { margin-top: 16px; color: var(--muted); font-size: 11px; }
+.terminal-ssh-login .terminal-login-help { margin-top: 16px; color: inherit; opacity: .75; font-size: 11px; }
 .session-row-main[aria-busy="true"] { color: var(--amber); background: var(--mint-soft); cursor: progress; opacity: 1; }
 .session-row-main[aria-busy="true"] .session-type { color: var(--amber); letter-spacing: 0; }
 .session-row-main:disabled, .desktop-recent-sessions button:disabled, .recovery-session:disabled { cursor: progress; }
@@ -997,3 +997,44 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 
 /* Keep terminal glyphs on their measured monospace grid. */
 .terminal-host .xterm { text-rendering: auto; font-kerning: none; font-variant-ligatures: none; letter-spacing: normal; }
+
+.folder-customization { box-sizing: border-box; width: min(420px, calc(100vw - 32px)); padding: 20px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); }
+.folder-customization h2 { display: flex; align-items: center; gap: 8px; margin: 0 0 18px; font-size: 16px; }
+.folder-customization fieldset { display: grid; gap: 14px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.folder-customization label { display: grid; gap: 6px; font-size: 12px; }
+.folder-customization input { box-sizing: border-box; width: 100%; height: 36px; padding: 6px; border: 1px solid var(--line-strong); background: var(--bg); color: var(--text); }
+.folder-icon-options { display: flex; gap: 8px; }
+.folder-icon-options button { display: grid; place-items: center; width: 44px; height: 40px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; }
+.folder-icon-options button[aria-pressed="true"] { border-color: var(--amber); background: var(--amber-soft); }
+.session-folder-edit { display: inline-flex; flex: 0 0 19px; align-items: center; justify-content: center; width: 19px; height: 19px; padding: 0; border: 0; background: transparent; color: var(--muted); visibility: hidden; cursor: pointer; }
+.session-folder-heading:hover .session-folder-edit, .session-folder-heading:focus-within .session-folder-edit { visibility: visible; }
+.session-folder-edit:hover { color: var(--amber); }
+
+.terminal-appearance-preview { padding: 16px; border: 1px solid var(--line-strong); font-family: "Conxol Terminal", monospace; line-height: 1.2; overflow: auto; }
+.app-shell .terminal-frame, .app-shell.theme-light .terminal-frame { background: var(--terminal-surface, #101514); }
+.app-shell .terminal-layout-pane, .app-shell.theme-light .terminal-layout-pane, .app-shell.theme-light .terminal-pane.active { background: transparent; }
+
+/* Let the terminal frame supply the selected background to split panes. */
+.app-shell .terminal-frame .terminal-layout-split,
+.app-shell .terminal-frame .terminal-pane.active { background: transparent; }
+
+.terminal-color-reset { display: flex; justify-content: flex-end; align-self: start; }
+.settings-modal .terminal-color-reset button { height: 28px; }
+
+/* Muted tool colors distinguish the sidebar actions at a glance. */
+.session-activity-strip .activity-sessions { --activity-color: #4b93bd; }
+.session-activity-strip .activity-favorites { --activity-color: #b49a62; }
+.session-activity-strip .activity-recent { --activity-color: #a48e89; }
+.session-activity-strip .activity-macros { --activity-color: #7c9d59; }
+.session-activity-strip .activity-notes { --activity-color: #a17ba3; }
+.session-activity-strip .activity-files { --activity-color: #4f9fb1; }
+.session-activity-strip .activity-settings { --activity-color: #b76578; }
+.session-activity-strip button { color: var(--activity-color, var(--muted)); cursor: pointer; }
+.session-activity-strip button:hover, .session-activity-strip button:focus-visible { color: var(--activity-color, var(--text)); background: color-mix(in srgb, var(--activity-color, var(--muted)) 15%, transparent); }
+.theme-light .session-activity-strip .activity-sessions { --activity-color: #30749b; }
+.theme-light .session-activity-strip .activity-favorites { --activity-color: #8c7136; }
+.theme-light .session-activity-strip .activity-recent { --activity-color: #876e68; }
+.theme-light .session-activity-strip .activity-macros { --activity-color: #5d7b3e; }
+.theme-light .session-activity-strip .activity-notes { --activity-color: #865c88; }
+.theme-light .session-activity-strip .activity-files { --activity-color: #347b8c; }
+.theme-light .session-activity-strip .activity-settings { --activity-color: #a14d62; }
