@@ -8,6 +8,8 @@ rust-version.workspace = true
 description = "Bounded native network diagnostics for Conxol"
 
 [dependencies]
+conxol-mtr = { path = "../conxol-mtr" }
+conxol-ping = { path = "../conxol-ping" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

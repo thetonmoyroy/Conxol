@@ -33,7 +33,9 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-ssh` | russh transport, per-hop trust/authentication, PTY channels, SFTP/SCP, forwarding, bounded remote editing/monitoring, X11 channels |
 | `crates/conxol-store` | Versioned atomic persistence; OpenSSH and profile import/export; validation and corruption refusal |
 | `crates/conxol-vault` | Native OS credential store and separate Argon2id/AES-GCM portable vault; zeroizing secret material |
-| `crates/conxol-network` | Bounded DNS/TCP/scan/ping/traceroute primitives |
+| `crates/conxol-network` | Bounded DNS/TCP/scan and async native Ping/MTR adapters |
+| `crates/conxol-ping` | Shared native IPv4 ICMP transport, Ping statistics/scheduler and CLI |
+| `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
 | `crates/conxol-telnet` | Plaintext Telnet negotiation, transport, and lifecycle |
 | `crates/conxol-serial` | Serial configuration, transport, and recoverable device loss |
 | `crates/conxol-remote-desktop` | Versioned bounded helper frames, capability validation, credentials/control separation, process supervision |

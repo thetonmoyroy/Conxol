@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -332,28 +332,6 @@ impl NetworkManager {
         timeout_ms: u64,
         max_hops: u8,
     ) -> Result<NetworkDiagnosticResponse, NetworkManagerError> {
-        let mtr_program = if cfg!(windows) {
-            let packaged = app
-                .path()
-                .resource_dir()
-                .map_err(|_| NetworkDiagnosticError::MtrUnavailable)?
-                .join("helpers/mtr/mtr.exe");
-            if packaged.is_file() {
-                packaged
-            } else {
-                #[cfg(debug_assertions)]
-                {
-                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                        .join("../../../tools/mtr/windows-x86_64/mtr.exe")
-                }
-                #[cfg(not(debug_assertions))]
-                {
-                    return Err(NetworkDiagnosticError::MtrUnavailable.into());
-                }
-            }
-        } else {
-            std::path::PathBuf::from("mtr")
-        };
         let kind = NetworkDiagnosticKind::Mtr;
         let options = TracerouteOptions {
             host,
@@ -378,7 +356,7 @@ impl NetworkManager {
         let manager = self.clone();
         let id_for_task = operation_id.clone();
         tauri::async_runtime::spawn(async move {
-            let result = mtr_live(&mtr_program, options, &mut cancellation, |snapshot| {
+            let result = mtr_live(options, &mut cancellation, |snapshot| {
                 emit_diagnostic_event(
                     &app,
                     NetworkDiagnosticEvent {

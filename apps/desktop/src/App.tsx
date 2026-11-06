@@ -5346,14 +5346,14 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
   } else if (tool === "mtr") {
     const report = mtrResult;
     lines.push("MTR  /  PACKET LOSS & LATENCY", "");
-    if (report) lines.push(`Target: ${report.host}    Elapsed: ${report.elapsedMs} ms`, "", ...report.hops);
+    if (report) lines.push(`Target: ${report.host}    Elapsed: ${formatElapsedTime(report.elapsedMs)}`, "", ...report.hops);
     else lines.push(diagnosticKind === tool && diagnosticActive ? "Collecting live probe cycles…" : diagnosticKind === tool && diagnosticStatus === "failed" ? "Diagnostic failed." : "Ready. Enter a target, then press Run.");
     if (diagnosticKind === tool && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
   } else if (tool === "ping") {
     lines.push("PING", "");
     if (pingResult) {
       const loss = pingResult.sent ? ((pingResult.sent - pingResult.received) / pingResult.sent * 100).toFixed(1) : "0.0";
-      lines.push(`Target: ${pingResult.host}    Payload: ${pingResult.packetSize} bytes    Interval: ${pingResult.intervalMs} ms`, "", ...pingResult.lines, "", `Sent: ${pingResult.sent}    Successful probes: ${pingResult.received}    Loss: ${loss}%    Elapsed: ${pingResult.elapsedMs} ms`);
+      lines.push(`Target: ${pingResult.host}    Payload: ${pingResult.packetSize} bytes    Interval: ${pingResult.intervalMs} ms`, "", ...pingResult.lines, "", `Sent: ${pingResult.sent}    Successful probes: ${pingResult.received}    Loss: ${loss}%    Elapsed: ${formatElapsedTime(pingResult.elapsedMs)}`);
     }
     else lines.push(diagnosticKind === "ping" && diagnosticActive ? "Waiting for echo reply…" : "Ready. Enter a target, then press Run.");
     if (diagnosticKind === "ping" && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
@@ -5426,7 +5426,7 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
       {exportNotice && <p className="diagnostics-export-notice" role="status">{exportNotice}</p>}
       <pre ref={outputRef} className="diagnostics-cli-output" tabIndex={0} aria-label={`${label} output`} onScroll={event => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) setFollow(false); }}>{output}</pre>
     </div>
-    <footer className="diagnostics-cli-footer"><span>{tool === "scan" ? "IP or CIDR · Up to 256 hosts, 4096 ports, 65536 checks" : tool === "ping" ? "Live until stopped · Interval between probe starts · Payload size excludes headers" : tool === "mtr" ? "Live until stopped · Cumulative hop statistics · Bundled Windows MTR" : "Run against the selected target"}</span><span>{busy ? "Working…" : "Select a tool · Enter a target · Run"}</span></footer>
+    <footer className="diagnostics-cli-footer"><span>{tool === "scan" ? "IP or CIDR · Up to 256 hosts, 4096 ports, 65536 checks" : tool === "ping" ? "Native IPv4 Ping · Interval between probe starts · Payload size excludes headers" : tool === "mtr" ? "Live until stopped · Cumulative hop statistics · Native IPv4 MTR" : "Run against the selected target"}</span><span>{busy ? "Working…" : "Select a tool · Enter a target · Run"}</span></footer>
   </section>;
 }
 
@@ -5473,6 +5473,20 @@ function formatTransferEta(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const remainingSeconds = Math.round(seconds % 60);
   return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
+}
+
+function formatElapsedTime(milliseconds: number) {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
+  const seconds = Math.floor(milliseconds / 1000);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return [
+    days > 0 ? `${days}d` : "",
+    hours > 0 || days > 0 ? `${hours}h` : "",
+    minutes > 0 || hours > 0 || days > 0 ? `${minutes}m` : "",
+    `${seconds % 60}s`,
+  ].filter(Boolean).join(" ");
 }
 
 function formatDuration(seconds?: number | null) {
@@ -5560,7 +5574,7 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
             <div><dt>Version</dt><dd>{desktopPackage.version}</dd></div>
             <div><dt>License</dt><dd>Apache License 2.0</dd></div>
           </dl>
-          <p className="help-note">See Credits for third-party tools, project links and the bundled MTR license.</p>
+          <p className="help-note">See Credits for Conxol components, third-party tools and project links.</p>
           <div className="help-diagnostics"><div><h4>Support diagnostics</h4><p>Save app information, recent SSH errors, and algorithm details for troubleshooting. Passwords, key contents, host addresses, and terminal output are excluded.</p></div><button type="button" className="outline-button" disabled={diagnosticsBusy} onClick={() => void exportReport()}><Download size={14} />{diagnosticsBusy ? "Saving…" : "Export diagnostics"}</button></div>
           <p className="help-note">For SSH issues, reproduce the failure and export before restarting Conxol. The report keeps the latest 64 failure records from this app session.</p>
           {diagnosticsMessage && <p className="help-note" role="status">{diagnosticsMessage}</p>}

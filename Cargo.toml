@@ -9,6 +9,8 @@ members = [
   "crates/conxol-telnet",
   "crates/conxol-serial",
   "crates/conxol-network",
+  "crates/conxol-mtr",
+  "crates/conxol-ping",
   "apps/desktop/src-tauri",
   "xtask",
 ]

@@ -29,7 +29,6 @@
     "active": true,
     "resources": {
       "helpers/*": "helpers/",
-      "../../../tools/mtr/windows-x86_64/*": "helpers/mtr/",
       "../src/assets/fonts/JetBrainsMono-OFL.txt": "licenses/JetBrainsMono-OFL.txt",
       "../../../LICENSE": "LICENSE",
       "../../../NOTICE": "NOTICE"
