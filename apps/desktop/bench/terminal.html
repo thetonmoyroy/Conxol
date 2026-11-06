@@ -1,0 +1,55 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Conxol terminal benchmark</title></head>
+<body style="background:#101414"><div id="terminal"></div><script type="module">
+import { Terminal } from '@xterm/xterm';
+import '@xterm/xterm/css/xterm.css';
+import { attachNetworkHighlighting } from '../src/network-highlighting.ts';
+
+const frame = () => new Promise(resolve => requestAnimationFrame(resolve));
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+const percentile = (values, p) => [...values].sort((a, b) => a - b)[Math.min(values.length - 1, Math.floor(values.length * p))];
+// Synthetic device configuration; no network or application state is accessed.
+const lines = Array.from({ length: 12000 }, (_, i) => [
+  `interface GigabitEthernet0/0/${i % 48}`,
+  ` description Synthetic uplink ${i}`,
+  ` ip address 192.0.2.${i % 254 + 1} 255.255.255.0`,
+  ' no shutdown',
+  `router bgp 65000 neighbor 198.51.100.${i % 254 + 1} remote-as 65001`,
+  '!',
+][i % 6]);
+const payload = lines.join('\r\n') + '\r\n';
+window.runTerminalBenchmark = async (highlighting) => {
+  const host = document.getElementById('terminal');
+  host.replaceChildren();
+  const terminal = new Terminal({ allowProposedApi: true, cols: 140, rows: 45, scrollback: 5000,
+    fontFamily: 'Consolas, monospace', fontSize: 14, lineHeight: 1.35, cursorBlink: false });
+  terminal.open(host);
+  const highlighter = highlighting ? attachNetworkHighlighting(terminal) : undefined;
+  const write = data => new Promise(resolve => terminal.write(data, resolve));
+  await write('Warmup\r\n'.repeat(200));
+  await pause(100);
+  const start = performance.now();
+  for (let offset = 0; offset < payload.length; offset += 32768) await write(payload.slice(offset, offset + 32768));
+  const parsedMs = performance.now() - start;
+  await pause(100);
+  // Warm retained history, then measure a second pass over the same range.
+  for (let i = 0; i < 100; i++) { terminal.scrollLines(-3); await frame(); }
+  terminal.scrollToBottom();
+  await pause(100);
+  const frames = [], scrollWork = [];
+  let previous = await new Promise(resolve => requestAnimationFrame(resolve));
+  for (let i = 0; i < 240; i++) {
+    const before = performance.now();
+    terminal.scrollLines(i < 120 ? -3 : 3);
+    scrollWork.push(performance.now() - before);
+    const now = await new Promise(resolve => requestAnimationFrame(resolve));
+    frames.push(now - previous); previous = now;
+  }
+  const result = { highlighting, lines: lines.length, characters: payload.length, parsedMs,
+    scrollCallMedianMs: percentile(scrollWork, .5), scrollCallP95Ms: percentile(scrollWork, .95),
+    frameMedianMs: percentile(frames, .5), frameP95Ms: percentile(frames, .95),
+    framesOver25Ms: frames.filter(ms => ms > 25).length, scrollFrames: frames.length };
+  highlighter?.dispose(); terminal.dispose();
+  return result;
+};
+</script></body></html>

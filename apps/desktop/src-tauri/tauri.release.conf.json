@@ -1,0 +1,18 @@
+{
+  "bundle": {
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.ico",
+      "icons/icon.icns"
+    ],
+    "resources": {
+      "helpers/*": "helpers/",
+      "../../../LICENSE": "LICENSE",
+      "../../../NOTICE": "NOTICE",
+      "../src/assets/fonts/JetBrainsMono-OFL.txt": "licenses/JetBrainsMono-OFL.txt"
+    },
+    "macOS": {
+      "signingIdentity": "-"
+    }
+  }
+}

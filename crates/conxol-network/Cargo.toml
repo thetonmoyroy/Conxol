@@ -1,0 +1,20 @@
+[package]
+name = "conxol-network"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Bounded native network diagnostics for Conxol"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+
+hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
+rand = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+ipconfig = "0.3"

@@ -1,0 +1,62 @@
+# ADR 0010: Import OpenSSH profiles as secret-free session definitions
+
+## Status
+
+Accepted and implemented for the common OpenSSH fields.
+
+## Decision
+
+Conxol imports a user-selected OpenSSH config through a dedicated native
+command. The importer opens only a regular file, bounds the input to 1 MiB,
+and parses it natively. It recognizes:
+
+- `Host` exact aliases;
+- `HostName`, `User`, and `Port`;
+- the first `IdentityFile` as a private-key reference;
+- comma-separated `ProxyJump` entries as jump-host references;
+- `ServerAliveInterval` as a bounded native SSH keepalive interval on the
+  target and each saved jump hop; `0` or an invalid/out-of-range value
+  disables application of the setting and remains visible in the import note.
+
+Wildcard aliases, negated patterns, malformed ports, invalid session fields,
+and unsupported directives are not silently converted into a profile. One
+invalid host does not prevent valid neighbors from importing. The report
+contains skipped hosts and distinct unsupported directive names. `Host *` is
+treated as a defaults block; exact aliases receive the first value found for
+each option, matching the important precedence rule without claiming full
+OpenSSH parser compatibility.
+
+Imported profiles are persisted in the existing versioned session store.
+Existing SSH profiles with the same alias are reported as skipped so a repeat
+import cannot overwrite credentials, host trust, or later profile edits.
+`IdentityFile` remains a path reference; passwords are never read from the
+config or stored. Profiles
+with `ProxyJump` reconnect when each alias resolves to a saved SSH profile.
+An explicit `user@host:port` entry overrides the saved hop username and port.
+Unresolved aliases remain visible but cannot start a connection.
+
+## Rationale
+
+- OpenSSH config is a high-value, user-controlled migration source.
+- A dedicated parser keeps the IPC contract narrow and avoids generic file
+  access from React.
+- An import report makes partial compatibility reviewable.
+- Skipping existing aliases prevents repeated imports from flooding the catalog
+  or overwriting operator edits.
+
+## Rejected for this milestone
+
+- importing `IdentityFile` contents or passphrases;
+- pretending wildcard/pattern matching is fully supported;
+- executing `ProxyJump` through a shell string;
+- reading arbitrary config includes recursively without a separate path and
+  security review;
+- applying an invalid or unbounded `ServerAliveInterval` value.
+
+## Verification
+
+Store tests cover global defaults, aliases, key and jump references, bounded
+keepalive mapping (including jump-hop profile persistence), notes, unsupported
+directives, malformed ports, secret absence, persistence, and repeat-import
+preservation. Desktop TypeScript and Rust command compilation must also pass
+before release.

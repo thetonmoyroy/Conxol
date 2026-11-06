@@ -1,0 +1,52 @@
+/* Scoped to avoid inheriting the large, unstyled labels of the settings form. */
+.settings-modal .workspace-backup { padding: 16px 0 20px; }
+.workspace-backup-heading { display: flex; align-items: center; gap: 12px; }
+.workspace-backup-symbol { display: grid; place-items: center; width: 40px; height: 40px; flex: 0 0 40px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--panel-soft); color: var(--mint); }
+.settings-modal .workspace-backup h3 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: -.02em; color: var(--text); }
+.settings-modal .workspace-backup p { margin: 0; font-size: 11px; line-height: 1.6; color: var(--muted); }
+.workspace-backup-badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; margin-left: auto; border: 1px solid var(--line); border-radius: 20px; font-size: 10px; color: var(--mint); white-space: nowrap; }
+.settings-modal .workspace-backup .workspace-backup-includes { margin: 12px 0 16px; font-size: 10px; }
+.workspace-backup-includes span { padding: 0 5px; color: var(--faint); }
+.workspace-backup-choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.workspace-backup-choice { display: flex; gap: 12px; padding: 17px 14px; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--bg); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
+.workspace-backup-choice:hover { border-color: var(--mint); background: var(--panel-soft); }
+.workspace-backup-choice:focus-visible { outline: 2px solid var(--mint); outline-offset: 2px; }
+.workspace-backup-choice-icon { color: var(--mint); padding-top: 2px; }
+.workspace-backup-choice > span:last-child { display: grid; gap: 6px; }
+.workspace-backup-choice strong { font-size: 12px; font-weight: 600; }
+.workspace-backup-choice small { font-size: 11px; line-height: 1.6; color: var(--muted); }
+.workspace-backup-choice b { display: flex; align-items: center; gap: 6px; margin-top: 5px; font-size: 10px; font-weight: 500; color: var(--amber); }
+.workspace-backup-card { overflow: hidden; border: 1px solid var(--line-strong); border-radius: 9px; background: var(--bg); }
+.workspace-backup-card-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 16px; border-bottom: 1px solid var(--line); }
+.settings-modal .workspace-backup h4 { margin: 0; color: var(--text); font-size: 12px; font-weight: 600; }
+.workspace-backup-card-heading > span { font-size: 10px; color: var(--muted); white-space: nowrap; }
+.workspace-backup-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 15px 14px; padding: 16px; }
+.settings-modal .workspace-backup label { display: grid; gap: 7px; margin: 0; color: var(--text); font: inherit; font-size: 11px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.settings-modal .workspace-backup input { display: block; box-sizing: border-box; width: 100%; min-width: 0; height: 35px; margin: 0; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel-soft); color: var(--text); font: inherit; font-size: 12px; outline: none; }
+.settings-modal .workspace-backup input::placeholder { color: var(--faint); font-size: 11px; }
+.settings-modal .workspace-backup input:focus-visible { border-color: var(--mint); box-shadow: 0 0 0 2px var(--amber-soft); }
+.workspace-backup-password-wide { grid-column: 1 / -1; }
+.workspace-backup-file { grid-column: 1 / -1; display: grid; gap: 7px; }
+.workspace-backup-file-control { display: flex; align-items: center; gap: 9px; padding: 7px 8px 7px 11px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-soft); color: var(--muted); }
+.workspace-backup-file-control.has-file > svg { color: var(--mint); }
+.settings-modal .workspace-backup .workspace-backup-file-control input { flex: 1; height: 28px; padding: 0; border: 0; background: transparent; text-overflow: ellipsis; font-family: var(--mono); font-size: 11px; }
+.workspace-backup-file small { font-size: 10px; color: var(--muted); }
+.settings-modal .workspace-backup .workspace-backup-helper { display: flex; align-items: flex-start; gap: 7px; grid-column: 1 / -1; font-size: 10px; }
+.workspace-backup-helper svg { flex-shrink: 0; margin-top: 2px; }
+.workspace-backup-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 16px; border-top: 1px solid var(--line); background: var(--panel-soft); }
+.workspace-backup-back { display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 5px 0; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.workspace-backup-back:hover { color: var(--text); }
+.workspace-backup-verified { display: flex; align-items: center; gap: 10px; padding: 16px; color: var(--mint); }
+.workspace-backup-verified p { margin-top: 3px !important; overflow-wrap: anywhere; }
+.workspace-backup-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 0 16px 16px; }
+.workspace-backup-counts > div { display: grid; gap: 4px; padding-left: 10px; border-left: 1px solid var(--line-strong); }
+.workspace-backup-counts strong { color: var(--text); font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.workspace-backup-counts span { color: var(--muted); font-size: 10px; }
+.settings-modal .workspace-backup .workspace-backup-restore-note { padding: 0 16px 14px; font-size: 10px; }
+.settings-modal .workspace-backup .workspace-backup-inline-warning { display: flex; align-items: center; gap: 7px; padding: 0 16px 14px; color: var(--amber); }
+.workspace-backup-feedback { display: flex; align-items: flex-start; gap: 9px; padding: 11px 13px; margin-top: 12px; border: 1px solid var(--line-strong); border-radius: 6px; font-size: 11px; line-height: 1.6; background: var(--panel-soft); }
+.workspace-backup-feedback svg { flex-shrink: 0; margin-top: 1px; }
+.workspace-backup-feedback.success { color: var(--mint); }
+.workspace-backup-feedback.failure { color: var(--coral); }
+.workspace-backup button:disabled { opacity: .45; cursor: default; }
+@media (max-width: 600px) { .workspace-backup-choices, .workspace-backup-form { grid-template-columns: 1fr; } .workspace-backup-card-heading > span { display: none; } .workspace-backup-badge { display: none; } }

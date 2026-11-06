@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import { createTerminalFitScheduler } from '../src/terminal-fit.ts';
+const frames = new Map();
+let id = 0, font = 12, rows = 50, visible = true, disposed = false;
+const calls = [];
+const scheduler = createTerminalFitScheduler(() => { assert(!disposed); if (!visible) return false; rows = Math.floor(600 / font); calls.push('fit'); return true; }, () => calls.push('bottom'), callback => { frames.set(++id, callback); return id; }, key => frames.delete(key));
+const paint = () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback()); };
+font = 17; scheduler.schedule(true);
+assert.equal(rows, 50);
+paint(); assert.equal(rows, 35, 'larger text reduces the row count to fit the host');
+assert.deepEqual(calls, ['fit', 'bottom'], 'follow the prompt after resizing, never before');
+calls.length = 0;
+scheduler.schedule(false); font = 20; scheduler.schedule(false); font = 24;
+assert.equal(frames.size, 1); paint(); assert.equal(rows, 25); assert.deepEqual(calls, ['fit'], 'zooming in scrollback preserves browsing position');
+calls.length = 0; visible = false; scheduler.schedule(true); paint(); assert.deepEqual(calls, []);
+visible = true; scheduler.schedule(true); scheduler.dispose(); disposed = true; paint(); scheduler.schedule(true); assert.equal(frames.size, 0); assert.deepEqual(calls, [], 'closed terminals cannot refit or scroll');

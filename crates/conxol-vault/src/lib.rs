@@ -1,0 +1,1096 @@
+//! Native credential storage kept behind a small Rust-only boundary.
+//!
+//! Session records should store [`CredentialId`] values, never password or key
+//! material. The desktop frontend can ask native code to use a reference, but
+//! it does not receive the secret as part of the normal session snapshot.
+
+use std::collections::BTreeMap;
+use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
+use std::path::{Path, PathBuf};
+
+use aes_gcm::aead::consts::U12;
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
+use argon2::{Algorithm, Argon2, Params, Version};
+use serde::{Deserialize, Serialize};
+use thiserror::Error;
+use uuid::Uuid;
+use zeroize::{Zeroize, Zeroizing};
+
+// Legacy OS keyring namespace intentionally remains stable across the Conxol rename.
+const DEFAULT_SERVICE: &str = "com.othmane.mobarust";
+const PORTABLE_MAGIC: &[u8; 8] = b"MRPVLT01";
+const PORTABLE_SALT_BYTES: usize = 16;
+const PORTABLE_NONCE_BYTES: usize = 12;
+const PORTABLE_KEY_BYTES: usize = 32;
+const PORTABLE_AUTH_TAG_BYTES: usize = 16;
+const PORTABLE_HEADER_BYTES: usize =
+    PORTABLE_MAGIC.len() + PORTABLE_SALT_BYTES + PORTABLE_NONCE_BYTES;
+const PORTABLE_MAX_FILE_BYTES: usize = 8 * 1024 * 1024;
+const PORTABLE_MAX_PLAINTEXT_BYTES: usize =
+    PORTABLE_MAX_FILE_BYTES - PORTABLE_HEADER_BYTES - PORTABLE_AUTH_TAG_BYTES;
+const PORTABLE_MAX_CREDENTIALS: usize = 4096;
+pub const MAX_SECRET_BYTES: usize = 1024 * 1024;
+const PORTABLE_ARGON_MEMORY_KIB: u32 = 64 * 1024;
+const PORTABLE_ARGON_ITERATIONS: u32 = 3;
+const PORTABLE_ARGON_PARALLELISM: u32 = 1;
+
+/// An opaque, non-secret identifier used by a session to refer to vault data.
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct CredentialId(String);
+
+impl CredentialId {
+    /// Validate an identifier before it reaches a platform credential store.
+    pub fn new(value: impl Into<String>) -> Result<Self, VaultError> {
+        let value = value.into();
+        let valid = !value.is_empty()
+            && value.len() <= 128
+            && value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'));
+
+        if !valid {
+            return Err(VaultError::InvalidCredentialId);
+        }
+
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for CredentialId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_tuple("CredentialId")
+            .field(&self.0)
+            .finish()
+    }
+}
+
+impl fmt::Display for CredentialId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(formatter)
+    }
+}
+
+/// Secret material that is scrubbed when the native boundary drops it.
+pub struct SecretMaterial(Zeroizing<String>);
+
+impl SecretMaterial {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(Zeroizing::new(value.into()))
+    }
+
+    /// Adopt a deserialized zeroizing string without creating a second
+    /// plaintext allocation at the native command boundary.
+    pub fn from_zeroizing(value: Zeroizing<String>) -> Self {
+        Self(value)
+    }
+
+    /// Move the owned secret buffer to another native secret boundary without
+    /// cloning its plaintext. The source is left with an empty zeroizing
+    /// buffer before its drop handler runs.
+    pub fn into_zeroizing(mut self) -> Zeroizing<String> {
+        std::mem::replace(&mut self.0, Zeroizing::new(String::new()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SecretMaterial {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("SecretMaterial(<redacted>)")
+    }
+}
+
+impl Drop for SecretMaterial {
+    fn drop(&mut self) {
+        self.0.zeroize();
+    }
+}
+
+#[derive(Error)]
+pub enum VaultError {
+    #[error("credential reference must contain only letters, numbers, '.', '_' or '-'")]
+    InvalidCredentialId,
+    #[error("native credential store error")]
+    Backend(#[from] keyring::Error),
+    #[error("portable vault passphrase cannot be empty")]
+    EmptyPassphrase,
+    #[error("portable vault file is too large")]
+    PortableFileTooLarge,
+    #[error("portable vault contains too many credentials")]
+    PortableCredentialLimit,
+    #[error("portable vault credential secret is too large")]
+    PortableSecretTooLarge,
+    #[error("credential secret is too large")]
+    SecretTooLarge,
+    #[error("portable vault credential is missing: {0}")]
+    PortableCredentialMissing(String),
+    #[error("portable vault passphrase is incorrect or the file is corrupt")]
+    PortableAuthenticationFailed,
+    #[error("portable vault format is invalid")]
+    PortableFormat(String),
+    #[error("portable vault key derivation failed")]
+    PortableKeyDerivation(#[source] argon2::Error),
+    #[error("portable vault encryption failed")]
+    PortableEncryption,
+    #[error("portable vault randomness failed")]
+    PortableRandomness(#[source] getrandom::Error),
+    #[error("portable vault file operation failed")]
+    PortableIo {
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+    #[error("portable vault already exists")]
+    PortableAlreadyExists(PathBuf),
+    #[error("portable vault path is not a regular file")]
+    PortablePathUnsafe(PathBuf),
+    #[error("portable vault state is unavailable")]
+    PortableStateUnavailable(String),
+}
+
+impl VaultError {
+    /// Exact failure category for diagnostics, without backend payloads,
+    /// credential identifiers, stored bytes, or local filesystem paths.
+    pub fn diagnostic_kind(&self) -> &'static str {
+        match self {
+            Self::Backend(error) => match error {
+                keyring::Error::NoEntry => "keyring::Error::NoEntry",
+                keyring::Error::NoStorageAccess(_) => "keyring::Error::NoStorageAccess",
+                keyring::Error::PlatformFailure(_) => "keyring::Error::PlatformFailure",
+                keyring::Error::BadEncoding(_) => "keyring::Error::BadEncoding",
+                keyring::Error::BadDataFormat(_, _) => "keyring::Error::BadDataFormat",
+                keyring::Error::BadStoreFormat(_) => "keyring::Error::BadStoreFormat",
+                keyring::Error::TooLong(_, _) => "keyring::Error::TooLong",
+                keyring::Error::Invalid(_, _) => "keyring::Error::Invalid",
+                keyring::Error::Ambiguous(_) => "keyring::Error::Ambiguous",
+                keyring::Error::NoDefaultStore => "keyring::Error::NoDefaultStore",
+                keyring::Error::NotSupportedByStore(_) => "keyring::Error::NotSupportedByStore",
+                _ => "keyring::Error::<unknown>",
+            },
+            Self::InvalidCredentialId => "VaultError::InvalidCredentialId",
+            Self::PortableCredentialMissing(_) => "VaultError::PortableCredentialMissing",
+            Self::PortableStateUnavailable(_) => "VaultError::PortableStateUnavailable",
+            Self::SecretTooLarge | Self::PortableSecretTooLarge => "VaultError::SecretTooLarge",
+            Self::PortableIo { .. } => "VaultError::PortableIo",
+            _ => "VaultError::<additional details redacted>",
+        }
+    }
+}
+
+impl fmt::Debug for VaultError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Keep structured `?error` logging from exposing paths, backend
+        // diagnostics, or any future detail carried by a String field.
+        write!(formatter, "VaultError({self})")
+    }
+}
+
+/// Access to the platform credential store selected by `keyring`.
+///
+/// On macOS this is Keychain, on Windows Credential Manager, and on supported
+/// Unix desktops Secret Service. Portable encrypted storage is intentionally a
+/// separate backend and is not silently substituted here.
+#[derive(Clone, Debug)]
+pub struct PlatformVault {
+    service: String,
+}
+
+impl Default for PlatformVault {
+    fn default() -> Self {
+        Self::new(DEFAULT_SERVICE)
+    }
+}
+
+impl PlatformVault {
+    pub fn new(service: impl Into<String>) -> Self {
+        Self {
+            service: service.into(),
+        }
+    }
+
+    pub fn put(
+        &self,
+        credential_id: &CredentialId,
+        secret: &SecretMaterial,
+    ) -> Result<(), VaultError> {
+        validate_secret_size(secret)?;
+        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
+        entry.set_password(secret.as_str())?;
+        Ok(())
+    }
+
+    pub fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
+        let value = entry.get_password()?;
+        let secret = SecretMaterial::new(value);
+        validate_secret_size(&secret)?;
+        Ok(secret)
+    }
+
+    pub fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
+        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
+        match entry.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(error) => Err(VaultError::Backend(error)),
+        }
+    }
+
+    /// Enumerate only this application's namespace; never return secret values.
+    pub fn list_ids(&self) -> Result<Vec<String>, VaultError> {
+        self.entry(&CredentialId::new("backup-probe")?)?;
+        #[cfg(windows)]
+        {
+            let pattern = format!(r".*\.{}$", self.service.replace('.', r"\."));
+            let spec = std::collections::HashMap::from([("pattern", pattern.as_str())]);
+            let entries = keyring_core::Entry::search(&spec).map_err(VaultError::Backend)?;
+            let mut ids = Vec::new();
+            for entry in entries {
+                // Legacy Windows targets are `<id>.<service>`. The store's generic
+                // splitter is ambiguous when the service itself contains dots.
+                let attributes = entry.get_attributes().map_err(VaultError::Backend)?;
+                if let Some(id) = attributes
+                    .get("target_name")
+                    .and_then(|target| target.strip_suffix(&format!(".{}", self.service)))
+                    && CredentialId::new(id).is_ok()
+                {
+                    ids.push(id.to_owned());
+                }
+            }
+            Ok(ids)
+        }
+        #[cfg(not(windows))]
+        {
+            Ok(Vec::new())
+        }
+    }
+
+    /// Check whether the platform store can be constructed without retrieving
+    /// any user credential. This deliberately does not expose a secret.
+    pub fn entry(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
+        let _entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
+        Ok(())
+    }
+}
+
+/// A narrowly-scoped interface that keeps vault access mockable in higher
+/// layers without making the frontend aware of platform credential APIs.
+pub trait CredentialStore {
+    fn put(&self, credential_id: &CredentialId, secret: &SecretMaterial) -> Result<(), VaultError>;
+    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError>;
+    fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError>;
+}
+
+/// Read-only credential lookup used by native protocol adapters. Keeping this
+/// trait separate lets an explicitly unlocked portable vault participate in a
+/// connection without widening the frontend IPC surface.
+pub trait CredentialLookup: Send + Sync {
+    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError>;
+}
+
+impl CredentialStore for PlatformVault {
+    fn put(&self, credential_id: &CredentialId, secret: &SecretMaterial) -> Result<(), VaultError> {
+        Self::put(self, credential_id, secret)
+    }
+
+    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        Self::get(self, credential_id)
+    }
+
+    fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
+        Self::delete(self, credential_id)
+    }
+}
+
+impl CredentialLookup for PlatformVault {
+    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        Self::get(self, credential_id)
+    }
+}
+
+impl CredentialLookup for PortableVault {
+    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        Self::get(self, credential_id)
+    }
+}
+
+/// Convert an owned secret to a zeroizing temporary for a native operation.
+pub fn zeroizing_secret(value: String) -> Zeroizing<String> {
+    Zeroizing::new(value)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PortablePayload {
+    schema_version: u32,
+    credentials: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Serialize)]
+struct PortablePayloadRef<'a> {
+    schema_version: u32,
+    credentials: BTreeMap<&'a str, &'a str>,
+}
+
+impl Drop for PortablePayload {
+    fn drop(&mut self) {
+        for secret in self.credentials.values_mut() {
+            secret.zeroize();
+        }
+    }
+}
+
+/// An explicitly unlocked, encrypted vault for portable distributions.
+///
+/// The file is AES-256-GCM authenticated encryption with an Argon2id-derived
+/// key. The passphrase is never written to disk and the derived key is
+/// zeroized when this value is dropped. This backend is intentionally not
+/// substituted for the platform vault; callers must opt into unlock and
+/// handle the locked/unlocked lifecycle explicitly.
+pub struct PortableVault {
+    path: PathBuf,
+    salt: [u8; PORTABLE_SALT_BYTES],
+    key: Zeroizing<[u8; PORTABLE_KEY_BYTES]>,
+    entries: BTreeMap<String, SecretMaterial>,
+}
+
+impl fmt::Debug for PortableVault {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PortableVault")
+            .field("path", &"<redacted>")
+            .field("credential_count", &self.entries.len())
+            .finish()
+    }
+}
+
+impl PortableVault {
+    /// Create a new encrypted portable vault. Existing files are never
+    /// overwritten by this constructor.
+    pub fn create(
+        path: impl Into<PathBuf>,
+        passphrase: &SecretMaterial,
+    ) -> Result<Self, VaultError> {
+        let path = path.into();
+        if ensure_portable_path_is_safe(&path, true)? {
+            return Err(VaultError::PortableAlreadyExists(path));
+        }
+        let salt = random_bytes::<PORTABLE_SALT_BYTES>()?;
+        let key = derive_portable_key(passphrase, &salt)?;
+        let vault = Self {
+            path,
+            salt,
+            key,
+            entries: BTreeMap::new(),
+        };
+        vault.persist()?;
+        Ok(vault)
+    }
+
+    /// Unlock an existing portable vault. Authentication failures do not
+    /// distinguish a wrong passphrase from tampered ciphertext.
+    pub fn open(path: impl Into<PathBuf>, passphrase: &SecretMaterial) -> Result<Self, VaultError> {
+        let path = path.into();
+        ensure_portable_path_is_safe(&path, false)?;
+        let bytes = read_portable_file(&path)?;
+        if bytes.len() < PORTABLE_HEADER_BYTES {
+            return Err(VaultError::PortableFormat("header is truncated".into()));
+        }
+        if &bytes[..PORTABLE_MAGIC.len()] != PORTABLE_MAGIC {
+            return Err(VaultError::PortableFormat("magic is invalid".into()));
+        }
+        let mut salt = [0_u8; PORTABLE_SALT_BYTES];
+        let salt_start = PORTABLE_MAGIC.len();
+        salt.copy_from_slice(&bytes[salt_start..salt_start + PORTABLE_SALT_BYTES]);
+        let nonce_start = salt_start + PORTABLE_SALT_BYTES;
+        let nonce = &bytes[nonce_start..PORTABLE_HEADER_BYTES];
+        let key = derive_portable_key(passphrase, &salt)?;
+        let cipher = cipher_from_key(&key)?;
+        let nonce = Nonce::<U12>::try_from(nonce)
+            .map_err(|_| VaultError::PortableFormat("nonce is invalid".into()))?;
+        let plaintext = cipher
+            .decrypt(&nonce, &bytes[PORTABLE_HEADER_BYTES..])
+            .map(Zeroizing::new)
+            .map_err(|_| VaultError::PortableAuthenticationFailed)?;
+        let entries = decode_portable_entries(&plaintext)?;
+        Ok(Self {
+            path,
+            salt,
+            key,
+            entries,
+        })
+    }
+
+    pub fn list_ids(&self) -> Vec<String> {
+        self.entries.keys().cloned().collect()
+    }
+
+    pub fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        self.entries
+            .get(credential_id.as_str())
+            .map(|secret| SecretMaterial::new(secret.as_str()))
+            .ok_or_else(|| VaultError::PortableCredentialMissing(credential_id.to_string()))
+    }
+
+    pub fn put(
+        &mut self,
+        credential_id: &CredentialId,
+        secret: SecretMaterial,
+    ) -> Result<(), VaultError> {
+        validate_portable_secret(&secret)?;
+        let key = credential_id.as_str().to_owned();
+        let previous = self.entries.insert(key.clone(), secret);
+        if let Err(error) = self.persist() {
+            match previous {
+                Some(value) => {
+                    self.entries.insert(key, value);
+                }
+                None => {
+                    self.entries.remove(&key);
+                }
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    pub fn delete(&mut self, credential_id: &CredentialId) -> Result<bool, VaultError> {
+        let key = credential_id.as_str().to_owned();
+        let Some(previous) = self.entries.remove(&key) else {
+            return Ok(false);
+        };
+        if let Err(error) = self.persist() {
+            self.entries.insert(key, previous);
+            return Err(error);
+        }
+        Ok(true)
+    }
+
+    fn persist(&self) -> Result<(), VaultError> {
+        if self.entries.len() > PORTABLE_MAX_CREDENTIALS {
+            return Err(VaultError::PortableCredentialLimit);
+        }
+        for secret in self.entries.values() {
+            validate_portable_secret(secret)?;
+        }
+        // Serialize borrowed views of the in-memory entries. Building an
+        // owned payload here would create a second plaintext String for every
+        // credential before the zeroizing ciphertext buffer is produced.
+        let payload = PortablePayloadRef {
+            schema_version: 1,
+            credentials: self
+                .entries
+                .iter()
+                .map(|(id, secret)| (id.as_str(), secret.as_str()))
+                .collect(),
+        };
+        let plaintext = Zeroizing::new(
+            serde_json::to_vec(&payload)
+                .map_err(|error| VaultError::PortableFormat(error.to_string()))?,
+        );
+        if plaintext.len() > PORTABLE_MAX_PLAINTEXT_BYTES {
+            return Err(VaultError::PortableFileTooLarge);
+        }
+
+        let nonce = random_bytes::<PORTABLE_NONCE_BYTES>()?;
+        let cipher = cipher_from_key(&self.key)?;
+        let nonce = Nonce::<U12>::try_from(nonce.as_slice())
+            .map_err(|_| VaultError::PortableFormat("nonce is invalid".into()))?;
+        let ciphertext = cipher
+            .encrypt(&nonce, plaintext.as_ref())
+            .map_err(|_| VaultError::PortableEncryption)?;
+        let mut file = Vec::with_capacity(PORTABLE_HEADER_BYTES + ciphertext.len());
+        file.extend_from_slice(PORTABLE_MAGIC);
+        file.extend_from_slice(&self.salt);
+        file.extend_from_slice(&nonce);
+        file.extend_from_slice(&ciphertext);
+        atomic_write_private(&self.path, &file)
+    }
+}
+
+fn validate_portable_secret(secret: &SecretMaterial) -> Result<(), VaultError> {
+    if secret.as_str().is_empty() {
+        return Err(VaultError::EmptyPassphrase);
+    }
+    if secret.as_str().len() > MAX_SECRET_BYTES {
+        return Err(VaultError::PortableSecretTooLarge);
+    }
+    Ok(())
+}
+
+fn validate_secret_size(secret: &SecretMaterial) -> Result<(), VaultError> {
+    if secret.as_str().len() > MAX_SECRET_BYTES {
+        return Err(VaultError::SecretTooLarge);
+    }
+    Ok(())
+}
+
+/// A versioned, bounded workspace archive. The format has fixed KDF parameters;
+/// untrusted input cannot select an excessive memory or iteration count.
+pub const MAX_BACKUP_BYTES: usize = 64 * 1024 * 1024;
+const BACKUP_MAGIC: &[u8; 8] = b"CXBKP001";
+pub fn encrypt_workspace_backup(
+    plaintext: &[u8],
+    passphrase: &SecretMaterial,
+) -> Result<Vec<u8>, VaultError> {
+    if plaintext.len() > MAX_BACKUP_BYTES {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+    if passphrase.as_str().chars().count() < 8 || passphrase.as_str().len() > 1024 {
+        return Err(VaultError::PortableFormat(
+            "Use a backup password of 8–1024 bytes.".into(),
+        ));
+    }
+    let salt = random_bytes::<16>()?;
+    let nonce_bytes = random_bytes::<12>()?;
+    let key = derive_portable_key(passphrase, &salt)?;
+    let nonce = Nonce::<U12>::try_from(nonce_bytes.as_slice())
+        .map_err(|_| VaultError::PortableEncryption)?;
+    let encrypted = cipher_from_key(&key)?
+        .encrypt(
+            &nonce,
+            aes_gcm::aead::Payload {
+                msg: plaintext,
+                aad: BACKUP_MAGIC,
+            },
+        )
+        .map_err(|_| VaultError::PortableEncryption)?;
+    let mut bytes = Vec::with_capacity(36 + encrypted.len());
+    bytes.extend_from_slice(BACKUP_MAGIC);
+    bytes.extend_from_slice(&salt);
+    bytes.extend_from_slice(&nonce_bytes);
+    bytes.extend_from_slice(&encrypted);
+    Ok(bytes)
+}
+pub fn decrypt_workspace_backup(
+    bytes: &[u8],
+    passphrase: &SecretMaterial,
+) -> Result<Zeroizing<Vec<u8>>, VaultError> {
+    if bytes.len() > MAX_BACKUP_BYTES + 52 {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+    if bytes.len() < 52 || &bytes[..8] != BACKUP_MAGIC {
+        return Err(VaultError::PortableFormat(
+            "Not a supported Conxol workspace backup.".into(),
+        ));
+    }
+    if passphrase.as_str().chars().count() < 8 || passphrase.as_str().len() > 1024 {
+        return Err(VaultError::PortableAuthenticationFailed);
+    }
+    let mut salt = [0u8; 16];
+    salt.copy_from_slice(&bytes[8..24]);
+    let key = derive_portable_key(passphrase, &salt)?;
+    let nonce = Nonce::<U12>::try_from(&bytes[24..36])
+        .map_err(|_| VaultError::PortableAuthenticationFailed)?;
+    cipher_from_key(&key)?
+        .decrypt(
+            &nonce,
+            aes_gcm::aead::Payload {
+                msg: &bytes[36..],
+                aad: BACKUP_MAGIC,
+            },
+        )
+        .map(Zeroizing::new)
+        .map_err(|_| VaultError::PortableAuthenticationFailed)
+}
+
+fn derive_portable_key(
+    passphrase: &SecretMaterial,
+    salt: &[u8; PORTABLE_SALT_BYTES],
+) -> Result<Zeroizing<[u8; PORTABLE_KEY_BYTES]>, VaultError> {
+    if passphrase.as_str().is_empty() {
+        return Err(VaultError::EmptyPassphrase);
+    }
+    validate_secret_size(passphrase)?;
+    let params = Params::new(
+        PORTABLE_ARGON_MEMORY_KIB,
+        PORTABLE_ARGON_ITERATIONS,
+        PORTABLE_ARGON_PARALLELISM,
+        Some(PORTABLE_KEY_BYTES),
+    )
+    .map_err(VaultError::PortableKeyDerivation)?;
+    let argon = Argon2::new(Algorithm::Argon2id, Version::V0x13, params);
+    let mut key = Zeroizing::new([0_u8; PORTABLE_KEY_BYTES]);
+    argon
+        .hash_password_into(passphrase.as_str().as_bytes(), salt, key.as_mut())
+        .map_err(VaultError::PortableKeyDerivation)?;
+    Ok(key)
+}
+
+fn cipher_from_key(key: &[u8; PORTABLE_KEY_BYTES]) -> Result<Aes256Gcm, VaultError> {
+    let key = Key::<Aes256Gcm>::try_from(key.as_slice())
+        .map_err(|_| VaultError::PortableFormat("key length is invalid".into()))?;
+    Ok(Aes256Gcm::new(&key))
+}
+
+fn decode_portable_entries(
+    plaintext: &[u8],
+) -> Result<BTreeMap<String, SecretMaterial>, VaultError> {
+    let mut payload: PortablePayload = serde_json::from_slice(plaintext)
+        .map_err(|error| VaultError::PortableFormat(error.to_string()))?;
+    let schema_version = payload.schema_version;
+    let credentials = std::mem::take(&mut payload.credentials);
+    if schema_version != 1 {
+        return Err(VaultError::PortableFormat(
+            "unsupported schema version".into(),
+        ));
+    }
+    if credentials.len() > PORTABLE_MAX_CREDENTIALS {
+        return Err(VaultError::PortableCredentialLimit);
+    }
+    let mut entries = BTreeMap::new();
+    for (id, secret) in credentials {
+        // Take ownership of the deserialized secret under a zeroizing guard
+        // before validating the unrelated identifier. Otherwise an invalid
+        // ID could make this String leave the loop through `?` un scrubbed.
+        let secret = SecretMaterial::from_zeroizing(Zeroizing::new(secret));
+        let credential_id = CredentialId::new(id)?;
+        validate_portable_secret(&secret)?;
+        entries.insert(credential_id.to_string(), secret);
+    }
+    Ok(entries)
+}
+
+fn random_bytes<const N: usize>() -> Result<[u8; N], VaultError> {
+    let mut bytes = [0_u8; N];
+    getrandom::fill(&mut bytes).map_err(VaultError::PortableRandomness)?;
+    Ok(bytes)
+}
+
+/// Read an application-controlled vault through a bounded file handle. The
+/// size check must happen before allocating a buffer from an untrusted file's
+/// reported length; otherwise a hostile portable file can turn an input limit
+/// into an allocation-after-read denial of service.
+fn read_portable_file(path: &Path) -> Result<Vec<u8>, VaultError> {
+    let file = open_portable_file(path).map_err(|source| VaultError::PortableIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let metadata = file.metadata().map_err(|source| VaultError::PortableIo {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(VaultError::PortablePathUnsafe(path.to_path_buf()));
+    }
+    if metadata.len() > PORTABLE_MAX_FILE_BYTES as u64 {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(PORTABLE_MAX_FILE_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|source| VaultError::PortableIo {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if bytes.len() > PORTABLE_MAX_FILE_BYTES {
+        return Err(VaultError::PortableFileTooLarge);
+    }
+    Ok(bytes)
+}
+
+#[cfg(unix)]
+fn open_portable_file(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let mut options = OpenOptions::new();
+    options
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    options.open(path)
+}
+
+#[cfg(not(unix))]
+fn open_portable_file(path: &Path) -> io::Result<fs::File> {
+    fs::File::open(path)
+}
+
+fn atomic_write_private(path: &Path, bytes: &[u8]) -> Result<(), VaultError> {
+    ensure_portable_path_is_safe(path, true)?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|source| VaultError::PortableIo {
+        path: parent.to_path_buf(),
+        source,
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("portable-vault.bin");
+    let temporary_path = parent.join(format!(".{file_name}.{}.tmp", Uuid::new_v4()));
+    let mut options = OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut temporary = options
+        .open(&temporary_path)
+        .map_err(|source| VaultError::PortableIo {
+            path: temporary_path.clone(),
+            source,
+        })?;
+    let write_result = (|| -> io::Result<()> {
+        temporary.write_all(bytes)?;
+        temporary.sync_all()?;
+        drop(temporary);
+        #[cfg(windows)]
+        {
+            use std::os::windows::ffi::OsStrExt;
+            use windows_sys::Win32::Storage::FileSystem::{
+                MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
+            };
+
+            let temporary = temporary_path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let destination = path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let flags = MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH;
+            if unsafe { MoveFileExW(temporary.as_ptr(), destination.as_ptr(), flags) } == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        }
+
+        #[cfg(not(windows))]
+        {
+            fs::rename(&temporary_path, path)
+        }
+    })();
+    if let Err(source) = write_result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(VaultError::PortableIo {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+/// The vault path is application-controlled, but a hostile local process or a
+/// malformed portable directory must not redirect reads/writes through a
+/// symlink or a directory. The final rename remains atomic for regular files.
+fn ensure_portable_path_is_safe(path: &Path, allow_missing: bool) -> Result<bool, VaultError> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.file_type().is_file() {
+                return Err(VaultError::PortablePathUnsafe(path.to_path_buf()));
+            }
+            Ok(true)
+        }
+        Err(source) if source.kind() == io::ErrorKind::NotFound && allow_missing => Ok(false),
+        Err(source) => Err(VaultError::PortableIo {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CredentialId, MAX_SECRET_BYTES, PlatformVault, PortableVault, SecretMaterial, VaultError,
+        decode_portable_entries, validate_secret_size,
+    };
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn credential_ids_are_strict_and_non_secret() {
+        assert!(CredentialId::new("session-01-password").is_ok());
+        assert!(CredentialId::new("session/01").is_err());
+        assert!(CredentialId::new("").is_err());
+        assert!(CredentialId::new("password=secret").is_err());
+    }
+
+    #[test]
+    fn secret_debug_is_redacted() {
+        let secret = SecretMaterial::new("do-not-log-this");
+        assert_eq!(format!("{secret:?}"), "SecretMaterial(<redacted>)");
+    }
+
+    #[test]
+    fn vault_errors_redact_paths_and_backend_details_from_display() {
+        let private_path = std::path::PathBuf::from("/Users/example/.ssh/private-key");
+        let errors = [
+            VaultError::PortableFormat(format!("parser saw {private_path:?}")),
+            VaultError::PortableIo {
+                path: private_path.clone(),
+                source: std::io::Error::other(format!("raw OS detail at {private_path:?}")),
+            },
+            VaultError::PortableAlreadyExists(private_path.clone()),
+            VaultError::PortablePathUnsafe(private_path.clone()),
+            VaultError::PortableStateUnavailable(format!("backend detail at {private_path:?}")),
+        ];
+
+        for error in errors {
+            let display = error.to_string();
+            let debug = format!("{error:?}");
+            assert!(!display.contains(private_path.to_string_lossy().as_ref()));
+            assert!(!display.contains("raw OS detail"));
+            assert!(!display.contains("backend detail"));
+            assert!(!display.contains("private-key"));
+            assert!(!debug.contains(private_path.to_string_lossy().as_ref()));
+            assert!(!debug.contains("raw OS detail"));
+            assert!(!debug.contains("backend detail"));
+            assert!(!debug.contains("private-key"));
+        }
+
+        let error = VaultError::PortableIo {
+            path: private_path,
+            source: std::io::Error::other("fixture OS detail"),
+        };
+        assert!(std::error::Error::source(&error).is_some());
+    }
+
+    #[test]
+    fn secret_material_can_move_its_owned_buffer_without_cloning() {
+        let secret =
+            SecretMaterial::from_zeroizing(zeroize::Zeroizing::new("fixture-secret".to_owned()));
+        let moved = secret.into_zeroizing();
+
+        assert_eq!(&*moved, "fixture-secret");
+    }
+
+    #[test]
+    fn secret_material_has_a_bounded_native_size() {
+        let oversized = SecretMaterial::new("s".repeat(MAX_SECRET_BYTES + 1));
+        assert!(matches!(
+            validate_secret_size(&oversized),
+            Err(VaultError::SecretTooLarge)
+        ));
+    }
+
+    #[test]
+    fn portable_vault_rejects_an_oversized_passphrase_before_derivation() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        let passphrase = SecretMaterial::new("p".repeat(MAX_SECRET_BYTES + 1));
+
+        assert!(matches!(
+            PortableVault::create(&path, &passphrase),
+            Err(VaultError::SecretTooLarge)
+        ));
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn portable_vault_rejects_an_oversized_file_before_reading_it() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        let file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.set_len(super::PORTABLE_MAX_FILE_BYTES as u64 + 1)
+            .unwrap();
+
+        assert!(matches!(
+            PortableVault::open(&path, &SecretMaterial::new("fixture-passphrase")),
+            Err(VaultError::PortableFileTooLarge)
+        ));
+    }
+
+    #[test]
+    fn portable_vault_reserves_authentication_tag_space_in_file_limit() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        let mut vault =
+            PortableVault::create(&path, &SecretMaterial::new("fixture-passphrase")).unwrap();
+
+        for index in 0..8 {
+            vault.entries.insert(
+                format!("fixture-{index}"),
+                SecretMaterial::new("s".repeat(MAX_SECRET_BYTES)),
+            );
+        }
+
+        assert!(matches!(
+            vault.persist(),
+            Err(VaultError::PortableFileTooLarge)
+        ));
+        assert!(fs::metadata(&path).unwrap().len() <= super::PORTABLE_MAX_FILE_BYTES as u64);
+    }
+
+    #[test]
+    fn default_vault_has_stable_service_namespace() {
+        assert_eq!(
+            format!("{:?}", PlatformVault::default()),
+            "PlatformVault { service: \"com.othmane.mobarust\" }"
+        );
+    }
+
+    #[test]
+    fn portable_vault_encrypts_and_round_trips_without_system_credentials() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        let passphrase = SecretMaterial::new("fixture-passphrase");
+        let credential_id = CredentialId::new("fixture-password").unwrap();
+        let secret_value = "fixture-only-secret";
+
+        let mut vault = PortableVault::create(&path, &passphrase).unwrap();
+        let debug = format!("{vault:?}");
+        assert!(!debug.contains(path.to_string_lossy().as_ref()));
+        assert!(debug.contains("<redacted>"));
+        vault
+            .put(&credential_id, SecretMaterial::new(secret_value))
+            .unwrap();
+        assert_eq!(vault.list_ids(), vec!["fixture-password"]);
+        drop(vault);
+
+        let bytes = fs::read(&path).unwrap();
+        assert!(
+            !bytes
+                .windows(secret_value.len())
+                .any(|window| window == secret_value.as_bytes())
+        );
+        assert!(
+            !bytes
+                .windows(passphrase.as_str().len())
+                .any(|window| window == passphrase.as_str().as_bytes())
+        );
+
+        let vault = PortableVault::open(&path, &passphrase).unwrap();
+        assert_eq!(vault.get(&credential_id).unwrap().as_str(), secret_value);
+        assert!(matches!(
+            PortableVault::open(&path, &SecretMaterial::new("wrong-passphrase")),
+            Err(VaultError::PortableAuthenticationFailed)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_vault_file_is_owner_read_write_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        PortableVault::create(&path, &SecretMaterial::new("fixture-passphrase")).unwrap();
+
+        let mode = fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn portable_vault_rejects_tampering_and_preserves_delete_semantics() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        let passphrase = SecretMaterial::new("fixture-passphrase");
+        let credential_id = CredentialId::new("fixture-token").unwrap();
+        let mut vault = PortableVault::create(&path, &passphrase).unwrap();
+        vault
+            .put(&credential_id, SecretMaterial::new("token-value"))
+            .unwrap();
+        assert!(vault.delete(&credential_id).unwrap());
+        assert!(!vault.delete(&credential_id).unwrap());
+        drop(vault);
+
+        let mut bytes = fs::read(&path).unwrap();
+        let last = bytes.last_mut().unwrap();
+        *last ^= 0x01;
+        fs::write(&path, bytes).unwrap();
+        assert!(matches!(
+            PortableVault::open(&path, &passphrase),
+            Err(VaultError::PortableAuthenticationFailed)
+        ));
+    }
+
+    #[test]
+    fn portable_vault_rejects_a_directory_path() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("portable-vault.bin");
+        fs::create_dir(&path).unwrap();
+
+        assert!(matches!(
+            PortableVault::create(&path, &SecretMaterial::new("fixture-passphrase")),
+            Err(VaultError::PortablePathUnsafe(rejected)) if rejected == path
+        ));
+    }
+
+    #[test]
+    fn portable_decoder_rejects_invalid_ids_after_adopting_zeroizing_secrets() {
+        let plaintext = br#"{"schema_version":1,"credentials":{"invalid/id":"fixture-secret"}}"#;
+
+        assert!(matches!(
+            decode_portable_entries(plaintext),
+            Err(VaultError::InvalidCredentialId)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn portable_vault_rejects_symlink_paths_without_touching_the_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempdir().unwrap();
+        let target = directory.path().join("target.bin");
+        let path = directory.path().join("portable-vault.bin");
+        let original = b"fixture target must remain unchanged";
+        fs::write(&target, original).unwrap();
+        symlink(&target, &path).unwrap();
+
+        assert!(matches!(
+            PortableVault::create(&path, &SecretMaterial::new("fixture-passphrase")),
+            Err(VaultError::PortablePathUnsafe(rejected)) if rejected == path
+        ));
+        assert!(matches!(
+            PortableVault::open(&path, &SecretMaterial::new("fixture-passphrase")),
+            Err(VaultError::PortablePathUnsafe(rejected)) if rejected == path
+        ));
+        assert_eq!(fs::read(&target).unwrap(), original);
+    }
+}
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn diagnostic_error_kind_keeps_categories_without_credential_bytes() {
+        let cases = [
+            (
+                VaultError::Backend(keyring::Error::NoEntry),
+                "keyring::Error::NoEntry",
+            ),
+            (
+                VaultError::Backend(keyring::Error::BadEncoding(
+                    b"fixture-secret-password".to_vec(),
+                )),
+                "keyring::Error::BadEncoding",
+            ),
+            (
+                VaultError::Backend(keyring::Error::Invalid(
+                    "fixture-user".into(),
+                    "fixture-secret-password".into(),
+                )),
+                "keyring::Error::Invalid",
+            ),
+            (
+                VaultError::PortableCredentialMissing("fixture-credential-id".into()),
+                "VaultError::PortableCredentialMissing",
+            ),
+            (
+                VaultError::PortableIo {
+                    path: PathBuf::from("C:/fixture/private-key"),
+                    source: io::Error::other("fixture-secret-password"),
+                },
+                "VaultError::PortableIo",
+            ),
+        ];
+        for (error, expected) in cases {
+            assert_eq!(error.diagnostic_kind(), expected);
+        }
+    }
+}

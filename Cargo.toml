@@ -1,0 +1,45 @@
+[workspace]
+members = [
+  "benchmarks",
+  "crates/conxol-core",
+  "crates/conxol-ssh",
+  "crates/conxol-store",
+  "crates/conxol-vault",
+  "crates/conxol-remote-desktop",
+  "crates/conxol-telnet",
+  "crates/conxol-serial",
+  "crates/conxol-network",
+  "apps/desktop/src-tauri",
+  "xtask",
+]
+exclude = ["vendor/russh", "vendor/russh-sftp"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.53"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/OthmaneBlial/MobaRust"
+rust-version = "1.90"
+
+[workspace.dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+thiserror = "2.0"
+uuid = { version = "1.18", features = ["serde", "v4"] }
+anyhow = "1.0"
+encoding_rs = "0.8"
+libc = "0.2"
+# Keep RSA private-key operations disabled for RUSTSEC-2023-0071.
+# RSA-SHA2 server signatures are verified using AWS-LC public-key operations
+# in the local vendor patch; Ed25519/ECDSA remain enabled.
+# Local packet-reader correction: vendor/russh/CONXOL_PATCH.md.
+russh = { path = "vendor/russh", version = "0.63.3", default-features = false, features = ["aws-lc-rs", "flate2"] }
+# Enforce inbound packet limits: vendor/russh-sftp/CONXOL_PATCH.md.
+russh-sftp = { path = "vendor/russh-sftp", version = "2.4.0" }
+serialport = { version = "4.7", default-features = false }
+tokio = { version = "1.47", features = ["fs", "io-util", "macros", "net", "process", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+zeroize = "1.8"

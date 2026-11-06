@@ -1,0 +1,86 @@
+# Repository-local russh patch
+
+Baseline: [russh 0.63.3](https://github.com/Eugeny/russh/releases/tag/v0.63.3),
+crates.io archive SHA-256
+`036204edbd199552a5b3832f63c60dcdf395dc44c7f06b4af1c0e8139cc11bce`.
+Packaged source commit: `f33baf439be8c59c49cb6cb2ae5976c579495bdf`.
+Apache-2.0; original source headers and README remain. The archive omits its
+license file, so this copy includes the canonical Apache-2.0 text.
+
+The keyboard-interactive handler previously awaited an application response
+inside the packet reader. A user leaving the dialogue unanswered therefore
+prevented peer disconnects from being processed. The local change returns to
+the packet loop immediately and handles answers through `Session::handle_msg`.
+One pending flag refuses overlapping challenges, new authentication during a
+challenge and unsolicited answers; terminal authentication results clear it.
+`client_send_auth_response` is visible to its parent module for that route.
+
+Regression: `cargo test --locked -p conxol-ssh --test authentication`.
+It includes a real loopback peer disconnect while a responder never completes,
+requiring cancellation within one second and no response packet. Multi-round
+and distinct password/OTP cases exercise normal answer delivery. No upstream
+fix or upstream test-suite result is claimed. Remove this local copy when an
+upstream release fixes the same behavior and these regressions pass unchanged.
+
+The client packet loop also selects pending writes alongside reads. Awaiting
+the entire flush previously stalled concurrent large PTY/SFTP streams over
+two nested jump channels. Further application output stays in bounded queues
+while a flush is pending; unsent replies exceeding twice the configured receive
+window are refused. `src/sshbuffer.rs` retains a partial-write cursor across
+select turns, so resuming a flush cannot duplicate its ciphertext prefix.
+Sent-prefix compaction occurs after at least half the buffer has been written.
+Final disconnect retains a final flush. Regression and limits:
+[8 MiB concurrent IPv6/OpenSSH streams](../../docs/testing/routed-ipv6-streams.md),
+run with `cargo xtask test-ssh` and `cargo xtask check`. Remove these changes only
+when the concurrent stream and existing authentication regressions pass with
+an upstream replacement.
+
+The client handle additionally owns an `AbortHandle` for its packet task.
+`abort_transport` wakes an existing `Abortable` wrapper and drops the owned
+transport when that task is polled, without queuing a disconnect behind
+ordinary protocol messages. Conxol uses this only when a remote-forward
+approval or revocation is unconfirmed: dropping a polled request, exceeding
+its deadline, malformed allocation or failed revocation retires that SSH
+connection. Confirmed forwarding and explicit approval refusal preserve the
+transport. Loopback regression: `cargo test --locked -p conxol-ssh --test forwarding`.
+No upstream equivalent or upstream test-suite result is claimed.
+
+The workspace excludes this dependency from its own test targets, and its
+library test/doctest targets are disabled in the local manifest. Upstream
+examples, benchmarks, external tests, development dependencies, library/client
+test modules, key format fixtures, inline key fixtures and the key-bearing documentation
+example are omitted; production code is otherwise unchanged except for the
+client/packet-writer changes above. Conxol generates test credentials in memory. Remaining
+inline upstream tests are not executed as workspace tests.
+
+`src/keys/format/mod.rs` retains upstream PEM delimiter literals. Its exact
+unmodified SHA-256 is
+`7ca4a796a523df1063f0ea0bac1b6d869288dd100d041a6455f8bd7d73b15678`.
+The pre-push audit permits markers only in those exact indexed bytes; edited
+parser bytes or markers in any other indexed file are refused. No private-key
+fixture is included. The root dependency retains `default-features = false`
+and enables only `aws-lc-rs` and `flate2`; RSA remains disabled.
+
+## RSA-SHA2 server verification through AWS-LC
+
+`keys::key::verify_server_signature` verifies RSA-SHA2 server exchange
+signatures with the already enabled AWS-LC backend's public-key-only
+`RsaPublicKeyComponents` verifier (2048–8192 bits). The client KEX path calls
+it with the negotiated algorithm; SHA-1 and mismatched signature algorithms
+are rejected. Other host key types retain the existing verifier.
+
+This does not enable the `rsa` feature, RSA private-key loading/signing, or
+the RustCrypto RSA dependency gated by RUSTSEC-2023-0071. Conxol excludes
+legacy ssh-rsa/SHA-1 from its advertised host algorithms. Host-key approval
+and exact fingerprint matching remain required for authenticated sessions.
+
+Regression: `cargo test --locked -p conxol-ssh --lib --test rsa_host_signature`.
+Synthetic OpenSSL-generated public-key/signature vectors cover RSA-SHA256,
+RSA-SHA512, modified messages/signatures, algorithm mismatches, and SHA-1
+refusal. No fixture private key is retained. No upstream result is claimed.
+
+## PKCS#5 feature-gated local variable
+
+`src/keys/format/pkcs5.rs` names its decrypted key buffer `_sec` because its
+consumer is compiled only with the disabled `rsa` feature. This suppresses the
+unused-variable warning without changing decryption or key-support behavior.

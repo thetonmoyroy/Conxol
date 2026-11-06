@@ -1,0 +1,70 @@
+# Research corpus: never commit cloned reference projects.
+base/
+
+# Rust
+target/
+fuzz/artifacts/
+fuzz/corpus/
+# Frontend
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Desktop artifacts
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+apps/desktop/src-tauri/helpers/
+apps/desktop/src-tauri/icons/*.icns
+apps/desktop/src-tauri/icons/*.ico
+apps/desktop/src-tauri/icons/*.png
+!apps/desktop/src-tauri/icons/icon.png
+!apps/desktop/src-tauri/icons/icon.ico
+
+# Local state and secrets
+.env
+.env.*
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.session
+*.pem
+*.key
+*.p12
+*.pfx
+*.vault
+credentials/
+secrets/
+
+# OS and editor noise
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
+
+# Local AI assistant instructions and state
+AGENT.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.codex/
+.claude/
+.cursor/
+.aider*
+.windsurf/
+.windsurfrules
+.cursorrules
+.cursorignore
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.openai/
+
+# Local publishing exports and audit scratch files
+/landing-conxol/
+/artifacts/*.tar.gz
+/artifacts/*audit*.txt
+/artifacts/

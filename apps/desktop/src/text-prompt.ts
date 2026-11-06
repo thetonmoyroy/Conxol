@@ -1,0 +1,119 @@
+let pending: HTMLDialogElement | null = null;
+
+// WebKit desktop runtimes do not implement window.prompt. HTML dialogs also
+// provide native focus containment, an inert background, and Escape cancellation.
+export function promptText(message: string, initialValue = "", options: { multiline?: boolean; readOnly?: boolean; secret?: boolean; signal?: AbortSignal } = {}): Promise<string | null> {
+  return openDialogue(message, initialValue, options);
+}
+
+export async function confirmAction(message: string, options: { title?: string; acceptLabel?: string } = {}): Promise<boolean> {
+  return await openDialogue(message, undefined, options) !== null;
+}
+
+/** Review configured shell input before opening a local or SSH session. */
+export async function confirmSessionStartup(command: string | undefined, destination: string, reconnect = false, stillAllowed: () => boolean = () => true): Promise<boolean> {
+  if (!stillAllowed()) return false;
+  if (command?.trim() && await openDialogue(`Send this profile's startup command to ${destination}?${reconnect ? " It will also run again after automatic SSH reconnects." : ""}`, undefined, { reviewText: command }) === null) return false;
+  return stillAllowed();
+}
+
+/** Cancel/closing returns null; create-only is an explicit, distinct choice. */
+export async function chooseOverwrite(message: string): Promise<boolean | null> {
+  const choice = await openDialogue(message, undefined, { createOnly: true });
+  return choice === null ? null : choice === "yes";
+}
+
+function openDialogue(message: string, initialValue: string | undefined, options: { multiline?: boolean; readOnly?: boolean; createOnly?: boolean; secret?: boolean; signal?: AbortSignal; reviewText?: string; title?: string; acceptLabel?: string } = {}): Promise<string | null> {
+  if (document.documentElement.dataset.workspaceLocked === "true" || pending || options.signal?.aborted) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const dialog = document.createElement("dialog");
+    pending = dialog;
+    dialog.className = "quick-connect text-prompt";
+    dialog.setAttribute("aria-label", message);
+    // Only fixed markup enters innerHTML. Paths, file names and user text below
+    // are assigned through textContent/value, never interpreted as markup.
+    dialog.innerHTML = '<form><div class="quick-connect-heading"><h2>Enter a value</h2></div><label class="text-prompt-label"></label><div class="quick-connect-footer"><span>Escape to cancel</span><div><button type="button" class="outline-button">Cancel</button><button type="submit" class="primary-button">Continue</button></div></div></form>';
+    const form = dialog.querySelector("form")!;
+    const label = dialog.querySelector("label")!;
+    label.textContent = message;
+    const input = initialValue === undefined ? null : document.createElement(options.multiline ? "textarea" : "input");
+    if (input) {
+      input.value = initialValue!;
+      input.readOnly = options.readOnly ?? false;
+      input.spellcheck = false;
+      input.setAttribute("autocapitalize", "off");
+      input.setAttribute("autocomplete", "off");
+      if (options.secret) {
+        input.setAttribute("type", "password");
+        input.setAttribute("maxlength", "16384");
+        dialog.querySelector("h2")!.textContent = "SSH authentication";
+      }
+      if (options.multiline) input.setAttribute("rows", "8");
+      label.append(input);
+    } else {
+      dialog.querySelector("h2")!.textContent = "Confirm action";
+      if (options.createOnly) dialog.querySelector('button[type="submit"]')!.textContent = "Replace";
+      // Confirmation text may be long. Keep it keyboard-scrollable without
+      // moving the default Cancel focus or scrolling the heading/footer away.
+      label.tabIndex = 0;
+    }
+    if (options.reviewText !== undefined) {
+      dialog.querySelector("h2")!.textContent = "Review startup command";
+      const review = document.createElement("pre");
+      review.className = "text-prompt-review";
+      review.textContent = options.reviewText;
+      review.tabIndex = 0;
+      review.setAttribute("role", "region");
+      review.setAttribute("aria-label", "Startup command");
+      label.after(review);
+      label.className = "text-prompt-label text-prompt-context";
+    }
+    if (options.readOnly) {
+      dialog.querySelector("h2")!.textContent = "Copy text";
+      dialog.querySelector('button[type="submit"]')!.textContent = "Done";
+    }
+    if (options.title) dialog.querySelector("h2")!.textContent = options.title;
+    if (options.acceptLabel) dialog.querySelector('button[type="submit"]')!.textContent = options.acceptLabel;
+    let settled = false;
+    const finish = (value: string | null) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener("pagehide", cancel);
+      window.removeEventListener("conxol:workspace-locked", cancel);
+      options.signal?.removeEventListener("abort", cancel);
+      if (input) input.value = "";
+      pending = null;
+      if (dialog.open) dialog.close();
+      dialog.remove();
+      resolve(value);
+    };
+    const cancel = () => finish(null);
+    form.addEventListener("submit", (event) => { event.preventDefault(); finish(input?.value ?? "yes"); });
+    const cancelButton = dialog.querySelector<HTMLButtonElement>('button[type="button"]')!;
+    cancelButton.addEventListener("click", cancel);
+    if (options.createOnly) {
+      const createOnly = document.createElement("button");
+      createOnly.type = "button";
+      createOnly.className = "outline-button";
+      createOnly.textContent = "Create only";
+      createOnly.addEventListener("click", () => finish("no"));
+      cancelButton.after(createOnly);
+    }
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
+    dialog.addEventListener("close", cancel);
+    // Keep ordinary application shortcuts out of the input. Emergency keys
+    // are handled in window capture; Escape still cancels the dialog normally.
+    dialog.addEventListener("keydown", (event) => { if (event.key !== "Escape") event.stopPropagation(); });
+    window.addEventListener("pagehide", cancel);
+    window.addEventListener("conxol:workspace-locked", cancel);
+    options.signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      document.body.append(dialog);
+      dialog.showModal();
+      (input ?? cancelButton).focus();
+      input?.select();
+    } catch {
+      cancel(); // Unsupported/closing webviews fail closed, without a value.
+    }
+  });
+}

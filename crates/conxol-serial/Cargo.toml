@@ -1,0 +1,16 @@
+[package]
+name = "conxol-serial"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Native serial terminal transport and device lifecycle for Conxol"
+
+[dependencies]
+libc.workspace = true
+conxol-core = { path = "../conxol-core" }
+serialport.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

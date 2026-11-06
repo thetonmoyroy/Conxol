@@ -1,0 +1,25 @@
+[package]
+name = "conxol-ssh"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Native SSH transport and interactive PTY primitives for Conxol"
+
+[dependencies]
+anyhow.workspace = true
+encoding_rs.workspace = true
+conxol-core = { path = "../conxol-core" }
+russh.workspace = true
+russh-sftp.workspace = true
+serde.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile = "3.23"
