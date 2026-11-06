@@ -63,7 +63,7 @@ jobs:
           cargo xtask test-network
       - name: Build installers
         working-directory: apps/desktop
-        run: pnpm tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json -- --locked
+        run: node node_modules/@tauri-apps/cli/tauri.js build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json -- --locked
       - name: Check binary startup
         shell: bash
         run: |
