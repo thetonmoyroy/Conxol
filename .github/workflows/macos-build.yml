@@ -1,0 +1,70 @@
+name: macOS packages
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            platform: macos-arm64
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos-x64
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CI: 'true'
+      TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.33.0'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            tools/vnc-helper -> target
+      - name: Install frontend dependencies
+        run: pnpm install --dir apps/desktop --frozen-lockfile
+      - name: Check frontend and release tooling
+        run: |
+          pnpm --dir apps/desktop check
+          pnpm --dir apps/desktop lint
+          pnpm --dir apps/desktop test:unit
+          node --test tools/release-assets.test.mjs
+          GITHUB_REF_NAME=v$(node -p "require('./apps/desktop/package.json').version") node tools/release-assets.mjs check-version
+      - name: Generate bundle icons
+        run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
+      - name: Build macOS DMG
+        run: pnpm --dir apps/desktop tauri build --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
+      - name: Verify app and helper
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          app=target/release/bundle/macos/Conxol.app
+          test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$EXPECTED_ARCH"
+          test "$(lipo -archs "$app/Contents/Resources/helpers/conxol-vnc-helper")" = "$EXPECTED_ARCH"
+          codesign --verify --deep --strict "$app"
+          "$app/Contents/MacOS/conxol" --version
+          test ! -e "$app/Contents/Resources/helpers/conxol-rdp-helper"
+      - name: Collect DMG and checksum
+        run: node tools/release-assets.mjs collect ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          path: target/release-assets/*
+          if-no-files-found: error
