@@ -11,7 +11,7 @@ Install Rust stable (1.90 or newer), Node.js 22, pnpm 10, and the
 Clone the repository and install the locked frontend dependencies:
 
 ```bash
-git clone https://github.com/OthmaneBlial/MobaRust.git Conxol
+git clone https://github.com/thetonmoyroy/Conxol.git Conxol
 cd Conxol
 pnpm install --dir apps/desktop --frozen-lockfile
 pnpm --dir apps/desktop dev

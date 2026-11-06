@@ -5557,11 +5557,9 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
           <p className="help-about-description">An open-source workspace for terminals, remote sessions, and everyday network operations.</p>
           <dl className="help-about-details">
             <div><dt>Maintainer</dt><dd><a href="https://github.com/thetonmoyroy" target="_blank" rel="noopener noreferrer">Tonmoy Roy <span className="help-profile-handle">@thetonmoyroy</span></a></dd></div>
-            <div><dt>Based on</dt><dd><a href="https://github.com/OthmaneBlial/MobaRust" target="_blank" rel="noopener noreferrer">MobaRust by Othmane Blial and contributors</a></dd></div>
             <div><dt>Version</dt><dd>{desktopPackage.version}</dd></div>
             <div><dt>License</dt><dd>Apache License 2.0</dd></div>
           </dl>
-          <p className="help-note">Conxol builds on the original open-source project. Original copyright notices and third-party licenses are retained.</p>
           <p className="help-note">See Credits for third-party tools, project links and the bundled MTR license.</p>
           <div className="help-diagnostics"><div><h4>Support diagnostics</h4><p>Save app information, recent SSH errors, and algorithm details for troubleshooting. Passwords, key contents, host addresses, and terminal output are excluded.</p></div><button type="button" className="outline-button" disabled={diagnosticsBusy} onClick={() => void exportReport()}><Download size={14} />{diagnosticsBusy ? "Saving…" : "Export diagnostics"}</button></div>
           <p className="help-note">For SSH issues, reproduce the failure and export before restarting Conxol. The report keeps the latest 64 failure records from this app session.</p>

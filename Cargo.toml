@@ -19,7 +19,7 @@ resolver = "2"
 version = "0.1.53"
 edition = "2024"
 license = "Apache-2.0"
-repository = "https://github.com/OthmaneBlial/MobaRust"
+repository = "https://github.com/thetonmoyroy/Conxol"
 rust-version = "1.90"
 
 [workspace.dependencies]

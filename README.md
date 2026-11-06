@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="docs/assets/readme-hero.svg" alt="Conxol — Free, open-source MobaXterm alternative built with Rust" width="100%" />
+<img src="docs/assets/readme-hero.svg" alt="Conxol — Open-source terminal and network workspace built with Rust" width="100%" />
 
-**Free, open-source MobaXterm alternative built with Rust**
+**Open-source terminal and network workspace built with Rust**
 
 SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • reviewed automation
 
@@ -10,21 +10,9 @@ SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • r
 [![Rust + Tauri](https://img.shields.io/badge/built_with-Rust_%2B_Tauri-536f60?style=for-the-badge)](docs/architecture.md)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-536f60?style=for-the-badge)](LICENSE)
 
-**[⬇️ Download](#download)** · **[🎬 Watch the app](#demo)** · **[🌐 Website](https://othmaneblial.github.io/MobaRust/)** · **[🧭 Roadmap](ROADMAP.md)** · **[📖 Docs](https://othmaneblial.github.io/MobaRust/docs.html)** · **[🤝 Contribute](CONTRIBUTING.md)**
+**[⬇️ Download](#download)** · **[🧭 Roadmap](ROADMAP.md)** · **[📖 Docs](docs/architecture.md)** · **[🤝 Contribute](CONTRIBUTING.md)**
 
 </div>
-
-<a id="demo"></a>
-
-## 🎬 See the real app
-
-https://github.com/user-attachments/assets/616b444e-6b8a-411e-8075-bac4f58d9d88
-
-**From a shell to a working remote workspace.** A real macOS ARM64 application recording: independent terminal panes, an authenticated SSH session, SFTP browsing and editing, a completed file download, an HTTP request through an SSH tunnel, reusable snippets, and light/dark themes.
-
-[▶ Watch / download the full walkthrough](https://github.com/OthmaneBlial/MobaRust/releases/download/v0.1.17/mobarust-desktop-demo.mp4) · [Recording details & chapters](docs/release/desktop-demo.md)
-
-The server, keys, files and HTTP service are disposable loopback fixtures. The recording shows working product flows; it is not evidence of production-server or cross-platform compatibility.
 
 ## ✨ One workspace, from connection to completion
 
@@ -38,7 +26,6 @@ The server, keys, files and HTTP service are disposable loopback fixtures. The r
 
 Local shells and SSH terminals share a workspace. Open tabs, split panes, search scrollback and keep independent tasks in view. Organize saved sessions with **folders, tags, favorites, recents and search**.
 
-<img src="docs/assets/native-splits.jpg" alt="Two independent terminals in the real Conxol macOS application" width="100%" />
 
 </td>
 <td width="50%" valign="top">
@@ -47,7 +34,6 @@ Local shells and SSH terminals share a workspace. Open tabs, split panes, search
 
 Browse SFTP files, download or upload, and edit remote text without leaving the app. Transfers expose **progress and cancellation**; the editor checks for remote changes before saving.
 
-<img src="docs/assets/native-editor.jpg" alt="Editing a generated remote configuration file over an actual SFTP connection" width="100%" />
 
 </td>
 </tr>
@@ -91,7 +77,7 @@ Switch light/dark themes, adjust terminal fonts and shortcuts, and keep settings
 
 **[Download the Windows x64 installer](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.53/Conxol_0.1.53_x64-setup.exe)** · [Release notes and SHA-256 checksum](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.53)
 
-The Windows installer is an unsigned preview. macOS and Linux source is included; this repository's v0.1.53 release does not provide binaries for those platforms. RDP remains experimental and excluded from normal bundles. Older upstream demonstrations and platform receipts below describe the versions and platforms named in them.
+The Windows installer is an unsigned preview. macOS and Linux source is included; this repository's v0.1.53 release does not provide binaries for those platforms. RDP remains experimental and excluded from normal bundles.
 
 ## Features in the current source
 
@@ -108,10 +94,6 @@ The Windows installer is an unsigned preview. macOS and Linux source is included
 
 See [architecture](docs/architecture.md), [keyboard shortcuts](docs/keyboard-shortcuts.md), [roadmap](ROADMAP.md) and [release notes](docs/release/v0.1.53.md) for implementation details and limits. Real-device and cross-platform acceptance varies by feature; included source does not imply every protocol has production interoperability coverage.
 
-## Project origin
-
-Conxol builds on [Othmane Blial's MobaRust](https://github.com/OthmaneBlial/MobaRust). Original copyright, Apache-2.0 license, attribution, upstream demonstrations and historical test documentation are preserved. This repository publishes the current Windows-focused Conxol work; upstream download links in historical documents refer to upstream releases.
-
 ## 🛡️ Keep trust and data local
 
 Rust owns protocols, processes, saved credentials and persistence. Unknown SSH host keys are not silently accepted. Multiline paste and remote execution have explicit review boundaries. VNC TCP and Telnet are unencrypted; experimental support is documented separately.
@@ -126,7 +108,7 @@ Rust owns protocols, processes, saved credentials and persistence. Unknown SSH h
 Use Rust stable **1.90+**, Node.js **22**, pnpm **10**, and the [native Tauri prerequisites](CONTRIBUTING.md).
 
 ```bash
-git clone https://github.com/OthmaneBlial/MobaRust.git Conxol
+git clone https://github.com/thetonmoyroy/Conxol.git Conxol
 cd Conxol
 pnpm install --dir apps/desktop --frozen-lockfile
 cargo xtask check
@@ -148,8 +130,8 @@ The full check covers frontend, Rust, isolated protocol helpers, package layouts
 
 **Build your next remote workspace with us.**
 
-[Report a bug](https://github.com/OthmaneBlial/MobaRust/issues/new/choose) · [Explore the roadmap](ROADMAP.md) · [Star Conxol ⭐](https://github.com/OthmaneBlial/MobaRust/stargazers)
+[Report a bug](https://github.com/thetonmoyroy/Conxol/issues/new/choose) · [Explore the roadmap](ROADMAP.md) · [Star Conxol ⭐](https://github.com/thetonmoyroy/Conxol/stargazers)
 
-Independent project; not affiliated with Mobatek or MobaXterm. Licensed under [Apache-2.0](LICENSE).
+Licensed under [Apache-2.0](LICENSE). See [copyright and third-party notices](NOTICE).
 
 </div>

@@ -473,7 +473,7 @@ button:not(:disabled) { cursor: pointer; }
 .shutdown-state h1 { margin: 16px 0 8px; font-size: 24px; }
 .shutdown-state p { color: var(--muted); }
 
-/* MobaXterm-inspired desktop geometry; all colors inherit the Conxol theme. */
+/* Desktop workspace geometry; all colors inherit the Conxol theme. */
 .app-shell { height: 100dvh; min-height: 680px; display: flex; flex-direction: column; }
 .desktop-menubar { display: flex; align-items: center; flex: 0 0 23px; height: 23px; gap: 1px; padding: 0 3px; border-bottom: 1px solid var(--line); background: var(--panel); z-index: 20; }
 .desktop-menubar > button, .desktop-menubar summary { display: flex; align-items: center; height: 22px; padding: 0 7px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
