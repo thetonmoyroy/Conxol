@@ -35,6 +35,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
+          cache-on-failure: true
           workspaces: |
             . -> target
             tools/vnc-helper -> target
@@ -55,7 +56,11 @@ jobs:
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
-          app=target/release/bundle/macos/Conxol.app
+          mount=$(mktemp -d)
+          dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print)
+          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"; rmdir "$mount"' EXIT
+          app="$mount/Conxol.app"
           test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$EXPECTED_ARCH"
           test "$(lipo -archs "$app/Contents/Resources/helpers/conxol-vnc-helper")" = "$EXPECTED_ARCH"
           codesign --verify --deep --strict "$app"
