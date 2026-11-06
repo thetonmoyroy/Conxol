@@ -58,3 +58,16 @@ assert.equal(findBlock(innerEdit, 'inner').children[0].text, 'port {n}/{n2}\n en
 assert.deepEqual(findBlock(innerEdit, 'sibling'), findBlock(branching, 'sibling'));
 assert.deepEqual(generateConfig(simpleRoundTrip([{ ...inner, children: [third] }]), '1', '2', '1'), generateConfig([{ ...inner, children: [third] }], '1', '2', '1'));
 assert.deepEqual(simpleSections([]), []);
+
+// Repeated range edits always regenerate from the requested first number.
+for (const [start, end, step, expected] of [
+  ['1', '60', '1', 60], ['1', '20', '1', 20],
+  ['10', '14', '2', 3], ['3', '1', '-1', 3], ['1', '2', '1', 2],
+]) {
+  const result = generateConfig(commands, start, end, step);
+  assert.equal(result.error, '');
+  assert.equal(result.count, expected);
+  assert.equal(result.text.split('\n').length, expected * 2);
+  assert.equal(result.text.split('\n')[0], `interface eth 0/${start}`);
+  assert.equal(result.text.split('\n').at(-2), `interface eth 0/${Number(start) + (expected - 1) * Number(step)}`);
+}

@@ -1,4 +1,4 @@
-import { useRef, useState, type PointerEvent, type DragEvent } from "react";
+import { useEffect, useRef, useState, type PointerEvent, type DragEvent } from "react";
 import { ArrowDown, ArrowUp, Copy, Download, GripVertical, Plus, Trash2 } from "lucide-react";
 import { writeClipboardText } from "./clipboard-access";
 import { generateConfig, simpleSections, replaceSimpleSection, isLoop, findBlock, editBlocks, removeBlock, moveBlock, type GeneratorBlock } from "./config-generator";
@@ -12,12 +12,18 @@ export function ConfigGenerator() {
   const [commands, setCommands] = useState<GeneratorBlock[]>(example);
   const [start, setStart] = useState("1"), [end, setEnd] = useState("24"), [step, setStep] = useState("1");
   const [advanced, setAdvanced] = useState(false);
+  const previewInput = useRef<HTMLTextAreaElement>(null);
   const simpleInput = useRef<HTMLTextAreaElement>(null);
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const suppressClick = useRef(false);
   const inputs = useRef(new Map<string, HTMLTextAreaElement>());
   const result = generateConfig(commands, start, end, step);
+  useEffect(() => {
+    const preview = previewInput.current;
+    if (preview) { preview.scrollTop = 0; preview.scrollLeft = 0; }
+    setNotice("");
+  }, [result.text]);
   // A single chain uses one editor; branching layouts use compact sections in order.
   const chain: Extract<GeneratorBlock, { kind: "loop" }>[] = [];
   let leaves = commands;
@@ -177,8 +183,8 @@ export function ConfigGenerator() {
         {renderBlocks(commands, "root", 1)}
         <p>Example: put <code>interface eth {"{n}"}/{"{n2}"}</code> inside Loop 2 to generate every slot and port combination.</p>
       </section>
-    </div></div><section className="generator-card generator-preview"><h3>Result</h3><p>{result.text ? `${result.text.split("\n").length.toLocaleString()} lines · Updates as you type` : "Updates as you type"}</p>
-      {result.error && <p role="alert">{result.error}</p>}<textarea aria-label="Generated configuration preview" readOnly value={result.text} spellCheck={false} />
+    </div></div><section className="generator-card generator-preview"><h3>Result</h3><p>{result.text ? `${result.count.toLocaleString()} repeats · ${result.text.split("\n").length.toLocaleString()} lines · Updates as you type` : "Updates as you type"}</p>
+      {result.error && <p role="alert">{result.error}</p>}<textarea ref={previewInput} aria-label="Generated configuration preview" readOnly value={result.text} spellCheck={false} />
       <div className="generator-actions"><button className="primary-button" disabled={!result.text} onClick={() => void copy()}><Copy size={14} /> Copy all</button><button className="outline-button" disabled={!result.text} onClick={download}><Download size={14} /> Save .txt</button></div>
       <p role="status">{notice || "Ready to copy. Commands are never run automatically."}</p>
     </section></div>

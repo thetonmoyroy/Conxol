@@ -18,6 +18,8 @@ fn main() {
         "check" => check(),
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
+        "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
+        "test-file-transfers" => test_file_transfers(),
         "test-backup" => run_sanitized_test(
             "cargo",
             [
@@ -69,6 +71,7 @@ fn main() {
             println!(
                 "cargo xtask check-rust    Run sanitized workspace formatting, tests, and Clippy"
             );
+            println!("cargo xtask test-file-transfers    Run isolated FTP/TFTP client fixtures");
             println!("cargo xtask test-ssh    Run isolated SSH tests and Unix OpenSSH fixtures");
             println!("cargo xtask test-diagnostics    Run isolated diagnostic export regressions");
             println!(
@@ -1434,6 +1437,11 @@ fn run_app_version_probe(executable: &Path, root: &Path) -> Result<(Duration, St
     let output = String::from_utf8(stdout)
         .map_err(|_| "benchmark app version output was not valid UTF-8".to_owned())?;
     Ok((started.elapsed(), output))
+}
+
+fn test_file_transfers() -> Result<(), String> {
+    run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "file_transfer::tests", "--", "--nocapture"], None)?;
+    run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "tftp_server::tests", "--", "--nocapture"], None)
 }
 
 fn test_sftp_dependency() -> Result<(), String> {

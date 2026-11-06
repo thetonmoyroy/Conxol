@@ -1,3 +1,8 @@
+import { ThirdPartyCredits } from "./ThirdPartyCredits";
+import { registerTerminalPasteReveal, revealPastedTerminal } from "./terminal-paste-reveal";
+import { createTerminalFitScheduler } from "./terminal-fit";
+import { handleTerminalControlKey } from "./terminal-control-keys";
+import { FileTransferClient } from "./FileTransferClient";
 import { SyntaxHighlightSettings } from "./SyntaxHighlightSettings";
 import { WorkspaceBackup } from "./WorkspaceBackup";
 import { applyWorkspacePreferences } from "./workspace-backup-model";
@@ -725,7 +730,7 @@ type SshTunnelEvent = {
 type TcpCheckResult = {
   host: string;
   port: number;
-  status: "open" | "closed" | "timed-out" | "failed";
+  status: "open" | "closed" | "timed-out" | "open-or-filtered" | "failed";
 };
 
 type SshHostKeyInspection = {
@@ -745,9 +750,12 @@ type NetworkScanEvent = {
 
 type PingResult = {
   host: string;
-  reachable: boolean;
+  sent: number;
+  received: number;
   elapsedMs: number;
-  last_used_at?: number | null;
+  intervalMs: number;
+  packetSize: number;
+  lines: string[];
 };
 
 type TracerouteResult = {
@@ -759,7 +767,7 @@ type TracerouteResult = {
 
 type NetworkDiagnosticEvent = {
   operationId: string;
-  kind: "ping" | "traceroute";
+  kind: "ping" | "mtr";
   state: "running" | "completed" | "cancelled" | "failed";
   ping?: PingResult | null;
   traceroute?: TracerouteResult | null;
@@ -812,6 +820,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const terminalFitRef = useRef<ReturnType<typeof createTerminalFitScheduler> | null>(null);
   const terminalOptionsRef = useRef({ fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance });
   const confirmMultilinePasteRef = useRef(confirmMultilinePaste);
   const copyOnSelectRef = useRef(copyOnSelect);
@@ -829,7 +838,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     await pasteTerminalClipboard(readClipboardText, () => terminalRef.current === terminal && terminalIdRef.current === nativeId && !isWorkspaceLocked() && !!hostRef.current?.getClientRects().length && !hostRef.current?.closest('[hidden], [aria-hidden="true"]'), async text => {
       setContextMenu(null);
       const handled = await onTerminalPaste(workspaceId, nativeId, text, confirmMultilinePasteRef.current);
-      if (!handled && terminalRef.current === terminal && !isWorkspaceLocked()) terminal.paste(text);
+      if (!handled && terminalRef.current === terminal && !isWorkspaceLocked()) { revealPastedTerminal(terminal); terminal.paste(text); }
     });
   }, [onTerminalPaste, workspaceId]);
 
@@ -837,10 +846,13 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
   useEffect(() => {
     terminalOptionsRef.current = { fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance };
     if (terminalRef.current) {
+      const fontChanged = terminalRef.current.options.fontSize !== fontSize;
+      const atBottom = terminalRef.current.buffer.active.viewportY >= terminalRef.current.buffer.active.baseY;
       terminalRef.current.options.fontSize = fontSize;
       terminalRef.current.options.cursorBlink = cursorBlink;
       terminalRef.current.options.theme = resolveTerminalTheme(colorTheme, terminalAppearance);
       terminalRef.current.options.scrollback = scrollbackLines;
+      if (fontChanged) terminalFitRef.current?.schedule(atBottom);
       networkHighlightingRef.current?.refresh();
     }
   }, [colorTheme, cursorBlink, fontSize, scrollbackLines, terminalAppearance]);
@@ -909,7 +921,8 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     onTerminalReady(workspaceId, terminal, searchAddon);
 
     const fit = () => {
-      if (host.clientWidth > 0 && host.clientHeight > 0) fitAddon.fit();
+      if (disposed || host.clientWidth <= 0 || host.clientHeight <= 0) return false;
+      fitAddon.fit();
       const terminalId = terminalIdRef.current;
       if (IS_TAURI && terminalId && remoteProtocol !== "serial") {
         const resizeCommand = remoteProtocol === "ssh" ? "ssh_resize" : remoteProtocol === "telnet" ? "telnet_resize" : "terminal_resize";
@@ -919,7 +932,11 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
           rows: terminal.rows,
         }).catch(() => undefined);
       }
+      return true;
     };
+    const fitScheduler = createTerminalFitScheduler(fit, () => terminal.scrollToBottom(), callback => window.requestAnimationFrame(callback), id => window.cancelAnimationFrame(id));
+    terminalFitRef.current = fitScheduler;
+    const pasteReveal = registerTerminalPasteReveal(terminal, () => fitScheduler.schedule());
 
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(host);
@@ -948,6 +965,13 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       onInput(workspaceId, terminalId, data);
     };
 
+    terminal.attachCustomKeyEventHandler(event => !handleTerminalControlKey(
+      event, terminal,
+      () => !disposed && !isWorkspaceLocked() && !!host.getClientRects().length && !host.closest('[hidden], [aria-hidden="true"]'),
+      sendTerminalInput,
+      text => { void writeClipboardText(text).catch(() => console.warn("Terminal selection could not be copied.")); },
+    ));
+
     const input = terminal.onData((data) => {
       sendTerminalInput(data);
     });
@@ -961,7 +985,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       void onTerminalPaste(workspaceId, nativeId, data, confirmMultilinePasteRef.current).then((handled) => {
         // Only the browser preview falls back to xterm paste. A native paste is
         // sent to the exact destinations pinned before asynchronous approval.
-        if (!handled && !disposed && terminalIdRef.current === nativeId) terminal.paste(data);
+        if (!handled && !disposed && terminalIdRef.current === nativeId) { revealPastedTerminal(terminal); terminal.paste(data); }
       }).catch(() => {
         if (!disposed) terminal.writeln("\r\nPaste could not be completed. Check the terminal before retrying.");
       });
@@ -1098,6 +1122,9 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       networkHighlightingRef.current = null;
       terminalLinks.dispose();
       host.removeEventListener("paste", onPaste, true);
+      pasteReveal.dispose();
+      fitScheduler.dispose();
+      if (terminalFitRef.current === fitScheduler) terminalFitRef.current = null;
       resizeObserver.disconnect();
       window.cancelAnimationFrame(initialFitFrame);
       releaseListeners();
@@ -1536,6 +1563,15 @@ function TerminalLayoutView({
   </div>;
 }
 
+// One owner prevents tool dialogs from stacking. A stale close callback may
+// close its own dialog only, so it cannot dismiss a tool opened afterward.
+function useToolDialog(name: string, active: string | null, setActive: React.Dispatch<React.SetStateAction<string | null>>) {
+  const setOpen = useCallback((open: React.SetStateAction<boolean>) => {
+    setActive(current => (typeof open === "function" ? open(current === name) : open) ? name : current === name ? null : current);
+  }, [name, setActive]);
+  return [active === name, setOpen] as const;
+}
+
 function App() {
   const workspaceSecurity = useWorkspaceLock();
   useEffect(() => {
@@ -1569,18 +1605,19 @@ function App() {
     return () => window.removeEventListener("resize", clamp);
   }, []);
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "files">("sessions");
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [quickConnectOpen, setQuickConnectOpen] = useState(false);
-  const [wslTerminalOpen, setWslTerminalOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeToolDialog, setActiveToolDialog] = useState<string | null>(null);
+  const [paletteOpen, setPaletteOpen] = useToolDialog("palette", activeToolDialog, setActiveToolDialog);
+  const [quickConnectOpen, setQuickConnectOpen] = useToolDialog("quickConnect", activeToolDialog, setActiveToolDialog);
+  const [wslTerminalOpen, setWslTerminalOpen] = useToolDialog("wslTerminal", activeToolDialog, setActiveToolDialog);
+  const [helpOpen, setHelpOpen] = useToolDialog("help", activeToolDialog, setActiveToolDialog);
+  const [settingsOpen, setSettingsOpen] = useToolDialog("settings", activeToolDialog, setActiveToolDialog);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const openSettings = () => { setSettingsError(null); setSettingsOpen(true); };
-  const [credentialsOpen, setCredentialsOpen] = useState(false);
-  const [snippetsOpen, setSnippetsOpen] = useState(false);
-  const [macrosOpen, setMacrosOpen] = useState(false);
-  const [notesOpen, setNotesOpen] = useState(false);
-  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [credentialsOpen, setCredentialsOpen] = useToolDialog("credentials", activeToolDialog, setActiveToolDialog);
+  const [snippetsOpen, setSnippetsOpen] = useToolDialog("snippets", activeToolDialog, setActiveToolDialog);
+  const [macrosOpen, setMacrosOpen] = useToolDialog("macros", activeToolDialog, setActiveToolDialog);
+  const [notesOpen, setNotesOpen] = useToolDialog("notes", activeToolDialog, setActiveToolDialog);
+  const [broadcastOpen, setBroadcastOpen] = useToolDialog("broadcast", activeToolDialog, setActiveToolDialog);
   const [broadcastEnabled, setBroadcastEnabled] = useState(false);
   const [broadcastTargetIds, setBroadcastTargetIds] = useState<string[]>([]);
   const [macroRun, setMacroRun] = useState<{ title: string; step: number; total: number; targets: string[] } | null>(null);
@@ -1600,6 +1637,15 @@ function App() {
     document.documentElement.style.colorScheme = colorTheme;
     try { localStorage.setItem("conxol-theme", settings.general.theme); } catch { /* Native settings still persist when browser storage is unavailable. */ }
   }, [colorTheme, settings.general.theme]);
+  const windowThemeUpdate = useRef<Promise<void>>(Promise.resolve());
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let cancelled = false;
+    windowThemeUpdate.current = windowThemeUpdate.current.catch(() => undefined).then(async () => {
+      if (!cancelled) await getCurrentWindow().setTheme(colorTheme);
+    }).catch(error => console.warn("Could not update window theme", error));
+    return () => { cancelled = true; };
+  }, [colorTheme]);
   const settingsRef = useRef(settings);
   const zoomPersistTimerRef = useRef<number | null>(null);
   const [portableVaultStatus, setPortableVaultStatus] = useState<PortableVaultStatus | null>(null);
@@ -1621,6 +1667,11 @@ function App() {
     try { return readFolderStyles(localStorage.getItem("conxol.folderStyles")); } catch { return {}; }
   });
   useEffect(() => { try { localStorage.setItem("conxol.folderStyles", JSON.stringify(folderStyles)); } catch { /* Keep in memory. */ } }, [folderStyles]);
+  const [hostStyles, setHostStyles] = useState<Record<string, FolderStyle>>(() => {
+    try { return readFolderStyles(localStorage.getItem("conxol.hostStyles")); } catch { return {}; }
+  });
+  useEffect(() => { try { localStorage.setItem("conxol.hostStyles", JSON.stringify(hostStyles)); } catch { /* Keep in memory. */ } }, [hostStyles]);
+  const [customizingHost, setCustomizingHost] = useState<SavedSession | null>(null);
   const [customizingFolder, setCustomizingFolder] = useState<string | null>(null);
   const [folderContextMenu, setFolderContextMenu] = useState<{ folder: string; x: number; y: number } | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
@@ -1644,7 +1695,9 @@ function App() {
   const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<SessionNotice | null>(null);
   const [closing, setClosing] = useState(false);
-  const [syntaxSettingsOpen, setSyntaxSettingsOpen] = useState(false);
+  const [tftpServerRunning, setTftpServerRunning] = useState(false);
+  const [fileTransferOpen, setFileTransferOpen] = useToolDialog("fileTransfer", activeToolDialog, setActiveToolDialog);
+  const [syntaxSettingsOpen, setSyntaxSettingsOpen] = useToolDialog("syntaxSettings", activeToolDialog, setActiveToolDialog);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" || !window.matchMedia("(max-width: 720px)").matches);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [now, setNow] = useState(() => new Date());
@@ -1653,7 +1706,7 @@ function App() {
   const [recentOnly, setRecentOnly] = useState(false);
   const [savedSessions, setSavedSessions] = useState<SavedSession[]>([]);
   const [snippets, setSnippets] = useState<SnippetRecord[]>([]);
-  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useToolDialog("shortcuts", activeToolDialog, setActiveToolDialog);
   const [shortcutSelectionDraft, setShortcutSelectionDraft] = useState<ShortcutRecord | null>(null);
   const [macros, setMacros] = useState<MacroRecord[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
@@ -1688,13 +1741,16 @@ function App() {
   const [networkResult, setNetworkResult] = useState<TcpCheckResult | null>(null);
   const [networkFingerprint, setNetworkFingerprint] = useState<SshHostKeyInspection | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
-  const [networkDiagnosticKind, setNetworkDiagnosticKind] = useState<"ping" | "traceroute" | null>(null);
+  const [networkDiagnosticKind, setNetworkDiagnosticKind] = useState<"ping" | "mtr" | null>(null);
   const [networkDiagnosticStatus, setNetworkDiagnosticStatus] = useState<"idle" | "running" | "completed" | "cancelled" | "failed">("idle");
+  const [pingInterval, setPingInterval] = useState("1000");
+  const [pingPacketSize, setPingPacketSize] = useState("32");
   const [networkPingResult, setNetworkPingResult] = useState<PingResult | null>(null);
-  const [networkTracerouteResult, setNetworkTracerouteResult] = useState<TracerouteResult | null>(null);
+  const [networkMtrResult, setNetworkMtrResult] = useState<TracerouteResult | null>(null);
   const [networkTraceMaxHops, setNetworkTraceMaxHops] = useState("8");
   const [networkScanId, setNetworkScanId] = useState<string | null>(null);
   const [networkScanStatus, setNetworkScanStatus] = useState<"idle" | "running" | "completed" | "cancelled" | "failed">("idle");
+  const [networkScanProtocol, setNetworkScanProtocol] = useState<"tcp" | "udp">("tcp");
   const [networkScanStart, setNetworkScanStart] = useState("1");
   const [networkScanEnd, setNetworkScanEnd] = useState("1024");
   const [networkScanConcurrency, setNetworkScanConcurrency] = useState(() => String(settings.network.scanConcurrency));
@@ -1844,17 +1900,17 @@ function App() {
       return;
     }
     startNewTerminal({ type: "default", shell }, shell === "powershell" ? "PowerShell" : shell);
-  }, [startNewTerminal]);
+  }, [setPaletteOpen, startNewTerminal]);
 
   const openWslTerminalPicker = useCallback(() => {
     setPaletteOpen(false);
     setWslTerminalOpen(true);
-  }, []);
+  }, [setPaletteOpen, setWslTerminalOpen]);
 
   const startWslTerminal = useCallback((distribution: string) => {
     startNewTerminal({ type: "wsl", distribution });
     setWslTerminalOpen(false);
-  }, [startNewTerminal]);
+  }, [setWslTerminalOpen, startNewTerminal]);
 
   const openSftpView = useCallback(() => {
     if (remoteSessionId && remoteProtocol === "ssh") {
@@ -1863,7 +1919,7 @@ function App() {
     }
     setConnectionError("Open an SSH session before opening SFTP.");
     setQuickConnectOpen(true);
-  }, [remoteProtocol, remoteSessionId]);
+  }, [remoteProtocol, remoteSessionId, setQuickConnectOpen]);
 
   const startMacroRecording = useCallback(() => {
     if (!selectedTerminalId || !activeTerminal || remoteProtocol === "rdp" || remoteProtocol === "vnc") return;
@@ -1896,7 +1952,7 @@ function App() {
     setRecordedMacroDraft(draft);
     setMacrosOpen(true);
     setSessionNotice(`Captured ${recording.actions.length} bounded macro action${recording.actions.length === 1 ? "" : "s"}. Review before saving.`);
-  }, []);
+  }, [setMacrosOpen]);
 
   const recordAudit = useCallback((kind: AuditEventKind, protocol: string | null | undefined, sessionId?: string | null) => {
     const normalizedProtocol = auditProtocol(protocol);
@@ -1927,7 +1983,7 @@ function App() {
     // SSH reconnects can keep the same native ID. Invalidate old approvals.
     if (previous !== status) terminalGenerationsRef.current.set(workspaceId, (terminalGenerationsRef.current.get(workspaceId) ?? 0) + 1);
     if (!protocol || previous === status) return;
-    if (protocol === "SSH" && status === "connected") requestTerminalFocus(workspaceId);
+    if ((protocol === "SSH" || protocol === "TELNET") && status === "connected") requestTerminalFocus(workspaceId);
     if (status === "connected") recordAudit("connectionSucceeded", protocol);
     if (status === "error") recordAudit("connectionFailed", protocol);
     if (status === "closed") recordAudit("disconnected", protocol);
@@ -2028,7 +2084,7 @@ function App() {
     if (next === recording) return;
     macroRecordingRef.current = next;
     setMacroRecording(next);
-  }, []);
+  }, [setMacrosOpen]);
 
   const handleTerminalInput = useCallback((workspaceId: string, terminalId: string, data: string) => {
     const selectedTargets = broadcastEnabledRef.current ? broadcastTargetIdsRef.current : [workspaceId];
@@ -2074,7 +2130,7 @@ function App() {
       return true;
     };
     if (!IS_TAURI) {
-      if (await approve(() => !isWorkspaceLocked() && terminalInstancesRef.current.get(workspaceId)?.terminal === source)) source?.paste(data);
+      if (await approve(() => !isWorkspaceLocked() && terminalInstancesRef.current.get(workspaceId)?.terminal === source)) { if (source) { revealPastedTerminal(source); source.paste(data); } }
       return true;
     }
     const terminals = new Map(targetIds.map((id) => [id, terminalInstancesRef.current.get(id)?.terminal]));
@@ -2107,6 +2163,7 @@ function App() {
           if (current?.size !== targets.size || [...targets].some(([workspace, native]) => current.get(workspace) !== native)) {
             throw new Error("paste targets changed; queued input was not sent");
           }
+          revealPastedTerminal(terminal);
         });
       }));
     } catch (error) {
@@ -2124,7 +2181,7 @@ function App() {
     setActiveTerminalId(workspaceId);
     setShortcutSelectionDraft(draft);
     setShortcutsOpen(true);
-  }, []);
+  }, [setShortcutsOpen]);
 
   const pasteShortcut = useCallback(async (record: ShortcutRecord) => {
     const workspaceId = selectedTerminalIdRef.current;
@@ -2139,7 +2196,7 @@ function App() {
     setShortcutsOpen(false); setShortcutSelectionDraft(null); setActiveView("terminal");
     await handleTerminalPaste(workspaceId, nativeId, text, true, true);
     if (!isWorkspaceLocked() && terminalInstancesRef.current.get(workspaceId)?.terminal === source && selectedTerminalIdRef.current === workspaceId) source.focus();
-  }, [handleTerminalPaste]);
+  }, [handleTerminalPaste, setShortcutsOpen]);
 
   useEffect(() => {
     const taps = new DoubleShift();
@@ -2153,7 +2210,7 @@ function App() {
     window.addEventListener("keydown", down, true); window.addEventListener("keyup", up, true);
     window.addEventListener("blur", reset); window.addEventListener("pointerdown", reset, true);
     return () => { window.removeEventListener("keydown", down, true); window.removeEventListener("keyup", up, true); window.removeEventListener("blur", reset); window.removeEventListener("pointerdown", reset, true); };
-  }, []);
+  }, [setShortcutsOpen]);
 
   const findTerminalMatch = useCallback((direction: "next" | "previous", query = terminalSearchQuery) => {
     const instance = terminalInstancesRef.current.get(selectedTerminalIdRef.current);
@@ -2501,7 +2558,7 @@ function App() {
     } catch (error) {
       setSettingsError(`Settings could not be saved: ${String(error)}`);
     }
-  }, []);
+  }, [setSettingsOpen]);
 
   const adjustTerminalFontSize = useCallback((action: "increase" | "decrease" | "reset") => {
     const current = settingsRef.current;
@@ -2543,7 +2600,7 @@ function App() {
     } catch (error) {
       setSettingsError(`Settings could not be reset: ${String(error)}`);
     }
-  }, []);
+  }, [setSettingsOpen]);
 
   const exportSettings = useCallback(async () => {
     if (!IS_TAURI) return;
@@ -2584,7 +2641,7 @@ function App() {
     } catch (error) {
       setSettingsError(`Settings import failed: ${String(error)}`);
     }
-  }, []);
+  }, [setSettingsOpen]);
 
   const createPortableVault = useCallback(async (passphrase: string) => {
     if (!IS_TAURI) return;
@@ -2640,7 +2697,7 @@ function App() {
     } catch (error) {
       setConnectionError(`Credential could not be saved: ${String(error)}`);
     }
-  }, []);
+  }, [setCredentialsOpen]);
 
   const deleteCredential = useCallback(async (credentialId: string) => {
     if (!IS_TAURI) {
@@ -2657,7 +2714,7 @@ function App() {
     } catch (error) {
       setConnectionError(`Credential could not be deleted: ${String(error)}`);
     }
-  }, []);
+  }, [setCredentialsOpen]);
 
   const savePortableCredential = useCallback(async (credentialId: string, secret: string) => {
     if (!IS_TAURI) {
@@ -2674,7 +2731,7 @@ function App() {
     } catch (error) {
       setConnectionError(`Portable credential could not be saved: ${String(error)}`);
     }
-  }, []);
+  }, [setCredentialsOpen]);
 
   const deletePortableCredential = useCallback(async (credentialId: string) => {
     if (!IS_TAURI) {
@@ -2691,7 +2748,7 @@ function App() {
     } catch (error) {
       setConnectionError(`Portable credential could not be deleted: ${String(error)}`);
     }
-  }, []);
+  }, [setCredentialsOpen]);
 
   const connectSsh = useCallback(async (request: SshConnectRequest, offerSave = true, displayName?: string, folder?: string, shortcutDeviceId?: string) => {
     setConnectionError(null);
@@ -2798,7 +2855,7 @@ function App() {
       recordAudit("connectionFailed", "SSH");
       setConnectionError(String(error));
     }
-  }, [recordAudit, refreshSavedSessions, requestTerminalFocus]);
+  }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
   const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string) => {
     setConnectionError(null);
@@ -2837,11 +2894,12 @@ function App() {
           }
         }
       }
+      requestTerminalFocus(terminal.id);
     } catch (error) {
       recordAudit("connectionFailed", "TELNET");
       setConnectionError(String(error));
     }
-  }, [recordAudit, refreshSavedSessions]);
+  }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
   const connectSerial = useCallback(async (request: SerialConnectRequest, offerSave = true, shortcutDeviceId?: string) => {
     setConnectionError(null);
@@ -2883,7 +2941,7 @@ function App() {
       recordAudit("connectionFailed", "SERIAL");
       setConnectionError(String(error));
     }
-  }, [recordAudit, refreshSavedSessions]);
+  }, [recordAudit, refreshSavedSessions, setQuickConnectOpen]);
 
   const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string) => {
     if (request.protocol === "vnc" && request.allowInsecureVnc && !await confirmAction("VNC over TCP is unencrypted. Continue only if this target is trusted or protected by an external tunnel?")) {
@@ -2917,7 +2975,7 @@ function App() {
           .catch((error) => setConnectionError(`Queued, but the session could not be saved: ${String(error)}`));
       }
     }
-  }, [recordAudit, refreshSavedSessions]);
+  }, [recordAudit, refreshSavedSessions, setQuickConnectOpen]);
 
   const importOpenSshConfig = useCallback(async () => {
     if (!IS_TAURI) return;
@@ -3314,7 +3372,7 @@ function App() {
         setConnectionError(`Macro “${record.title}” stopped: ${String(error)}. Earlier actions or other targets may have received input; check before retrying.`);
       }
     }
-  }, [connectSavedSession, savedSessions, writeToExplicitTargets]);
+  }, [connectSavedSession, savedSessions, setMacrosOpen, writeToExplicitTargets]);
 
   const cancelMacro = useCallback(() => {
     if (!macroRun) return;
@@ -3892,6 +3950,12 @@ function App() {
       setNetworkDiagnosticStatus("failed");
       return;
     }
+    const intervalMs = Number(pingInterval), packetSize = Number(pingPacketSize);
+    if (!Number.isInteger(intervalMs) || intervalMs < 200 || intervalMs > 60000 || !Number.isInteger(packetSize) || packetSize < 0 || packetSize > 65500 || !pingInterval.trim() || !pingPacketSize.trim()) {
+      setNetworkError("Ping interval must be 200–60000 ms and packet size must be 0–65500 payload bytes.");
+      setNetworkDiagnosticStatus("failed");
+      return;
+    }
     if (!IS_TAURI) {
       setNetworkError("Network diagnostics require the desktop runtime.");
       setNetworkDiagnosticStatus("failed");
@@ -3907,7 +3971,7 @@ function App() {
     setNetworkPingResult(null);
     setNetworkError(null);
     try {
-      const response = await invoke<{ operationId: string }>("network_ping_start", { request: { host, timeoutMs } });
+      const response = await invoke<{ operationId: string }>("network_ping_start", { request: { host, timeoutMs, intervalMs, packetSize } });
       if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
         const cancelId = takePendingNetworkDiagnosticCancel(run);
         if (cancelId) void cancelNetworkDiagnosticId(cancelId);
@@ -3918,9 +3982,9 @@ function App() {
         setNetworkError(String(error));
       }
     }
-  }, [cancelNetworkDiagnosticId, networkHost, networkTimeout]);
+  }, [cancelNetworkDiagnosticId, networkHost, networkTimeout, pingInterval, pingPacketSize]);
 
-  const startNetworkTraceroute = useCallback(async () => {
+  const startNetworkMtr = useCallback(async () => {
     const host = networkHost.trim();
     const timeoutMs = Number(networkTimeout);
     const maxHops = Number(networkTraceMaxHops);
@@ -3944,12 +4008,12 @@ function App() {
     if (!pending) return;
     if (pending.cancelId) await invoke("network_diagnostic_cancel", { operationId: pending.cancelId }).catch(() => undefined);
     if (run.generation !== pending.generation) return;
-    setNetworkDiagnosticKind("traceroute");
+    setNetworkDiagnosticKind("mtr");
     setNetworkDiagnosticStatus("running");
-    setNetworkTracerouteResult(null);
+    setNetworkMtrResult(null);
     setNetworkError(null);
     try {
-      const response = await invoke<{ operationId: string }>("network_traceroute_start", { request: { host, timeoutMs, maxHops } });
+      const response = await invoke<{ operationId: string }>("network_mtr_start", { request: { host, timeoutMs: 60000, maxHops } });
       if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
         const cancelId = takePendingNetworkDiagnosticCancel(run);
         if (cancelId) void cancelNetworkDiagnosticId(cancelId);
@@ -4008,7 +4072,7 @@ function App() {
     setNetworkError(null);
     try {
       const response = await invoke<{ scanId: string }>("network_scan_start", {
-        request: { host, startPort, endPort, concurrency, timeoutMs },
+        request: { host, startPort, endPort, concurrency, timeoutMs, protocol: networkScanProtocol },
       });
       if (!networkScanIdRef.current) {
         networkScanIdRef.current = response.scanId;
@@ -4020,7 +4084,7 @@ function App() {
       setNetworkScanStatus("failed");
       setNetworkError(String(error));
     }
-  }, [networkHost, networkScanConcurrency, networkScanEnd, networkScanStart, networkTimeout]);
+  }, [networkHost, networkScanConcurrency, networkScanEnd, networkScanStart, networkTimeout, networkScanProtocol]);
 
   const cancelNetworkScan = useCallback(async () => {
     const scanId = networkScanIdRef.current ?? networkScanId;
@@ -4123,7 +4187,7 @@ function App() {
       setNetworkDiagnosticKind(payload.kind);
       setNetworkDiagnosticStatus(payload.state);
       if (payload.ping) setNetworkPingResult(payload.ping);
-      if (payload.traceroute) setNetworkTracerouteResult(payload.traceroute);
+      if (payload.traceroute) setNetworkMtrResult(payload.traceroute);
       if (payload.state === "failed") setNetworkError(payload.error ?? "Network diagnostic failed.");
       if (payload.state === "cancelled") setNetworkError(null);
     }).then((stop) => {
@@ -4361,12 +4425,14 @@ function App() {
       window.removeEventListener("keydown", onEmergencyKeyDown, true);
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [adjustTerminalFontSize, broadcastEnabled, cancelMacro, closing, closeTerminal, closeTerminalSearch, cycleTerminal, editingRemoteFile, focusPane, macroRecording, macroRun, openSplit, selectedTerminalId, settings.keyboard, startNewTerminal, stopMacroRecording, terminalSearchOpen]);
+  }, [adjustTerminalFontSize, broadcastEnabled, cancelMacro, closing, closeTerminal, closeTerminalSearch, cycleTerminal, editingRemoteFile, focusPane, macroRecording, macroRun, openSplit, selectedTerminalId, settings.keyboard, startNewTerminal, stopMacroRecording, terminalSearchOpen, setPaletteOpen, setBroadcastOpen, setQuickConnectOpen, setMacrosOpen]);
 
   const filteredSessions = sessionRows.filter((session) => {
-    const matchesSearch = `${session.name} ${session.detail} ${session.type} ${session.tags.join(" ")}`.toLowerCase().includes(search.toLowerCase());
+    const matchesSearch = `${session.name} ${session.folder} ${session.detail} ${session.type} ${session.tags.join(" ")}`.toLowerCase().includes(search.trim().toLowerCase());
     return matchesSearch && (!favoritesOnly || session.favorite) && (!recentOnly || session.lastUsedAt != null);
   }).sort((first, second) => first.name.localeCompare(second.name, undefined, { numeric: true, sensitivity: "base" }));
+  const sessionGroups = groupSessionsByFolder(filteredSessions, createdSessionFolders);
+  const firstMatchingSession = sessionGroups.find(([, sessions]) => sessions.length > 0)?.[1][0];
   const activeTransferCount = transfers.filter((transfer) => !["completed", "cancelled", "failed"].includes(transfer.state)).length;
   const activeTunnelCount = tunnels.filter((tunnel) => !["stopped", "failed"].includes(tunnel.state)).length;
 
@@ -4380,6 +4446,7 @@ function App() {
 
   return (
     <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
+      {fileTransferOpen && <FileTransferClient onClose={() => setFileTransferOpen(false)} onServerRunning={setTftpServerRunning} initialServer={tftpServerRunning} />}
       {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
       <nav className="desktop-menubar" aria-label="Application menu" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onKeyDown={(event) => { if (event.key === "Escape") { const menu = (event.target as HTMLElement).closest("details"); menu?.removeAttribute("open"); menu?.querySelector("summary")?.focus(); } }}>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
@@ -4389,8 +4456,14 @@ function App() {
           <hr />
           <button onClick={importOpenSshConfig}>Import OpenSSH config…</button>
         </div></details>
+        <button onClick={() => setActiveView("generator")}>Generator</button>
+        <button onClick={() => setMacrosOpen(true)}>Macros</button>
+        <button title="Double Shift" onClick={() => { setShortcutSelectionDraft(null); setShortcutsOpen(true); }}>Shortcuts</button>
+        <button onClick={() => setNotesOpen(true)}>Notes</button>
+        <button onClick={openSettings}>Settings</button>
         <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu">
           <button onClick={() => setActiveView("files")}>Remote files</button>
+          <button onClick={() => setFileTransferOpen(true)}>FTP / TFTP…</button>
           <button onClick={() => setActiveView("diagnostics")}>Network diagnostics</button>
           <button onClick={() => setActiveView("tunnels")}>SSH tunnels</button>
           <button onClick={() => setActiveView("transfers")}>Transfers</button>
@@ -4402,18 +4475,14 @@ function App() {
           <button onClick={() => setCredentialsOpen(true)}>Credential vault…</button>
           <button onClick={() => setPaletteOpen(true)}>Command palette…</button>
         </div></details>
-        <button onClick={() => setActiveView("generator")}>Generator</button>
-        <button onClick={openSettings}>Settings</button>
-        <button onClick={() => setMacrosOpen(true)}>Macros</button>
-        <button title="Double Shift" onClick={() => { setShortcutSelectionDraft(null); setShortcutsOpen(true); }}>Shortcuts</button>
-        <button onClick={() => setNotesOpen(true)}>Notes</button>
         <button onClick={() => setHelpOpen(true)}>Help</button>
-        <div className="desktop-menu-end">{workspaceSecurity.status?.enabled && <button aria-label="Lock workspace" title="Lock workspace" onClick={() => void workspaceSecurity.lock()}><LockKeyhole size={14} strokeWidth={1.5} /></button>}<span className="desktop-menu-status" title={IS_TAURI ? "Desktop runtime" : "Browser preview"}><span className="live-dot" /> Conxol</span></div>
+        <div className="desktop-menu-end">{tftpServerRunning && <button className="tftp-server-indicator" onClick={() => setFileTransferOpen(true)} title="TFTP server is running. Open to stop sharing.">TFTP serving</button>}{workspaceSecurity.status?.enabled && <button aria-label="Lock workspace" title="Lock workspace" onClick={() => void workspaceSecurity.lock()}><LockKeyhole size={14} strokeWidth={1.5} /></button>}<span className="desktop-menu-status" title={IS_TAURI ? "Desktop runtime" : "Browser preview"}><span className="live-dot" /> Conxol</span></div>
       </nav>
 
       <div className="app-body">
         <nav className="session-activity-strip" aria-label="Sidebar tools">
           <button className="activity-sessions" title="User sessions" aria-label="User sessions" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}><List size={16} strokeWidth={1.5} /></button>
+          <button className="activity-favorites" title="Favorite sessions" aria-label="Favorite sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} aria-controls="session-sidebar" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}><Star size={16} strokeWidth={1.5} /></button>
           <button className="activity-files" title="Remote files" aria-label="Remote files" onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderInput size={16} strokeWidth={1.5} /></button>
           <button title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarOpen} aria-controls="session-sidebar" onClick={() => setSidebarOpen((open) => !open)}>{sidebarOpen ? <ChevronLeft size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}</button>
           <button className="activity-settings" title="Settings" aria-label="Settings" onClick={openSettings}><Settings2 size={16} strokeWidth={1.5} /></button>
@@ -4435,7 +4504,7 @@ function App() {
 
           <label className="search-box">
             <Search size={15} />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quick connect / find session…" aria-label="Find session" onKeyDown={(event) => { if (event.key === "Enter") { const saved = savedSessions.find((item) => item.id === filteredSessions[0]?.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else setQuickConnectOpen(true); } }} />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quick connect / find session…" aria-label="Find session" onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (event.repeat) return; const saved = savedSessions.find((item) => item.id === firstMatchingSession?.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (!search.trim()) setQuickConnectOpen(true); } }} />
             <span className="search-key">{formatShortcut(settings.keyboard.quickConnect)}</span>
           </label>
 
@@ -4457,10 +4526,10 @@ function App() {
             <div className="list-heading"><span>{recentOnly ? "Recent sessions" : favoritesOnly ? "Favorite sessions" : "User sessions"}</span><span className="list-actions"><button aria-label="Import OpenSSH config" title="Import OpenSSH config" onClick={importOpenSshConfig}><Upload size={14} /></button><button aria-label="Import Conxol session export" title="Import Conxol session export" onClick={importSessions}><ArrowDownToLine size={14} /></button><button aria-label="Export Conxol sessions" title="Export secret-free session definitions" onClick={exportSessions}><ArrowUpFromLine size={14} /></button></span></div>
             {sessionListError && <div className="connect-error" role="alert"><span>{sessionListError}</span><button type="button" className="outline-button" onClick={refreshSavedSessions}>Retry</button></div>}
             <div className="session-folder-controls"><button type="button" title="Expand all folders" aria-label="Expand all folders" onClick={() => expandSessionFolders(true)}><ChevronsUpDown size={14} /></button><button type="button" title="Collapse all folders" aria-label="Collapse all folders" onClick={() => expandSessionFolders(false)}><ChevronsDownUp size={14} /></button><button type="button" title="Create folder" aria-label="Create folder" onClick={() => void createSessionFolder()}><FolderPlus size={14} /></button></div>
-            {groupSessionsByFolder(filteredSessions, createdSessionFolders).map(([folder, sessions]) => {
+            {sessionGroups.map(([folder, sessions]) => {
               const folderHasHosts = sessionRows.some(session => session.folder.trim() === folder);
               const rows = sessions.map((session) => (
-                  <SessionRow key={session.id ?? session.name} {...session} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
+                  <SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
                     const saved = savedSessions.find((item) => item.id === session.id);
                     if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); }
                   }} onEdit={session.id ? () => {
@@ -4472,7 +4541,7 @@ function App() {
                   } : undefined} onToggleFavorite={() => void toggleFavorite(session)} />
                 ));
               return folder ? (
-                <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={sessionFolderState[`folder:${folder}`] ?? true} onToggle={event => changeSessionFolder(`folder:${folder}`, event.currentTarget.open)}>
+                <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={search.trim() && sessions.length > 0 ? true : (sessionFolderState[`folder:${folder}`] ?? true)} onToggle={event => { if (!search.trim()) changeSessionFolder(`folder:${folder}`, event.currentTarget.open); }}>
                   <summary className="folder-heading session-folder-heading" onContextMenu={event => {
                     event.preventDefault(); event.stopPropagation();
                     setFolderContextMenu({ folder, x: event.clientX, y: event.clientY });
@@ -4590,7 +4659,7 @@ function App() {
               ) : activeView === "audit" ? (
                 <AuditHistoryView events={auditEvents} onClear={() => void clearAudit()} />
               ) : activeView === "diagnostics" ? (
-                <NetworkDiagnosticsView host={networkHost} port={networkPort} timeout={networkTimeout} status={networkStatus} addresses={networkAddresses} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} tracerouteResult={networkTracerouteResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} onTraceroute={startNetworkTraceroute} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
+                <NetworkDiagnosticsView pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} port={networkPort} timeout={networkTimeout} status={networkStatus} addresses={networkAddresses} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
               ) : activeView === "terminal" ? null : (
                 <EmptyProtocolView view={activeView} onAction={activeView === "tunnels" || activeView === "monitor" ? () => setQuickConnectOpen(true) : undefined} />
               )}
@@ -4631,6 +4700,16 @@ function App() {
       {helpOpen && <HelpModal onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
       {recoveryOpen && <div className="palette-backdrop" role="presentation" onMouseDown={() => setRecoveryOpen(false)}><section className="session-recovery-dialog" role="dialog" aria-modal="true" aria-label="Recover previous sessions" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setRecoveryOpen(false); }}><header><h2>Recover previous sessions</h2><button autoFocus aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}><X size={16} /></button></header><p>Select a recently used session to reconnect.</p>{sessionRows.filter((session) => session.lastUsedAt != null).sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)).map((session) => <button className="recovery-session" disabled={pendingSavedSession !== null && session.type !== "LOCAL"} key={session.id ?? session.name} onClick={() => { setRecoveryOpen(false); const saved = savedSessions.find((item) => item.id === session.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (session.type === "LOCAL") startNewTerminal(); else setQuickConnectOpen(true); }}><TerminalIcon size={15} /><span>{session.name}<small>{session.detail}</small></span></button>)}{!sessionRows.some((session) => session.lastUsedAt != null) && <p>No previous sessions yet. Start a local terminal or create a session with the + tab.</p>}</section></div>}
       {folderContextMenu && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} disabled={deletingFolder !== null || sessionRows.some(session => session.folder.trim() === folderContextMenu.folder)} onCustomize={() => { setCustomizingFolder(folderContextMenu.folder); setFolderContextMenu(null); }} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
+      {customizingHost && <FolderCustomization key={customizingHost.id} host folder={customizingHost.name} bookmark={{ folder: customizingHost.folder ?? "", tags: customizingHost.tags, notes: customizingHost.notes ?? "", favorite: customizingHost.favorite }} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder).filter((folder): folder is string => !!folder)])].sort()} appearance={hostStyles[customizingHost.id] ?? { icon: customizingHost.protocol === "LOCAL" ? "terminal" : "server", color: "" }} onClose={() => setCustomizingHost(null)} onSave={async (name, style, bookmark) => {
+        if (!bookmark) return;
+        const session = { ...customizingHost, name, folder: bookmark.folder || null, tags: bookmark.tags, notes: bookmark.notes, favorite: bookmark.favorite };
+        if (IS_TAURI) await invoke<SavedSession>("session_save", { session });
+        setSessionFolderState(current => ({ ...current, ...(bookmark.folder ? { [`folder:${bookmark.folder}`]: true } : {}) }));
+        refreshSavedSessions();
+        setSessionNotice(`Saved ${name}.`);
+        setHostStyles(current => ({ ...current, [customizingHost.id]: style }));
+        setCustomizingHost(null);
+      }} />}
       {customizingFolder && <FolderCustomization key={customizingFolder} folder={customizingFolder} appearance={folderStyles[customizingFolder] ?? defaultFolderStyle} onClose={() => setCustomizingFolder(null)} onSave={saveFolderCustomization} />}
       {quickConnectOpen && <QuickConnectDialog error={connectionError} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder).filter((folder): folder is string => !!folder)])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder)} onConnectTelnet={connectTelnet} onConnectSerial={connectSerial} onConnectRemoteDesktop={connectRemoteDesktop} onShell={() => startNewTerminal()} onWsl={openWslTerminalPicker} />}
       {tunnelDraft && <TunnelDialog kind={tunnelDraft.kind} onClose={() => setTunnelDraft(null)} onStart={startTunnel} />}
@@ -4792,7 +4871,7 @@ function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustom
   </div>;
 }
 
-function SessionRow({ name, detail, type, active, favorite, connecting = false, disabled = false, onSelect, onEdit, onDelete, onToggleFavorite, onDragStart, onDragEnd, onDragMove, onDrop }: SessionListItem & { connecting?: boolean; disabled?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragMove?: (folder: string | null) => void; onDrop?: (folder: string) => void; onSelect: () => void; onEdit?: () => void; onDelete?: () => void; onToggleFavorite: () => void }) {
+function SessionRow({ appearance, onCustomize, name, detail, type, active, favorite, connecting = false, disabled = false, onSelect, onEdit, onDelete, onToggleFavorite, onDragStart, onDragEnd, onDragMove, onDrop }: SessionListItem & { appearance?: FolderStyle; onCustomize?: () => void; connecting?: boolean; disabled?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragMove?: (folder: string | null) => void; onDrop?: (folder: string) => void; onSelect: () => void; onEdit?: () => void; onDelete?: () => void; onToggleFavorite: () => void }) {
   const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
   const suppressClick = useRef(false);
   const folderAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-session-folder]")?.dataset.sessionFolder ?? null;
@@ -4823,7 +4902,7 @@ function SessionRow({ name, detail, type, active, favorite, connecting = false, 
       drag.current = null;
     }}
     onPointerCancel={() => { drag.current = null; onDragEnd?.(); }}
-    onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}><button className="session-row-main" title={`${detail}${onEdit ? " · Right-click or F2 to rename and organize" : ""}`} onContextMenu={onEdit ? event => { event.preventDefault(); onEdit(); } : undefined} onKeyDown={event => { if (event.key === "F2" && onEdit) { event.preventDefault(); onEdit(); } }} disabled={disabled} aria-busy={connecting} onClick={onSelect}><span className={`session-icon ${type === "LOCAL" ? "local" : "remote"}`}>{type === "LOCAL" ? <TerminalIcon size={14} /> : <Server size={14} />}</span><span className="session-copy"><strong>{name}</strong><small>{detail}</small></span><span className={`session-type ${type === "LOCAL" ? "local-type" : ""}`}>{type}</span></button><div className="session-row-actions">{onEdit && <button className="session-action" onClick={onEdit} aria-label={`Edit ${name}`} title="Edit session"><Pencil size={12} /></button>}{onDelete && <button className="session-action danger" onClick={onDelete} aria-label={`Delete ${name}`} title="Delete session"><Trash2 size={12} /></button>}<button className={`session-favorite ${favorite ? "selected" : ""}`} onClick={onToggleFavorite} aria-label={`${favorite ? "Remove" : "Add"} ${name} ${favorite ? "from" : "to"} favorites`} title={favorite ? "Remove from favorites" : "Add to favorites"}><Star size={13} fill={favorite ? "currentColor" : "none"} /></button></div></div>;
+    onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}><button className="session-row-main" title={`${detail}${onEdit ? " · Right-click or F2 to rename and organize" : ""}`} onContextMenu={onEdit ? event => { event.preventDefault(); onEdit(); } : undefined} onKeyDown={event => { if (event.key === "F2" && onEdit) { event.preventDefault(); onEdit(); } }} disabled={disabled} aria-busy={connecting} onClick={onSelect}><span className={`session-icon ${type === "LOCAL" ? "local" : "remote"}`}>{appearance ? <SessionFolderIcon appearance={appearance} /> : type === "LOCAL" ? <TerminalIcon size={14} /> : <Server size={14} />}</span><span className="session-copy"><strong>{name}</strong><small>{detail}</small></span><span className={`session-type ${type === "LOCAL" ? "local-type" : ""}`}>{type}</span></button><div className="session-row-actions">{onCustomize && <button type="button" className="session-action" onClick={onCustomize} aria-label={`Customize host ${name}`} title="Customize host"><Network size={12} /></button>}{onEdit && <button className="session-action" onClick={onEdit} aria-label={`Edit ${name}`} title="Edit session"><Pencil size={12} /></button>}{onDelete && <button className="session-action danger" onClick={onDelete} aria-label={`Delete ${name}`} title="Delete session"><Trash2 size={12} /></button>}<button className={`session-favorite ${favorite ? "selected" : ""}`} onClick={onToggleFavorite} aria-label={`${favorite ? "Remove" : "Add"} ${name} ${favorite ? "from" : "to"} favorites`} title={favorite ? "Remove from favorites" : "Add to favorites"}><Star size={13} fill={favorite ? "currentColor" : "none"} /></button></div></div>;
 }
 
 function RemoteFilesView({ entries, path, status, error, localDropActive, transfers, onOpenTerminal, onNavigate, onDownload, onUpload, onCreateDirectory, onRename, onDelete, onSetPermissions, onCopyPath, onEdit, onCancelTransfer, onRetryTransfer }: {
@@ -5118,7 +5197,15 @@ function MonitorMetric({ label, value, detail }: { label: string; value: string;
   return <article className="remote-monitor-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function NetworkDiagnosticsView({ host, port, timeout, status, addresses, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, tracerouteResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onTraceroute, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, addresses, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+  pingInterval: string;
+  pingPacketSize: string;
+  onPingIntervalChange: (value: string) => void;
+  onPingPacketSizeChange: (value: string) => void;
+  mtrResult: TracerouteResult | null;
+  onMtr: () => void;
+  scanProtocol: "tcp" | "udp";
+  onScanProtocolChange: (value: "tcp" | "udp") => void;
   host: string;
   port: string;
   timeout: string;
@@ -5135,10 +5222,9 @@ function NetworkDiagnosticsView({ host, port, timeout, status, addresses, result
   scanScanned: number;
   scanTotal: number;
   scanResults: TcpCheckResult[];
-  diagnosticKind: "ping" | "traceroute" | null;
+  diagnosticKind: "ping" | "mtr" | null;
   diagnosticStatus: "idle" | "running" | "completed" | "cancelled" | "failed";
   pingResult: PingResult | null;
-  tracerouteResult: TracerouteResult | null;
   traceMaxHops: string;
   onHostChange: (value: string) => void;
   onPortChange: (value: string) => void;
@@ -5148,7 +5234,6 @@ function NetworkDiagnosticsView({ host, port, timeout, status, addresses, result
   onCheckTcp: () => void;
   onInspectFingerprint: () => void;
   onPing: () => void;
-  onTraceroute: () => void;
   onCancelDiagnostic: () => void;
   onScanStartChange: (value: string) => void;
   onScanEndChange: (value: string) => void;
@@ -5156,36 +5241,82 @@ function NetworkDiagnosticsView({ host, port, timeout, status, addresses, result
   onStartScan: () => void;
   onCancelScan: () => void;
 }) {
-  const statusLabel = status === "running" ? "Running" : status === "ready" ? "Ready" : status === "error" ? "Needs attention" : "Idle";
+  type Tool = "scan" | "ping" | "mtr" | "dns" | "tcp" | "ssh";
+  const [tool, setTool] = useState<Tool>("scan");
+  const [follow, setFollow] = useState(true);
+  const [copyNotice, setCopyNotice] = useState("");
+  const outputRef = useRef<HTMLPreElement>(null);
   const scanActive = scanStatus === "running";
   const diagnosticActive = diagnosticStatus === "running";
-  const scanProgress = scanTotal > 0 ? Math.min(100, Math.round((scanScanned / scanTotal) * 100)) : 0;
-  return <section className="diagnostics-view" aria-label="Network diagnostics">
-    <div className="diagnostics-toolbar">
-      <div><span className="eyebrow">NETWORK / DIAGNOSTICS</span><strong>Inspect one explicit target</strong><p>Resolve a hostname, check one TCP port, or run a bounded range from the desktop runtime. Nothing starts automatically.</p></div>
-      <div className={`diagnostics-status diagnostics-${status}`}><span /> {statusLabel}</div>
+  const busy = scanActive || diagnosticActive || status === "running";
+  const tools: { id: Tool; label: string }[] = [{ id: "scan", label: "Port scan" }, { id: "ping", label: "Ping" }, { id: "mtr", label: "MTR" }, { id: "dns", label: "DNS" }, { id: "tcp", label: "TCP check" }, { id: "ssh", label: "SSH key" }];
+  const label = tools.find(item => item.id === tool)!.label;
+  const selectedStatus = tool === "scan" ? scanStatus : ["ping", "mtr"].includes(tool) ? diagnosticKind === tool ? diagnosticStatus : "idle" : status;
+  const lines: string[] = [];
+  if (tool === "scan") {
+    lines.push(`PORT SCAN  /  ${scanProtocol.toUpperCase()}`, "");
+    if (scanStatus !== "idle" || scanResults.length) {
+      lines.push(`Scan ${scanId?.slice(0, 8) ?? "starting"}    ${scanStatus.toUpperCase()}    ${scanScanned}/${scanTotal} ports`, "", "PORT       PROTOCOL   STATE", "-----------------------------------------");
+      for (const item of scanResults) lines.push(`${String(item.port).padEnd(11)}${scanProtocol.toUpperCase().padEnd(11)}${item.status === "open-or-filtered" ? "open or filtered" : item.status.replaceAll("-", " ")}`);
+      if (scanActive) lines.push("", "Scanning…");
+      else lines.push("", `${scanResults.filter(item => item.status === "open").length} open · ${scanResults.filter(item => item.status === "closed").length} closed · ${scanResults.filter(item => item.status === "open-or-filtered").length} open or filtered`, `Scan ${scanStatus}.`);
+    } else lines.push("Ready. Enter a target and port range, then press Run.");
+    if (scanProtocol === "udp") lines.push("", "UDP: reply = open; silence = open or filtered.", "Services may ignore empty datagrams.");
+  } else if (tool === "mtr") {
+    const report = mtrResult;
+    lines.push("MTR  /  PACKET LOSS & LATENCY", "");
+    if (report) lines.push(`Target: ${report.host}    Elapsed: ${report.elapsedMs} ms`, "", ...report.hops);
+    else lines.push(diagnosticKind === tool && diagnosticActive ? "Collecting live probe cycles…" : diagnosticKind === tool && diagnosticStatus === "failed" ? "Diagnostic failed." : "Ready. Enter a target, then press Run.");
+    if (diagnosticKind === tool && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
+  } else if (tool === "ping") {
+    lines.push("PING", "");
+    if (pingResult) {
+      const loss = pingResult.sent ? ((pingResult.sent - pingResult.received) / pingResult.sent * 100).toFixed(1) : "0.0";
+      lines.push(`Target: ${pingResult.host}    Payload: ${pingResult.packetSize} bytes    Interval: ${pingResult.intervalMs} ms`, "", ...pingResult.lines, "", `Sent: ${pingResult.sent}    Successful probes: ${pingResult.received}    Loss: ${loss}%    Elapsed: ${pingResult.elapsedMs} ms`);
+    }
+    else lines.push(diagnosticKind === "ping" && diagnosticActive ? "Waiting for echo reply…" : "Ready. Enter a target, then press Run.");
+    if (diagnosticKind === "ping" && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
+  } else if (tool === "dns") {
+    lines.push("DNS LOOKUP", "", ...(addresses.length ? addresses : [status === "running" ? "Resolving…" : "Ready. Enter a hostname, then press Run."]));
+  } else if (tool === "tcp") {
+    lines.push("TCP CONNECT", "", ...(result ? [`Target: ${result.host}:${result.port}`, `State: ${result.status.replaceAll("-", " ")}`] : [status === "running" ? "Connecting…" : "Ready. Enter a target and port, then press Run."]));
+  } else {
+    lines.push("SSH HOST KEY", "", ...(fingerprint ? [`Target: ${fingerprint.host}:${fingerprint.port}`, fingerprint.fingerprint, "", "Observed only; host trust has not been changed."] : [status === "running" ? "Inspecting host key…" : "Ready. Enter an SSH target and port, then press Run."]));
+  }
+  if (error) lines.push("", `ERROR: ${error}`);
+  const output = lines.join("\n");
+  useEffect(() => {
+    if (follow && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
+  }, [follow, output]);
+  const run = () => {
+    setFollow(true); setCopyNotice("");
+    ({ scan: onStartScan, ping: onPing, mtr: onMtr, dns: onResolve, tcp: onCheckTcp, ssh: onInspectFingerprint })[tool]();
+  };
+  return <section className="diagnostics-cli" aria-label="Network diagnostics">
+    <header className="diagnostics-cli-header"><div><TerminalIcon size={18} /><h2>Diagnostics</h2></div><span role="status">{busy ? "Running" : "Ready"}</span></header>
+    <nav className="diagnostics-cli-tools" aria-label="Diagnostic tool">{tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} disabled={busy && item.id !== tool} onClick={() => { setTool(item.id); setCopyNotice(""); setFollow(true); }}>{item.label}</button>)}</nav>
+    <form className="diagnostics-cli-controls" onSubmit={event => { event.preventDefault(); if (!busy) run(); }}>
+      <label className="diagnostics-cli-host">Target<input required value={host} disabled={busy} onChange={event => onHostChange(event.target.value)} placeholder="Hostname or IP address" /></label>
+      {tool === "scan" && <>
+        <label>Protocol<select value={scanProtocol} disabled={busy} onChange={event => onScanProtocolChange(event.target.value as "tcp" | "udp")}><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+        <label>From<input type="number" min="1" max="65535" required value={scanStart} disabled={busy} onChange={event => onScanStartChange(event.target.value)} /></label>
+        <label>To<input type="number" min="1" max="65535" required value={scanEnd} disabled={busy} onChange={event => onScanEndChange(event.target.value)} /></label>
+        <label>Workers<input type="number" min="1" max="128" required value={scanConcurrency} disabled={busy} onChange={event => onScanConcurrencyChange(event.target.value)} /></label>
+      </>}
+      {(tool === "tcp" || tool === "ssh") && <label>Port<input type="number" min="1" max="65535" required value={port} disabled={busy} onChange={event => onPortChange(event.target.value)} /></label>}
+      {tool === "ping" && <>
+        <label>Interval (ms)<input type="number" min="200" max="60000" required value={pingInterval} disabled={busy} onChange={event => onPingIntervalChange(event.target.value)} /></label>
+        <label>Packet (bytes)<input type="number" min="0" max="65500" required value={pingPacketSize} disabled={busy} onChange={event => onPingPacketSizeChange(event.target.value)} title="ICMP payload size, excluding headers" /></label>
+      </>}
+      {(tool === "mtr") && <label>Max hops<input type="number" min="1" max="32" required value={traceMaxHops} disabled={busy} onChange={event => onTraceMaxHopsChange(event.target.value)} /></label>}
+      {tool !== "mtr" && <label>Timeout (ms)<input type="number" min="50" max="60000" required value={timeout} disabled={busy} onChange={event => onTimeoutChange(event.target.value)} /></label>}
+      {scanActive || diagnosticActive ? <button type="button" className="outline-button" onClick={scanActive ? onCancelScan : onCancelDiagnostic}><Square size={14} /> Stop</button> : <button type="submit" className="primary-button" disabled={busy}><Play size={14} /> Run</button>}
+    </form>
+    <div className="diagnostics-cli-console">
+      <div className="diagnostics-cli-console-bar"><span>{label} <span className="diagnostics-cli-state">/ {selectedStatus}</span></span><div><button type="button" aria-pressed={follow} onClick={() => setFollow(value => !value)}>Follow {follow ? "on" : "off"}</button><button type="button" onClick={() => { void writeClipboardText(output).then(() => setCopyNotice("Copied"), () => setCopyNotice("Copy failed")); }}>{copyNotice || "Copy output"}</button></div></div>
+      <pre ref={outputRef} className="diagnostics-cli-output" tabIndex={0} aria-label={`${label} output`} onScroll={event => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) setFollow(false); }}>{output}</pre>
     </div>
-    <div className="diagnostics-target">
-      <label className="diagnostics-host">Target host or IP<input value={host} onChange={(event) => onHostChange(event.target.value)} placeholder="127.0.0.1 or host.example" /></label>
-      <label>TCP port<input inputMode="numeric" pattern="[0-9]+" value={port} onChange={(event) => onPortChange(event.target.value)} /></label>
-      <label>Timeout ms<input inputMode="numeric" pattern="[0-9]+" value={timeout} onChange={(event) => onTimeoutChange(event.target.value)} /></label>
-    </div>
-    <div className="diagnostics-actions"><button className="outline-button" onClick={onResolve} disabled={status === "running" || diagnosticActive}><Search size={14} /> Resolve DNS</button><button className="primary-button" onClick={onCheckTcp} disabled={status === "running" || diagnosticActive}><Network size={14} /> Check TCP port</button><button className="outline-button" onClick={onInspectFingerprint} disabled={status === "running" || diagnosticActive}><KeyRound size={14} /> Inspect SSH key</button><button className="outline-button" onClick={onPing} disabled={diagnosticActive}><Radio size={14} /> Ping</button><button className="outline-button" onClick={onTraceroute} disabled={diagnosticActive}><Activity size={14} /> Traceroute</button>{diagnosticActive && <button className="outline-button danger-button" onClick={onCancelDiagnostic}><CircleX size={14} /> Cancel {diagnosticKind}</button>}</div>
-    <div className="diagnostics-trace-options"><label>Traceroute max hops<input inputMode="numeric" pattern="[0-9]+" value={traceMaxHops} onChange={(event) => onTraceMaxHopsChange(event.target.value)} disabled={diagnosticActive} /><small>1–32 hops; platform permissions may limit results.</small></label></div>
-    {error && <div className="connect-error diagnostics-error" role="alert"><CircleX size={14} /><span>{error}</span></div>}
-    <div className="diagnostics-results">
-      <article className="diagnostic-card"><div className="diagnostic-card-heading"><span className="eyebrow">DNS / ADDRESSES</span><Search size={15} /></div><h3>{addresses.length > 0 ? `${addresses.length} address${addresses.length === 1 ? "" : "es"}` : "No lookup yet"}</h3>{addresses.length > 0 ? <div className="diagnostic-addresses">{addresses.map((address) => <code key={address}>{address}</code>)}</div> : <p>Enter a target and run an explicit lookup. Results are kept in this view only.</p>}</article>
-      <article className="diagnostic-card"><div className="diagnostic-card-heading"><span className="eyebrow">TCP / REACHABILITY</span><Network size={15} /></div>{result ? <><h3>{result.host}:{result.port}</h3><div className={`diagnostic-result diagnostic-result-${result.status}`}><span /> {result.status === "open" ? "Open" : result.status === "closed" ? "Closed" : result.status === "timed-out" ? "Timed out" : "Failed"}</div><p>The result describes TCP reachability only; it does not authenticate or identify the service.</p></> : <><h3>No TCP check yet</h3><p>Choose a port explicitly, then run a bounded connection check.</p></>}</article>
-      <article className="diagnostic-card"><div className="diagnostic-card-heading"><span className="eyebrow">SSH / HOST KEY</span><KeyRound size={15} /></div>{fingerprint ? <><h3>{fingerprint.host}:{fingerprint.port}</h3><div className="diagnostic-fingerprint"><code>{fingerprint.fingerprint}</code></div><p>Observed during one unauthenticated SSH handshake. Nothing was added to known_hosts.</p></> : <><h3>No SSH key observed</h3><p>Inspect an explicit SSH target to read its server fingerprint without using credentials.</p></>}</article>
-      <article className="diagnostic-card"><div className="diagnostic-card-heading"><span className="eyebrow">ICMP / PING</span><Radio size={15} /></div>{pingResult ? <><h3>{pingResult.reachable ? "Reachable" : "No reply"}</h3><div className={`diagnostic-result ${pingResult.reachable ? "diagnostic-result-open" : "diagnostic-result-closed"}`}><span /> {pingResult.elapsedMs} ms observed</div><p>One platform-native echo request was sent to the explicit target.</p></> : <><h3>No ping yet</h3><p>Ping uses one bounded platform-native probe and can be cancelled.</p></>}</article>
-      <article className="diagnostic-card"><div className="diagnostic-card-heading"><span className="eyebrow">PATH / TRACEROUTE</span><Activity size={15} /></div>{tracerouteResult ? <><h3>{tracerouteResult.reached ? "Destination reached" : "Path incomplete"}</h3><div className={`diagnostic-result ${tracerouteResult.reached ? "diagnostic-result-open" : "diagnostic-result-timed-out"}`}><span /> {tracerouteResult.hops.length} hop lines · {tracerouteResult.elapsedMs} ms</div><pre className="diagnostic-hops">{tracerouteResult.hops.length > 0 ? tracerouteResult.hops.join("\n") : "No hop output returned."}</pre></> : <><h3>No route trace yet</h3><p>Traceroute is bounded to the selected maximum hops and timeout.</p></>}</article>
-    </div>
-    <section className="diagnostics-scan" aria-label="Bounded TCP port scan">
-      <div className="diagnostics-scan-heading"><div><span className="eyebrow">TCP / BOUNDED SCAN</span><h3>Scan an explicit range</h3><p>Maximum 4096 ports, maximum 128 concurrent checks, and a visible cancellation control.</p></div><span className={`diagnostics-scan-state scan-${scanStatus}`}>{scanStatus === "idle" ? "Ready" : scanStatus}</span></div>
-      <div className="diagnostics-scan-fields"><label>Start port<input inputMode="numeric" pattern="[0-9]+" value={scanStart} onChange={(event) => onScanStartChange(event.target.value)} disabled={scanActive} /></label><label>End port<input inputMode="numeric" pattern="[0-9]+" value={scanEnd} onChange={(event) => onScanEndChange(event.target.value)} disabled={scanActive} /></label><label>Concurrency<input inputMode="numeric" pattern="[0-9]+" value={scanConcurrency} onChange={(event) => onScanConcurrencyChange(event.target.value)} disabled={scanActive} /></label><div className="diagnostics-scan-action">{scanActive ? <button className="outline-button" onClick={onCancelScan}><CircleX size={14} /> Cancel scan</button> : <button className="primary-button" onClick={onStartScan}><Search size={14} /> Start bounded scan</button>}</div></div>
-      {(scanStatus !== "idle" || scanResults.length > 0) && <div className="diagnostics-scan-progress"><div className="diagnostics-progress-label"><span>{scanId ? `Scan ${scanId.slice(0, 8)}` : "Scan"}</span><strong>{scanScanned}/{scanTotal || "—"} · {scanProgress}%</strong></div><div className="diagnostics-progress-track"><span style={{ width: `${scanProgress}%` }} /></div><div className="diagnostics-open-results">{scanResults.length > 0 ? scanResults.filter((item) => item.status === "open").map((item) => <code key={item.port}>{item.port} open</code>) : <span>No open ports reported yet.</span>}</div></div>}
-    </section>
-    <div className="diagnostics-note"><ShieldCheck size={14} /><span>Safety boundary: target, range, hop limit, concurrency, timeout, and action are explicit. SSH key inspection uses no credentials, agent, personal key, or known_hosts file; results are diagnostics only.</span></div>
+    <footer className="diagnostics-cli-footer"><span>{tool === "scan" ? "Up to 4096 ports per run · TCP connect / UDP empty datagram" : tool === "ping" ? "Live until stopped · Interval between probe starts · Payload size excludes headers" : tool === "mtr" ? "Live until stopped · Cumulative hop statistics · Bundled Windows MTR" : "Run against the selected target"}</span><span>{busy ? "Working…" : "Select a tool · Enter a target · Run"}</span></footer>
   </section>;
 }
 
@@ -5269,7 +5400,7 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
     catch (cause) { setDiagnosticsError(String(cause)); }
     finally { setDiagnosticsBusy(false); }
   };
-  const tabs = ["Overview", "Shortcuts", "About"] as const;
+  const tabs = ["Overview", "Shortcuts", "Credits", "About"] as const;
   const [tab, setTab] = useState<typeof tabs[number]>("Overview");
   const shortcuts: Array<[string, string]> = [
     ["New terminal", keyboard.newTerminal], ["New session", keyboard.quickConnect],
@@ -5310,18 +5441,25 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
           <div className="help-shortcuts-grid">{shortcuts.map(([label, value]) => <div key={label} className="help-shortcut"><span>{label}</span><kbd>{formatShortcut(value)}</kbd></div>)}</div>
           <p className="help-note">Change shortcuts in Settings → Shortcuts. Escape always stops broadcast.</p>
         </section>
+        <section className="help-panel" id="help-panel-Credits" role="tabpanel" aria-labelledby="help-tab-Credits" hidden={tab !== "Credits"}><ThirdPartyCredits /></section>
         <section className="help-panel" id="help-panel-About" role="tabpanel" aria-labelledby="help-tab-About" hidden={tab !== "About"}>
           <h3>About Conxol</h3>
-          <p className="help-about-description">A focused workspace for terminals, remote sessions, and everyday network operations.</p>
-          <dl className="help-about-details"><div><dt>Author</dt><dd>Tanmoy Roy</dd></div><div><dt>Version</dt><dd>{desktopPackage.version}</dd></div><div><dt>License</dt><dd>Apache License 2.0</dd></div></dl>
-          <p className="help-note">Third-party notices and attributions are included with the application.</p>
+          <p className="help-about-description">An open-source workspace for terminals, remote sessions, and everyday network operations.</p>
+          <dl className="help-about-details">
+            <div><dt>Maintainer</dt><dd><a href="https://github.com/thetonmoyroy" target="_blank" rel="noopener noreferrer">Tonmoy Roy <span className="help-profile-handle">@thetonmoyroy</span></a></dd></div>
+            <div><dt>Based on</dt><dd><a href="https://github.com/OthmaneBlial/MobaRust" target="_blank" rel="noopener noreferrer">MobaRust by Othmane Blial and contributors</a></dd></div>
+            <div><dt>Version</dt><dd>{desktopPackage.version}</dd></div>
+            <div><dt>License</dt><dd>Apache License 2.0</dd></div>
+          </dl>
+          <p className="help-note">Conxol builds on the original open-source project. Original copyright notices and third-party licenses are retained.</p>
+          <p className="help-note">See Credits for third-party tools, project links and the bundled MTR license.</p>
           <div className="help-diagnostics"><div><h4>Support diagnostics</h4><p>Save app information, recent SSH errors, and algorithm details for troubleshooting. Passwords, key contents, host addresses, and terminal output are excluded.</p></div><button type="button" className="outline-button" disabled={diagnosticsBusy} onClick={() => void exportReport()}><Download size={14} />{diagnosticsBusy ? "Saving…" : "Export diagnostics"}</button></div>
           <p className="help-note">For SSH issues, reproduce the failure and export before restarting Conxol. The report keeps the latest 64 failure records from this app session.</p>
           {diagnosticsMessage && <p className="help-note" role="status">{diagnosticsMessage}</p>}
           {diagnosticsError && <p className="help-diagnostics-error" role="alert">{diagnosticsError}</p>}
         </section>
       </div>
-      <footer className="help-footer"><span>Author: <strong>Tanmoy Roy</strong></span><span className="help-version">v{desktopPackage.version}</span><button type="button" className="outline-button" onClick={onClose}>Done</button></footer>
+      <footer className="help-footer"><span>Maintained by <a href="https://github.com/thetonmoyroy" target="_blank" rel="noopener noreferrer">Tonmoy Roy</a></span><span className="help-version">v{desktopPackage.version}</span><button type="button" className="outline-button" onClick={onClose}>Done</button></footer>
     </section>
   </div>;
 }
@@ -6138,9 +6276,9 @@ function QuickConnectDialog({ initialSession, onSave, error, folders, onClose, o
           {[
             { value: "ssh", label: "SSH", icon: KeyRound },
             { value: "telnet", label: "Telnet", icon: TerminalIcon },
+            { value: "serial", label: "Serial", icon: Cable },
             { value: "rdp", label: "RDP", icon: Monitor },
             { value: "vnc", label: "VNC", icon: Monitor },
-            { value: "serial", label: "Serial", icon: Cable },
           ].map(item => <button key={item.value} type="button" disabled={!!initialSession && protocol !== item.value} aria-pressed={protocol === item.value} className={protocol === item.value ? "selected" : ""} onClick={() => {
             const next = item.value as typeof protocol;
             setProtocol(next);

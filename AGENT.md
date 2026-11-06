@@ -279,3 +279,43 @@ caches; existing 16 KiB line, 128-span, viewport and decoration bounds remain.
 Structured addresses/descriptive lines stay automatic and ANSI colors retain
 priority. Restore defaults resets the editable rule list. Unit coverage includes
 bounds, literal regex characters, persistence, removal and live refresh.
+
+## FTP / TFTP clients
+
+Tools > FTP / TFTP uses `FileTransferClient.tsx` and the native
+`file_transfer.rs` manager. FTP listing and single-file upload/download, explicit
+FTPS and binary TFTP clients are separate from the SSH/SFTP browser. The optional read-only TFTP server is started explicitly in the same dialog. System curl must support the selected protocol. Passwords
+travel only through transient stdin config. Preserve plaintext/upload approvals,
+private upload snapshots, no-clobber download promotion, cancellation and shutdown
+cleanup. See `docs/testing/ftp-tftp.md` for limits and runtime requirements.
+Use `cargo xtask test-file-transfers` for isolated disposable loopback fixtures.
+
+TFTP client/server files are bounded at 1 GiB, with normal 1468-byte block
+negotiation, optional 512-byte compatibility mode and 65535 -> 0 block rollover.
+Large transfers require peer rollover support; TFTP clients get a 30-minute
+rather than five-minute deadline. `tftp_server.rs` implements the native read-only
+server: one explicitly selected immutable snapshot, configurable bind IP/port,
+optional device-IP restriction, two workers, bounded retries and Start/Stop/status
+IPC. The server continues after dialog close with a top-bar indicator; app exit
+joins the server listener/workers. Preserve filename-only access (no directory
+root, symlink traversal or WRQ uploads) and explicit unencrypted sharing consent.
+`TftpServerPanel.tsx` owns the controls, polling status only while visible.
+
+Terminal Ctrl+C sends ETX through the normal input queue even with a selection;
+Ctrl+Shift+C copies selected text. `terminal-control-keys.ts` reserves these before
+xterm/browser copy handling and refuses input for hidden, locked or disposed panes.
+Approved terminal pastes refit each recipient and reveal its prompt before queued
+delivery. `terminal-paste-reveal.ts` also follows delayed echoed output after parse
+and paint for up to five seconds; manual scroll/selection cancels following.
+Cancelled pastes preserve the viewport. Dispose subscriptions and queued frames
+when the owning terminal closes.
+
+Font-size changes schedule a coalesced next-frame FitAddon refit through
+`terminal-fit.ts`, then notify the native transport of the new grid. Preserve
+bottom-following when already at the prompt, and keep scrollback browsing stable.
+Never remount the terminal to apply font changes; that closes its transport.
+
+SSH and Telnet focus the selected terminal on connected state, including reconnects.
+Telnet restores terminal focus after its optional Save session dialog closes, so
+the remote username prompt accepts typing immediately. Preserve focus guards for
+other selected panes, open modals, editable controls, hidden panes and workspace lock.

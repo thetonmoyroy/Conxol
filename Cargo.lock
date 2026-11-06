@@ -822,7 +822,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "conxol"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "anyhow",
  "argon2",
@@ -859,7 +859,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-benchmarks"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "conxol-core",
  "serde_json",
@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-core"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "proptest",
  "serde",
@@ -878,16 +878,17 @@ dependencies = [
 
 [[package]]
 name = "conxol-network"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "serde",
+ "serde_json",
  "thiserror 2.0.20",
  "tokio",
 ]
 
 [[package]]
 name = "conxol-remote-desktop"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "serde",
  "serde_json",
@@ -898,7 +899,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-serial"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "conxol-core",
  "libc",
@@ -910,7 +911,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-ssh"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "anyhow",
  "conxol-core",
@@ -929,7 +930,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-store"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "conxol-core",
  "libc",
@@ -943,7 +944,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-telnet"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "conxol-core",
  "encoding_rs",
@@ -954,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-vault"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -6969,7 +6970,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.1.45"
+version = "0.1.50"
 dependencies = [
  "sha2 0.11.0",
 ]

@@ -1,13 +1,14 @@
+use conxol_network::{
+    LivePingOptions, LivePingResult, NetworkDiagnosticError, PortScanOptions, ScanProtocol,
+    TcpCheckResult, TracerouteOptions, TracerouteResult, mtr_live, ping_live,
+    scan_ports_with_progress,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
-use conxol_network::{
-    NetworkDiagnosticError, PingOptions, PingResult, PortScanOptions, TcpCheckResult,
-    TracerouteOptions, TracerouteResult, ping, scan_tcp_with_progress, traceroute,
-};
+use tauri::{AppHandle, Emitter, Manager};
 use thiserror::Error;
 use tokio::sync::watch;
 use uuid::Uuid;
@@ -21,6 +22,8 @@ const SCAN_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NetworkScanRequest {
+    #[serde(default)]
+    pub protocol: ScanProtocol,
     pub host: String,
     pub start_port: u16,
     pub end_port: u16,
@@ -64,7 +67,7 @@ struct NetworkScanEvent {
 #[serde(rename_all = "camelCase")]
 enum NetworkDiagnosticKind {
     Ping,
-    Traceroute,
+    Mtr,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -82,7 +85,7 @@ struct NetworkDiagnosticEvent {
     operation_id: String,
     kind: NetworkDiagnosticKind,
     state: NetworkDiagnosticState,
-    ping: Option<PingResult>,
+    ping: Option<LivePingResult>,
     traceroute: Option<TracerouteResult>,
     error: Option<String>,
 }
@@ -153,8 +156,9 @@ impl NetworkManager {
                 SCAN_PROGRESS_INTERVAL,
                 Instant::now(),
             );
-            let result = scan_tcp_with_progress(
+            let result = scan_ports_with_progress(
                 options,
+                request.protocol,
                 &mut cancellation,
                 |port_result, scanned, total| {
                     progress_scanned.store(scanned, Ordering::Relaxed);
@@ -240,8 +244,12 @@ impl NetworkManager {
         app: AppHandle,
         host: String,
         timeout_ms: u64,
+        interval_ms: u64,
+        packet_size: u16,
     ) -> Result<NetworkDiagnosticResponse, NetworkManagerError> {
-        let options = PingOptions {
+        let options = LivePingOptions {
+            interval: Duration::from_millis(interval_ms),
+            packet_size,
             host,
             timeout: validated_timeout(timeout_ms)?,
         };
@@ -263,7 +271,21 @@ impl NetworkManager {
         let manager = self.clone();
         let id_for_task = operation_id.clone();
         tauri::async_runtime::spawn(async move {
-            match ping(options, &mut cancellation).await {
+            match ping_live(options, &mut cancellation, |snapshot| {
+                emit_diagnostic_event(
+                    &app,
+                    NetworkDiagnosticEvent {
+                        operation_id: id_for_task.clone(),
+                        kind: NetworkDiagnosticKind::Ping,
+                        state: NetworkDiagnosticState::Running,
+                        ping: Some(snapshot),
+                        traceroute: None,
+                        error: None,
+                    },
+                );
+            })
+            .await
+            {
                 Ok(result) => emit_diagnostic_event(
                     &app,
                     NetworkDiagnosticEvent {
@@ -303,13 +325,36 @@ impl NetworkManager {
         Ok(NetworkDiagnosticResponse { operation_id })
     }
 
-    pub async fn start_traceroute(
+    pub async fn start_mtr(
         &self,
         app: AppHandle,
         host: String,
         timeout_ms: u64,
         max_hops: u8,
     ) -> Result<NetworkDiagnosticResponse, NetworkManagerError> {
+        let mtr_program = if cfg!(windows) {
+            let packaged = app
+                .path()
+                .resource_dir()
+                .map_err(|_| NetworkDiagnosticError::MtrUnavailable)?
+                .join("helpers/mtr/mtr.exe");
+            if packaged.is_file() {
+                packaged
+            } else {
+                #[cfg(debug_assertions)]
+                {
+                    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                        .join("../../../tools/mtr/windows-x86_64/mtr.exe")
+                }
+                #[cfg(not(debug_assertions))]
+                {
+                    return Err(NetworkDiagnosticError::MtrUnavailable.into());
+                }
+            }
+        } else {
+            std::path::PathBuf::from("mtr")
+        };
+        let kind = NetworkDiagnosticKind::Mtr;
         let options = TracerouteOptions {
             host,
             timeout: validated_timeout(timeout_ms)?,
@@ -323,7 +368,7 @@ impl NetworkManager {
             &app,
             NetworkDiagnosticEvent {
                 operation_id: operation_id.clone(),
-                kind: NetworkDiagnosticKind::Traceroute,
+                kind: kind.clone(),
                 state: NetworkDiagnosticState::Running,
                 ping: None,
                 traceroute: None,
@@ -333,12 +378,26 @@ impl NetworkManager {
         let manager = self.clone();
         let id_for_task = operation_id.clone();
         tauri::async_runtime::spawn(async move {
-            match traceroute(options, &mut cancellation).await {
+            let result = mtr_live(&mtr_program, options, &mut cancellation, |snapshot| {
+                emit_diagnostic_event(
+                    &app,
+                    NetworkDiagnosticEvent {
+                        operation_id: id_for_task.clone(),
+                        kind: NetworkDiagnosticKind::Mtr,
+                        state: NetworkDiagnosticState::Running,
+                        ping: None,
+                        traceroute: Some(snapshot),
+                        error: None,
+                    },
+                );
+            })
+            .await;
+            match result {
                 Ok(result) => emit_diagnostic_event(
                     &app,
                     NetworkDiagnosticEvent {
                         operation_id: id_for_task.clone(),
-                        kind: NetworkDiagnosticKind::Traceroute,
+                        kind: kind.clone(),
                         state: NetworkDiagnosticState::Completed,
                         ping: None,
                         traceroute: Some(result),
@@ -349,7 +408,7 @@ impl NetworkManager {
                     &app,
                     NetworkDiagnosticEvent {
                         operation_id: id_for_task.clone(),
-                        kind: NetworkDiagnosticKind::Traceroute,
+                        kind: kind.clone(),
                         state: NetworkDiagnosticState::Cancelled,
                         ping: None,
                         traceroute: None,
@@ -360,7 +419,7 @@ impl NetworkManager {
                     &app,
                     NetworkDiagnosticEvent {
                         operation_id: id_for_task.clone(),
-                        kind: NetworkDiagnosticKind::Traceroute,
+                        kind: kind.clone(),
                         state: NetworkDiagnosticState::Failed,
                         ping: None,
                         traceroute: None,

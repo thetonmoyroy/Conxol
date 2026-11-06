@@ -12,7 +12,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
-use tokio::net::{TcpStream, lookup_host};
+use tokio::net::{TcpStream, UdpSocket, lookup_host};
 use tokio::process::Command;
 use tokio::sync::watch;
 use tokio::task::JoinSet;
@@ -41,6 +41,10 @@ pub enum NetworkDiagnosticError {
     Worker,
     #[error("network diagnostic process failed")]
     Process,
+    #[error(
+        "MTR could not run. Check that the bundled MTR helper is present and that packet probes are permitted."
+    )]
+    MtrUnavailable,
     #[error("network diagnostic output exceeded the safety limit")]
     OutputTooLarge,
 }
@@ -68,6 +72,7 @@ pub enum TcpPortStatus {
     Open,
     Closed,
     TimedOut,
+    OpenOrFiltered,
     Failed,
 }
 
@@ -108,6 +113,53 @@ fn tcp_error_status(kind: io::ErrorKind) -> TcpPortStatus {
         io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => TcpPortStatus::TimedOut,
         _ => TcpPortStatus::Failed,
     }
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScanProtocol {
+    #[default]
+    Tcp,
+    Udp,
+}
+
+/// A UDP reply establishes open; silence is inconclusive. The timeout covers
+/// DNS, bind, connect, send and receive. No raw sockets or elevated privileges.
+pub async fn check_udp(options: TcpCheckOptions) -> Result<TcpCheckResult, NetworkDiagnosticError> {
+    options.validate()?;
+    let probe = async {
+        let address = lookup_host((options.host.as_str(), options.port))
+            .await?
+            .next()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::AddrNotAvailable))?;
+        let socket = UdpSocket::bind(if address.is_ipv4() {
+            "0.0.0.0:0"
+        } else {
+            "[::]:0"
+        })
+        .await?;
+        socket.connect(address).await?;
+        socket.send(&[]).await?;
+        let mut reply = [0u8; 2048];
+        socket.recv(&mut reply).await?;
+        Ok::<_, io::Error>(())
+    };
+    let status = match tokio::time::timeout(options.timeout, probe).await {
+        Ok(Ok(())) => TcpPortStatus::Open,
+        Ok(Err(error)) => match error.kind() {
+            io::ErrorKind::ConnectionRefused | io::ErrorKind::ConnectionReset => {
+                TcpPortStatus::Closed
+            }
+            io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock => TcpPortStatus::OpenOrFiltered,
+            _ => TcpPortStatus::Failed,
+        },
+        Err(_) => TcpPortStatus::OpenOrFiltered,
+    };
+    Ok(TcpCheckResult {
+        host: options.host,
+        port: options.port,
+        status,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,6 +207,19 @@ pub async fn scan_tcp(
 pub async fn scan_tcp_with_progress<F>(
     options: PortScanOptions,
     cancellation: &mut watch::Receiver<bool>,
+    on_progress: F,
+) -> Result<Vec<TcpCheckResult>, NetworkDiagnosticError>
+where
+    F: FnMut(&TcpCheckResult, usize, usize),
+{
+    scan_ports_with_progress(options, ScanProtocol::Tcp, cancellation, on_progress).await
+}
+
+/// Shared bounded scheduling and cancellation for TCP and UDP range checks.
+pub async fn scan_ports_with_progress<F>(
+    options: PortScanOptions,
+    protocol: ScanProtocol,
+    cancellation: &mut watch::Receiver<bool>,
     mut on_progress: F,
 ) -> Result<Vec<TcpCheckResult>, NetworkDiagnosticError>
 where
@@ -171,14 +236,14 @@ where
     let mut cancellation_closed = false;
     let total = usize::from(options.end_port - options.start_port) + 1;
 
-    schedule_ports(&mut tasks, &options, &mut next_port);
+    schedule_ports(&mut tasks, &options, protocol, &mut next_port);
     while !tasks.is_empty() {
         if cancellation_closed {
             if let Some(result) = tasks.join_next().await {
                 let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                 on_progress(&result, results.len() + 1, total);
                 results.push(result);
-                schedule_ports(&mut tasks, &options, &mut next_port);
+                schedule_ports(&mut tasks, &options, protocol, &mut next_port);
             }
             continue;
         }
@@ -200,7 +265,7 @@ where
                     let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                     on_progress(&result, results.len() + 1, total);
                     results.push(result);
-                    schedule_ports(&mut tasks, &options, &mut next_port);
+                    schedule_ports(&mut tasks, &options, protocol, &mut next_port);
                 }
             }
         }
@@ -212,6 +277,7 @@ where
 fn schedule_ports(
     tasks: &mut JoinSet<Result<TcpCheckResult, NetworkDiagnosticError>>,
     options: &PortScanOptions,
+    protocol: ScanProtocol,
     next_port: &mut Option<u16>,
 ) {
     while tasks.len() < options.concurrency {
@@ -226,7 +292,12 @@ fn schedule_ports(
             port,
             timeout: options.timeout,
         };
-        tasks.spawn(async move { check_tcp(check).await });
+        tasks.spawn(async move {
+            match protocol {
+                ScanProtocol::Tcp => check_tcp(check).await,
+                ScanProtocol::Udp => check_udp(check).await,
+            }
+        });
         *next_port = port.checked_add(1);
     }
 }
@@ -303,6 +374,140 @@ pub async fn ping(
     })
 }
 
+#[derive(Debug, Clone)]
+pub struct LivePingOptions {
+    pub host: String,
+    pub timeout: Duration,
+    pub interval: Duration,
+    /// ICMP payload bytes, excluding IP and ICMP headers.
+    pub packet_size: u16,
+}
+impl LivePingOptions {
+    pub fn validate(&self) -> Result<(), NetworkDiagnosticError> {
+        PingOptions {
+            host: self.host.clone(),
+            timeout: self.timeout,
+        }
+        .validate()?;
+        if !(Duration::from_millis(200)..=Duration::from_secs(60)).contains(&self.interval)
+            || self.packet_size > 65500
+        {
+            return Err(NetworkDiagnosticError::InvalidTarget);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LivePingResult {
+    pub host: String,
+    pub sent: u64,
+    pub received: u64,
+    pub elapsed_ms: u64,
+    pub interval_ms: u64,
+    pub packet_size: u16,
+    pub lines: Vec<String>,
+}
+
+fn live_ping_arguments(options: &LivePingOptions) -> Vec<String> {
+    let mut arguments = ping_arguments(&options.host);
+    // Both platform argument builders put the host last.
+    arguments.pop();
+    #[cfg(windows)]
+    arguments.extend([
+        "-l".into(),
+        options.packet_size.to_string(),
+        "-w".into(),
+        options.timeout.as_millis().to_string(),
+    ]);
+    #[cfg(unix)]
+    arguments.extend(["-s".into(), options.packet_size.to_string()]);
+    arguments.push(options.host.clone());
+    arguments
+}
+
+// Native single-packet ping output contains a heading, one response, then a
+// blank line and statistics. Keep only the response, without interpreting
+// localized reply text or treating process runtime as packet latency.
+fn ping_reply_line(bytes: &[u8]) -> String {
+    let lines = bounded_trace_lines(bytes);
+    let mut content = lines.iter().skip_while(|line| line.trim().is_empty());
+    let Some(heading) = content.next() else {
+        return "No reply output.".into();
+    };
+    content
+        .next()
+        .filter(|line| !line.trim().is_empty())
+        .unwrap_or(heading)
+        .trim()
+        .to_owned()
+}
+
+/// Continuous single-probe ping with bounded transcript and serial scheduling.
+/// The interval is a minimum between probe starts; probes never overlap.
+pub async fn ping_live<F>(
+    options: LivePingOptions,
+    cancellation: &mut watch::Receiver<bool>,
+    mut progress: F,
+) -> Result<LivePingResult, NetworkDiagnosticError>
+where
+    F: FnMut(LivePingResult),
+{
+    options.validate()?;
+    let started = Instant::now();
+    let mut result = LivePingResult {
+        host: options.host.clone(),
+        sent: 0,
+        received: 0,
+        elapsed_ms: 0,
+        interval_ms: options.interval.as_millis() as u64,
+        packet_size: options.packet_size,
+        lines: Vec::new(),
+    };
+    let mut transcript = std::collections::VecDeque::new();
+    loop {
+        if *cancellation.borrow() {
+            return Err(NetworkDiagnosticError::Cancelled);
+        }
+        let cycle = Instant::now();
+        let probe = run_diagnostic_command(
+            ping_program(),
+            live_ping_arguments(&options),
+            options.timeout,
+            cancellation,
+        )
+        .await;
+        result.sent = result.sent.saturating_add(1);
+        match probe {
+            Ok(output) => {
+                if output.status.success() {
+                    result.received = result.received.saturating_add(1);
+                }
+                transcript.push_back(format!(
+                    "seq={}  {}",
+                    result.sent,
+                    ping_reply_line(&output.stdout)
+                ));
+            }
+            Err(NetworkDiagnosticError::Timeout) => {
+                transcript.push_back(format!("seq={}  Request timed out.", result.sent))
+            }
+            Err(error) => return Err(error),
+        }
+        while transcript.len() > 200 {
+            transcript.pop_front();
+        }
+        result.lines = transcript.iter().cloned().collect();
+        result.elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        progress(result.clone());
+        tokio::select! {
+            _ = tokio::time::sleep_until(cycle + options.interval) => {},
+            _ = cancellation.changed() => { if *cancellation.borrow() || cancellation.has_changed().is_err() { return Err(NetworkDiagnosticError::Cancelled); } }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TracerouteOptions {
     pub host: String,
@@ -357,13 +562,237 @@ pub async fn traceroute(
     })
 }
 
+/// Five-cycle MTR report, using the same cancellation and output bounds as traceroute.
+pub async fn mtr_report(
+    program: &std::path::Path,
+    options: TracerouteOptions,
+    cancellation: &mut watch::Receiver<bool>,
+) -> Result<TracerouteResult, NetworkDiagnosticError> {
+    options.validate()?;
+    if *cancellation.borrow() {
+        return Err(NetworkDiagnosticError::Cancelled);
+    }
+    let started = Instant::now();
+    let output = run_diagnostic_command(
+        program,
+        mtr_arguments(&options),
+        options.timeout,
+        cancellation,
+    )
+    .await
+    .map_err(|error| match error {
+        NetworkDiagnosticError::Process => NetworkDiagnosticError::MtrUnavailable,
+        other => other,
+    })?;
+    if !output.status.success() {
+        return Err(NetworkDiagnosticError::MtrUnavailable);
+    }
+    Ok(TracerouteResult {
+        host: options.host,
+        reached: true,
+        hops: bounded_trace_lines(&output.stdout),
+        elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+    })
+}
+
+fn mtr_arguments(options: &TracerouteOptions) -> Vec<String> {
+    vec![
+        "-r".into(),
+        "-w".into(),
+        "-n".into(),
+        "-c".into(),
+        "5".into(),
+        "-m".into(),
+        options.max_hops.to_string(),
+        "--".into(),
+        options.host.clone(),
+    ]
+}
+
+#[derive(Default)]
+struct MtrHopStats {
+    host: String,
+    sent: u64,
+    received: u64,
+    last: f64,
+    sum: f64,
+    best: f64,
+    worst: f64,
+}
+
+#[derive(Default)]
+struct MtrStats(std::collections::BTreeMap<u8, MtrHopStats>);
+impl MtrStats {
+    fn update(&mut self, bytes: &[u8], max_hops: u8) -> Result<(), NetworkDiagnosticError> {
+        let json: serde_json::Value =
+            serde_json::from_slice(bytes).map_err(|_| NetworkDiagnosticError::Process)?;
+        let report = &json["report"];
+        let hops = report["hops"]
+            .as_array()
+            .or_else(|| report["hubs"].as_array())
+            .ok_or(NetworkDiagnosticError::Process)?;
+        if hops.len() > usize::from(max_hops) {
+            return Err(NetworkDiagnosticError::OutputTooLarge);
+        }
+        for hop in hops {
+            let ttl = hop["ttl"]
+                .as_u64()
+                .or_else(|| hop["count"].as_u64())
+                .filter(|ttl| *ttl > 0 && *ttl <= u64::from(max_hops))
+                .ok_or(NetworkDiagnosticError::Process)? as u8;
+            // An unresponsive Windows ICMP hop has a null host and null
+            // latency fields. It is valid loss data, not a failed process.
+            let host = match &hop["host"] {
+                serde_json::Value::Null => "???".to_owned(),
+                serde_json::Value::String(host)
+                    if host.len() <= 253 && !host.chars().any(char::is_control) =>
+                {
+                    host.clone()
+                }
+                _ => return Err(NetworkDiagnosticError::Process),
+            };
+            let number = |a: &str, b: &str| {
+                hop[a]
+                    .as_f64()
+                    .or_else(|| hop[b].as_f64())
+                    .filter(|value| value.is_finite() && *value >= 0.0)
+            };
+            let sent = hop["sent"]
+                .as_u64()
+                .or_else(|| hop["Snt"].as_u64())
+                .filter(|sent| *sent <= 1)
+                .ok_or(NetworkDiagnosticError::Process)?;
+            let loss = number("loss_pct", "Loss%")
+                .filter(|loss| *loss <= 100.0)
+                .ok_or(NetworkDiagnosticError::Process)?;
+            let received = hop["recv"]
+                .as_u64()
+                .unwrap_or_else(|| (sent as f64 * (1.0 - loss / 100.0)).round() as u64)
+                .min(sent);
+            let stats = self.0.entry(ttl).or_default();
+            // A new router at the same hop starts its own statistics.
+            if stats.host.is_empty() || (host != "???" && stats.host != host && stats.host != "???")
+            {
+                *stats = MtrHopStats {
+                    host: host.clone(),
+                    ..Default::default()
+                };
+            }
+            if host != "???" {
+                stats.host = host;
+            }
+            stats.sent = stats.sent.saturating_add(sent);
+            if received > 0 {
+                let last = number("last", "Last").ok_or(NetworkDiagnosticError::Process)?;
+                let avg = number("avg", "Avg").ok_or(NetworkDiagnosticError::Process)?;
+                let best = number("best", "Best").ok_or(NetworkDiagnosticError::Process)?;
+                let worst = number("worst", "Wrst").ok_or(NetworkDiagnosticError::Process)?;
+                stats.last = last;
+                stats.best = if stats.received == 0 {
+                    best
+                } else {
+                    stats.best.min(best)
+                };
+                stats.worst = stats.worst.max(worst);
+                stats.sum += avg * received as f64;
+                stats.received = stats.received.saturating_add(received);
+            }
+        }
+        Ok(())
+    }
+    fn lines(&self) -> Vec<String> {
+        let mut lines = vec![format!(
+            "{:<4} {:<40} {:>6} {:>8} {:>8} {:>8} {:>8} {:>8}",
+            "Hop", "Host", "Loss%", "Sent", "Last", "Avg", "Best", "Worst"
+        )];
+        for (ttl, hop) in &self.0 {
+            let loss = if hop.sent == 0 {
+                0.0
+            } else {
+                100.0 * (hop.sent - hop.received) as f64 / hop.sent as f64
+            };
+            let metrics = if hop.received == 0 {
+                format!("{:>8} {:>8} {:>8} {:>8}", "—", "—", "—", "—")
+            } else {
+                format!(
+                    "{:>8.2} {:>8.2} {:>8.2} {:>8.2}",
+                    hop.last,
+                    hop.sum / hop.received as f64,
+                    hop.best,
+                    hop.worst
+                )
+            };
+            lines.push(format!(
+                "{ttl:<4} {:<40} {loss:>6.1} {:>8} {metrics}",
+                hop.host, hop.sent
+            ));
+        }
+        lines
+    }
+}
+
+/// Publish cumulative MTR snapshots until explicitly stopped. Each subprocess
+/// is a single bounded probe cycle; memory and update cadence stay bounded.
+pub async fn mtr_live<F>(
+    program: &std::path::Path,
+    options: TracerouteOptions,
+    cancellation: &mut watch::Receiver<bool>,
+    mut progress: F,
+) -> Result<TracerouteResult, NetworkDiagnosticError>
+where
+    F: FnMut(TracerouteResult),
+{
+    options.validate()?;
+    let started = Instant::now();
+    let mut stats = MtrStats::default();
+    loop {
+        if *cancellation.borrow() {
+            return Err(NetworkDiagnosticError::Cancelled);
+        }
+        let cycle = Instant::now();
+        let arguments = vec![
+            "--json".into(),
+            "-n".into(),
+            "-c".into(),
+            "1".into(),
+            "-m".into(),
+            options.max_hops.to_string(),
+            "--".into(),
+            options.host.clone(),
+        ];
+        let output = run_diagnostic_command(program, arguments, options.timeout, cancellation)
+            .await
+            .map_err(|error| match error {
+                NetworkDiagnosticError::Process => NetworkDiagnosticError::MtrUnavailable,
+                other => other,
+            })?;
+        if !output.status.success() {
+            return Err(NetworkDiagnosticError::MtrUnavailable);
+        }
+        stats.update(&output.stdout, options.max_hops)?;
+        progress(TracerouteResult {
+            host: options.host.clone(),
+            reached: false,
+            hops: stats.lines(),
+            elapsed_ms: started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64,
+        });
+        tokio::select! {
+            _ = tokio::time::sleep_until(cycle + Duration::from_secs(1)) => {},
+            _ = cancellation.changed() => { if *cancellation.borrow() || cancellation.has_changed().is_err() { return Err(NetworkDiagnosticError::Cancelled); } }
+        }
+    }
+}
+
 async fn run_diagnostic_command(
-    program: &'static str,
+    program: impl AsRef<std::ffi::OsStr>,
     arguments: Vec<String>,
     timeout: Duration,
     cancellation: &mut watch::Receiver<bool>,
 ) -> Result<Output, NetworkDiagnosticError> {
-    let child = Command::new(program)
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(0x08000000);
+    let child = command
         .args(arguments)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -761,5 +1190,281 @@ mod tests {
         let boundary = format!("{}é", "x".repeat(MAX_TRACE_LINE_BYTES - 1));
         let output = bounded_trace_lines(boundary.as_bytes());
         assert_eq!(output[0].len(), MAX_TRACE_LINE_BYTES - 1);
+    }
+    #[test]
+    fn udp_reply_silence_and_cancellation_are_distinct() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let echo = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let port = echo.local_addr().unwrap().port();
+            let responder = tokio::spawn(async move {
+                let mut bytes = [0u8; 16];
+                let (_, peer) = echo.recv_from(&mut bytes).await.unwrap();
+                echo.send_to(b"reply", peer).await.unwrap();
+            });
+            let options = PortScanOptions {
+                host: "127.0.0.1".into(),
+                start_port: port,
+                end_port: port,
+                concurrency: 1,
+                timeout: Duration::from_secs(2),
+            };
+            let (sender, mut cancellation) = watch::channel(false);
+            let mut progress = Vec::new();
+            let results = scan_ports_with_progress(
+                options,
+                ScanProtocol::Udp,
+                &mut cancellation,
+                |result, done, total| progress.push((result.port, done, total)),
+            )
+            .await
+            .unwrap();
+            responder.await.unwrap();
+            assert_eq!(results[0].status, TcpPortStatus::Open);
+            assert_eq!(progress, vec![(port, 1, 1)]);
+            // A bound but silent UDP service is not classified as closed/open.
+            let silent = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+            let port = silent.local_addr().unwrap().port();
+            let result = check_udp(TcpCheckOptions {
+                host: "127.0.0.1".into(),
+                port,
+                timeout: Duration::from_millis(30),
+            })
+            .await
+            .unwrap();
+            assert_eq!(result.status, TcpPortStatus::OpenOrFiltered);
+            let options = PortScanOptions {
+                host: "127.0.0.1".into(),
+                start_port: port,
+                end_port: port,
+                concurrency: 1,
+                timeout: Duration::from_secs(30),
+            };
+            let stop = tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                sender.send(true).unwrap();
+            });
+            let result = tokio::time::timeout(
+                Duration::from_secs(2),
+                scan_ports_with_progress(
+                    options,
+                    ScanProtocol::Udp,
+                    &mut cancellation,
+                    |_, _, _| {},
+                ),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(result, Err(NetworkDiagnosticError::Cancelled)));
+            stop.await.unwrap();
+        });
+    }
+
+    #[test]
+    fn mtr_arguments_are_bounded_and_target_is_a_single_argument() {
+        let options = TracerouteOptions {
+            host: "127.0.0.1".into(),
+            timeout: Duration::from_secs(60),
+            max_hops: 8,
+        };
+        assert_eq!(
+            mtr_arguments(&options),
+            ["-r", "-w", "-n", "-c", "5", "-m", "8", "--", "127.0.0.1"]
+        );
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (_sender, mut cancellation) = watch::channel(true);
+            assert!(matches!(
+                mtr_report(
+                    std::path::Path::new("does-not-exist"),
+                    options,
+                    &mut cancellation
+                )
+                .await,
+                Err(NetworkDiagnosticError::Cancelled)
+            ));
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn bundled_mtr_reports_only_loopback() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let program = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tools/mtr/windows-x86_64/mtr.exe");
+            let options = TracerouteOptions {
+                host: "127.0.0.1".into(),
+                timeout: Duration::from_secs(30),
+                max_hops: 1,
+            };
+            let (_sender, mut cancellation) = watch::channel(false);
+            let report = mtr_report(&program, options, &mut cancellation)
+                .await
+                .unwrap();
+            assert!(!report.hops.is_empty());
+            assert!(report.hops.iter().any(|line| line.contains("127.0.0.1")));
+        });
+    }
+    #[test]
+    fn mtr_cumulative_loss_latency_and_route_changes() {
+        let mut stats = MtrStats::default();
+        stats.update(br#"{"report":{"hops":[{"ttl":1,"host":"127.0.0.1","sent":1,"recv":1,"loss_pct":0,"last":12,"avg":12,"best":12,"worst":12}]}}"#, 8).unwrap();
+        stats.update(br#"{"report":{"hops":[{"ttl":1,"host":"127.0.0.1","sent":1,"recv":0,"loss_pct":100}]}}"#, 8).unwrap();
+        assert_eq!(stats.0[&1].sent, 2);
+        assert_eq!(stats.0[&1].received, 1);
+        assert!(stats.lines()[1].contains("50.0"));
+        stats.update(br#"{"report":{"hops":[{"ttl":1,"host":"127.0.0.2","sent":1,"recv":0,"loss_pct":100}]}}"#, 8).unwrap();
+        assert_eq!(stats.0[&1].sent, 1);
+        assert!(stats.lines()[1].contains("—"));
+        assert!(stats.update(b"not-json", 8).is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn live_mtr_updates_repeatedly_until_stopped() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let program = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../tools/mtr/windows-x86_64/mtr.exe");
+            let (sender, mut cancel) = watch::channel(false);
+            let mut updates = 0;
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                mtr_live(
+                    &program,
+                    TracerouteOptions {
+                        host: "127.0.0.1".into(),
+                        timeout: Duration::from_secs(5),
+                        max_hops: 1,
+                    },
+                    &mut cancel,
+                    |snapshot| {
+                        updates += 1;
+                        assert!(snapshot.hops[1].contains("127.0.0.1"));
+                        if updates == 2 {
+                            sender.send(true).unwrap();
+                        }
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+            assert!(matches!(result, Err(NetworkDiagnosticError::Cancelled)));
+            assert_eq!(updates, 2);
+        });
+    }
+    #[test]
+    fn live_mtr_retains_null_unresponsive_hops_and_keeps_previous_router() {
+        let mut stats = MtrStats::default();
+        let silence = br#"{"report":{"hops":[{"ttl":1,"host":null,"sent":1,"recv":0,"loss_pct":100,"last":null,"avg":null,"best":null,"worst":null}]}}"#;
+        stats.update(silence, 8).unwrap();
+        assert_eq!(stats.0[&1].host, "???");
+        assert_eq!(stats.0[&1].sent, 1);
+        assert!(stats.lines()[1].contains("100.0"));
+        stats.update(br#"{"report":{"hops":[{"ttl":1,"host":"127.0.0.1","sent":1,"recv":1,"loss_pct":0,"last":12,"avg":12,"best":12,"worst":12}]}}"#, 8).unwrap();
+        stats.update(silence, 8).unwrap();
+        assert_eq!(stats.0[&1].host, "127.0.0.1");
+        assert_eq!(stats.0[&1].sent, 3);
+        assert_eq!(stats.0[&1].received, 1);
+        assert_eq!(stats.0[&1].last, 12.0);
+    }
+    #[test]
+    fn live_ping_validates_interval_size_and_platform_arguments() {
+        let mut options = LivePingOptions {
+            host: "127.0.0.1".into(),
+            timeout: Duration::from_secs(2),
+            interval: Duration::from_millis(200),
+            packet_size: 48,
+        };
+        options.validate().unwrap();
+        let args = live_ping_arguments(&options);
+        assert_eq!(args.last().unwrap(), "127.0.0.1");
+        #[cfg(windows)]
+        assert!(args.windows(2).any(|pair| pair == ["-l", "48"]));
+        #[cfg(unix)]
+        assert!(args.windows(2).any(|pair| pair == ["-s", "48"]));
+        options.interval = Duration::from_millis(199);
+        assert!(options.validate().is_err());
+        options.interval = Duration::from_secs(61);
+        assert!(options.validate().is_err());
+        options.interval = Duration::from_secs(1);
+        options.packet_size = 65501;
+        assert!(options.validate().is_err());
+        options.packet_size = 0;
+        options.validate().unwrap();
+        options.host = "-bad-option".into();
+        assert!(options.validate().is_err());
+    }
+
+    #[test]
+    fn live_ping_respects_interval_and_stops_after_repeated_loopback_replies() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (sender, mut cancel) = watch::channel(false);
+            let options = LivePingOptions {
+                host: "127.0.0.1".into(),
+                timeout: Duration::from_secs(2),
+                interval: Duration::from_millis(200),
+                packet_size: 48,
+            };
+            let started = Instant::now();
+            let mut snapshots = Vec::new();
+            let result = tokio::time::timeout(
+                Duration::from_secs(10),
+                ping_live(options, &mut cancel, |snapshot| {
+                    assert_eq!(snapshot.received, snapshot.sent);
+                    assert_eq!(snapshot.packet_size, 48);
+                    assert_eq!(snapshot.interval_ms, 200);
+                    assert!(snapshot.lines.len() <= 200);
+                    assert!(snapshot.lines.iter().any(|line| line.contains("127.0.0.1")));
+                    snapshots.push(snapshot.sent);
+                    if snapshot.sent == 3 {
+                        sender.send(true).unwrap();
+                    }
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(snapshots, vec![1, 2, 3]);
+            assert!(started.elapsed() >= Duration::from_millis(400));
+            assert!(matches!(result, Err(NetworkDiagnosticError::Cancelled)));
+        });
+    }
+
+    #[test]
+    fn live_ping_can_stop_while_waiting_for_next_probe() {
+        tokio::runtime::Runtime::new().unwrap().block_on(async {
+            let (sender, mut cancel) = watch::channel(false);
+            let mut updates = 0;
+            let options = LivePingOptions {
+                host: "127.0.0.1".into(),
+                timeout: Duration::from_secs(2),
+                interval: Duration::from_secs(60),
+                packet_size: 32,
+            };
+            let result = tokio::time::timeout(
+                Duration::from_secs(5),
+                ping_live(options, &mut cancel, |_| {
+                    updates += 1;
+                    sender.send(true).unwrap();
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(updates, 1);
+            assert!(matches!(result, Err(NetworkDiagnosticError::Cancelled)));
+        });
+    }
+    #[test]
+    fn ping_transcript_keeps_one_reply_without_repeated_headers_or_summaries() {
+        let windows = b"\r\nPinging 127.0.0.1 with 32 bytes of data:\r\nReply from 127.0.0.1: bytes=32 time<1ms TTL=128\r\n\r\nPing statistics for 127.0.0.1:\r\n    Packets: Sent = 1, Received = 1, Lost = 0\r\n";
+        assert_eq!(
+            ping_reply_line(windows),
+            "Reply from 127.0.0.1: bytes=32 time<1ms TTL=128"
+        );
+        let unix = b"PING localhost (127.0.0.1) 32(60) bytes of data.\n40 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.012 ms\n\n--- localhost ping statistics ---\n1 packets transmitted, 1 received\n";
+        assert_eq!(
+            ping_reply_line(unix),
+            "40 bytes from 127.0.0.1: icmp_seq=1 ttl=64 time=0.012 ms"
+        );
+        assert_eq!(ping_reply_line(b"\nPinging example with 32 bytes of data:\nRequest timed out.\n\nPing statistics:\n"), "Request timed out.");
+        assert_eq!(ping_reply_line(b"Unknown host."), "Unknown host.");
+        assert_eq!(ping_reply_line(b""), "No reply output.");
     }
 }

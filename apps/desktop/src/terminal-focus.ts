@@ -1,4 +1,4 @@
-/** Focus a rendered SSH pane only while it still owns the ready selection. */
+/** Focus a rendered terminal pane only while it still owns the ready selection. */
 export function focusConnectedTerminal(terminal: { element?: HTMLElement; focus(): void }, stillSelected: () => boolean): void {
   window.requestAnimationFrame(() => {
     const host = terminal.element;

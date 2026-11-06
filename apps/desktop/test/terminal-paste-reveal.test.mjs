@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { registerTerminalPasteReveal, revealPastedTerminal } from '../src/terminal-paste-reveal.ts';
+const frames = new Map(), timers = new Map(), callbacks = new Map(), handlers = new Map();
+let next = 0, viewport = 10, bottom = 100, refits = 0;
+const host = { addEventListener: (name, fn) => handlers.set(name, fn), removeEventListener: name => handlers.delete(name) };
+const subscribe = name => callback => { callbacks.set(name, callback); return { dispose: () => callbacks.delete(name) }; };
+const terminal = { element: host, scrollToBottom: () => { viewport = bottom; }, onWriteParsed: subscribe('parsed'), onRender: subscribe('render') };
+const clock = { frame: fn => { frames.set(++next, fn); return next; }, cancelFrame: id => frames.delete(id), delay: fn => { timers.set(++next, fn); return next; }, cancelDelay: id => timers.delete(id) };
+const paint = () => { const list = [...frames.values()]; frames.clear(); list.forEach(fn => fn()); };
+const follower = registerTerminalPasteReveal(terminal, () => refits++, clock);
+revealPastedTerminal(terminal); assert.equal(viewport, 100); assert.equal(refits, 1);
+paint(); bottom = 120; viewport = 100; callbacks.get('parsed')(); callbacks.get('render')(); assert.equal(frames.size, 1); paint();
+assert.equal(viewport, 120, 'delayed native echo must be visible after parsing and paint');
+bottom = 130; callbacks.get('parsed')(); paint(); assert.equal(viewport, 130, 'follow all echo batches, not only the first');
+handlers.get('wheel')(); viewport = 15; bottom = 140; callbacks.get('parsed')(); callbacks.get('render')(); paint(); assert.equal(viewport, 15, 'manual history browsing cancels following');
+revealPastedTerminal(terminal); paint(); for (const fn of [...timers.values()]) fn(); viewport = 25; callbacks.get('parsed')(); paint(); assert.equal(viewport, 25, 'following is time-bounded');
+revealPastedTerminal(terminal); follower.dispose(); assert.equal(frames.size, 0); assert.equal(timers.size, 0); assert.equal(callbacks.size, 0); assert.equal(handlers.size, 0);

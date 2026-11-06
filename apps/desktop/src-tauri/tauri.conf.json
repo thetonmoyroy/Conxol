@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Conxol",
-  "version": "0.1.45",
+  "version": "0.1.50",
   "identifier": "com.othmane.conxol",
   "build": {
     "beforeDevCommand": "pnpm dev",
@@ -29,7 +29,10 @@
     "active": true,
     "resources": {
       "helpers/*": "helpers/",
-      "../src/assets/fonts/JetBrainsMono-OFL.txt": "licenses/JetBrainsMono-OFL.txt"
+      "../../../tools/mtr/windows-x86_64/*": "helpers/mtr/",
+      "../src/assets/fonts/JetBrainsMono-OFL.txt": "licenses/JetBrainsMono-OFL.txt",
+      "../../../LICENSE": "LICENSE",
+      "../../../NOTICE": "NOTICE"
     },
     "icon": [
       "icons/icon.png",
@@ -38,8 +41,17 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "uninstallerIcon": "icons/icon.ico"
+        "uninstallerIcon": "icons/icon.ico",
+        "installerHooks": "installer-metadata.nsh"
       }
-    }
+    },
+    "publisher": "Tonmoy",
+    "homepage": "https://github.com/OthmaneBlial/MobaRust",
+    "copyright": "Copyright 2026 Othmane Blial",
+    "license": "Apache-2.0",
+    "licenseFile": "../../../LICENSE",
+    "category": "DeveloperTool",
+    "shortDescription": "Conxol terminal and remote connection manager",
+    "longDescription": "Conxol provides local terminals, saved SSH sessions, SFTP file transfers, serial connections, and network administration tools."
   }
 }

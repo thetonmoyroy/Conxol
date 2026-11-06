@@ -1,5 +1,8 @@
 [package]
 name = "conxol"
+description = "Conxol terminal and remote connection manager"
+authors = ["Tonmoy"]
+homepage = "https://github.com/OthmaneBlial/MobaRust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

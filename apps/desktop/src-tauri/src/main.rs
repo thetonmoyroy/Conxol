@@ -8,6 +8,10 @@ mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
 mod workspace_lock;
 use workspace_lock::{WorkspaceLock, workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure};
+mod tftp_server;
+use tftp_server::{TftpServerManager, tftp_server_start, tftp_server_stop, tftp_server_status};
+mod file_transfer;
+use file_transfer::{FileTransferManager, file_transfer_run, file_transfer_cancel};
 mod network;
 mod output_batch;
 mod remote_desktop;
@@ -56,6 +60,7 @@ const MAX_NATIVE_PICKER_PATHS: usize = 16;
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 enum LocalPickerKind {
+    File,
     Files,
     Directory,
 }
@@ -196,7 +201,16 @@ struct NetworkTcpCheckRequest {
 
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct NetworkTracerouteRequest {
+struct NetworkPingRequest {
+    host: String,
+    timeout_ms: u64,
+    interval_ms: u64,
+    packet_size: u16,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NetworkMtrRequest {
     host: String,
     timeout_ms: u64,
     max_hops: u8,
@@ -1265,22 +1279,22 @@ async fn network_scan_start(
 async fn network_ping_start(
     app: tauri::AppHandle,
     manager: State<'_, NetworkManager>,
-    request: NetworkResolveRequest,
+    request: NetworkPingRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
     manager
-        .start_ping(app, request.host, request.timeout_ms)
+        .start_ping(app, request.host, request.timeout_ms, request.interval_ms, request.packet_size)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
-async fn network_traceroute_start(
+async fn network_mtr_start(
     app: tauri::AppHandle,
     manager: State<'_, NetworkManager>,
-    request: NetworkTracerouteRequest,
+    request: NetworkMtrRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
     manager
-        .start_traceroute(app, request.host, request.timeout_ms, request.max_hops)
+        .start_mtr(app, request.host, request.timeout_ms, request.max_hops)
         .await
         .map_err(|error| error.to_string())
 }
@@ -1608,6 +1622,7 @@ fn local_pick_download_path(
 #[tauri::command]
 fn local_pick_upload_paths(kind: LocalPickerKind) -> Result<Vec<String>, String> {
     let paths = match kind {
+        LocalPickerKind::File => rfd::FileDialog::new().set_title("Select a local file to upload").pick_file().into_iter().collect(),
         LocalPickerKind::Files => rfd::FileDialog::new()
             .set_title("Select local files to upload")
             .pick_files()
@@ -1950,8 +1965,12 @@ fn cli_message(argument: Option<&str>) -> Option<String> {
 
 async fn finish_native_shutdown(
     ssh: SshManager,
+    transfers: FileTransferManager,
+    tftp_server: TftpServerManager,
     local: impl std::future::Future<Output = Result<(), terminal::TerminalError>>,
 ) {
+    tftp_server.shutdown().await;
+    transfers.shutdown().await;
     ssh.shutdown().await;
     if local.await.is_err() {
         tracing::warn!(event = "local_terminal_shutdown_incomplete");
@@ -2017,6 +2036,8 @@ fn main() {
         .manage(SshManager::default())
         .manage(SerialManager::default())
         .manage(NetworkManager::default())
+        .manage(FileTransferManager::default())
+        .manage(TftpServerManager::default())
         .manage(TelnetManager::default())
         .setup(|app| {
             let portable_dir = detect_portable_data_dir();
@@ -2079,6 +2100,8 @@ fn main() {
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure,
             clipboard_read_text, clipboard_write_text,
+            file_transfer_run, file_transfer_cancel,
+            tftp_server_start, tftp_server_stop, tftp_server_status,
             app_snapshot,
             diagnostic_export,
             diagnostic_export_save,
@@ -2127,7 +2150,7 @@ fn main() {
             ssh_trust_lookup,
             ssh_trust_accept,
             network_ping_start,
-            network_traceroute_start,
+            network_mtr_start,
             network_diagnostic_cancel,
             network_scan_start,
             network_scan_cancel,
@@ -2201,12 +2224,15 @@ fn main() {
             if !exit_pending {
                 exit_pending = true;
                 let _ = app.emit("app://closing", ());
+                let server = app.state::<TftpServerManager>().inner().clone();
+                let transfers = app.state::<FileTransferManager>().inner().clone();
+                transfers.cancel_all();
                 let manager = app.state::<SshManager>().inner().clone();
                 let local_cleanup = app.state::<TerminalManager>().shutdown();
                 let app = app.clone();
                 let exit_ready = Arc::clone(&exit_ready);
                 tauri::async_runtime::spawn(async move {
-                    finish_native_shutdown(manager, local_cleanup).await;
+                    finish_native_shutdown(manager, transfers, server, local_cleanup).await;
                     exit_ready.store(true, Ordering::Release);
                     app.exit(code.unwrap_or(0));
                 });
@@ -2215,9 +2241,12 @@ fn main() {
         RunEvent::Exit if !exit_ready.load(Ordering::Acquire) => {
             // OS termination may bypass ExitRequested (for example, Dock Quit).
             // The event loop is ending, so finish native cleanup before returning.
+            let server = app.state::<TftpServerManager>().inner().clone();
+            let transfers = app.state::<FileTransferManager>().inner().clone();
+            transfers.cancel_all();
             let manager = app.state::<SshManager>().inner().clone();
             let local_cleanup = app.state::<TerminalManager>().shutdown();
-            tauri::async_runtime::block_on(finish_native_shutdown(manager, local_cleanup));
+            tauri::async_runtime::block_on(finish_native_shutdown(manager, transfers, server, local_cleanup));
         }
         _ => {}
     });
@@ -2459,7 +2488,7 @@ mod tests {
             "maxHops": 4,
             "extra": true
         });
-        let error = serde_json::from_value::<super::NetworkTracerouteRequest>(traceroute_payload)
+        let error = serde_json::from_value::<super::NetworkMtrRequest>(traceroute_payload)
             .expect_err("traceroute payload must reject unknown fields");
         assert!(error.to_string().contains("unknown field"));
 
