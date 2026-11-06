@@ -157,7 +157,7 @@ fn native_loopback_payload_boundaries_without_external_commands() {
                 Duration::from_secs(2),
                 &AtomicBool::new(false),
             )
-            .unwrap()
+            .unwrap_or_else(|error| panic!("payload {payload}: {error}"))
             .expect("loopback echo reply");
         assert_eq!(reply.address, Ipv4Addr::LOCALHOST);
         assert_eq!(reply.kind, ReplyKind::Destination);

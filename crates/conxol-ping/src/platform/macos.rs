@@ -20,6 +20,25 @@ impl NativeProbe {
         }
         // SAFETY: newly created descriptor is valid and exclusively owned.
         let socket = unsafe { OwnedFd::from_raw_fd(fd) };
+        // Darwin's default ICMP socket buffers are only 8 KiB. Reserve enough
+        // space for a maximum-sized echo plus mbuf/address accounting on both
+        // send and receive, without changing system-wide socket settings.
+        let capacity = (i32::from(payload_size) + 1024).max(8192) * 2;
+        for option in [libc::SO_SNDBUF, libc::SO_RCVBUF] {
+            // SAFETY: fd is owned/live and capacity is a correctly sized int.
+            if unsafe {
+                libc::setsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    option,
+                    (&capacity as *const i32).cast(),
+                    size_of::<i32>() as libc::socklen_t,
+                )
+            } < 0
+            {
+                return Err(io::Error::last_os_error().into());
+            }
+        }
         // SAFETY: operates on a live descriptor, preserving existing flags.
         let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
         if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
