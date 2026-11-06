@@ -147,6 +147,10 @@ The full check covers frontend, Rust, isolated protocol helpers, package layouts
 
 </details>
 
+## Acknowledgements
+
+Conxol builds on [MobaRust](https://github.com/OthmaneBlial/MobaRust), created by Othmane Blial and its contributors. Thank you for creating the original project and making its foundation available as open source.
+
 <div align="center">
 
 **Build your next remote workspace with us.**
