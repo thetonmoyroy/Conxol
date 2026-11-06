@@ -58,7 +58,7 @@ jobs:
         run: |
           mount=$(mktemp -d)
           dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print)
-          hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          printf 'Y\n' | hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
           trap 'hdiutil detach "$mount"; rmdir "$mount"' EXIT
           app="$mount/Conxol.app"
           test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$EXPECTED_ARCH"
