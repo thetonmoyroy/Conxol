@@ -16,7 +16,7 @@ SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • r
 
 ## What makes Conxol different
 
-**Developed and customized by [Tonmoy Roy](https://github.com/thetonmoyroy)** for everyday network administration. Conxol's additions and refinements focus on a compact desktop workflow, device-oriented tools, and keeping diagnostics beside your terminal.
+Conxol's additions and refinements focus on a compact desktop workflow, device-oriented tools, and keeping diagnostics beside your terminal.
 
 | Conxol addition or refinement | What it gives you |
 | --- | --- |
