@@ -702,9 +702,25 @@ mod tests {
     async fn cidr_scan_reports_each_loopback_host_on_the_same_port() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        let listener2 = TcpListener::bind(("127.0.0.2", port)).await.unwrap();
+        let (listener2, range, expected_hosts) = match TcpListener::bind(("127.0.0.2", port)).await
+        {
+            Ok(listener) => (
+                Some(listener),
+                "127.0.0.0/30",
+                vec!["127.0.0.1", "127.0.0.2"],
+            ),
+            Err(error) if error.kind() == io::ErrorKind::AddrNotAvailable => {
+                // macOS does not normally configure 127.0.0.2. Exercise /32
+                // instead without adding aliases or binding a public interface.
+                eprintln!(
+                    "Second loopback address unavailable; using the CIDR /32 fixture. Multi-host expansion remains covered by the pure address tests."
+                );
+                (None, "127.0.0.1/32", vec!["127.0.0.1"])
+            }
+            Err(error) => panic!("second loopback listener failed: {error}"),
+        };
         let options = PortScanOptions {
-            host: "127.0.0.0/30".into(),
+            host: range.into(),
             start_port: port,
             end_port: port,
             concurrency: 2,
@@ -722,20 +738,27 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(results.len(), 2);
+        assert_eq!(results.len(), expected_hosts.len());
         assert!(
             results
                 .iter()
                 .all(|result| result.status == TcpPortStatus::Open && result.port == port)
         );
-        assert_eq!(results[0].host, "127.0.0.1");
-        assert_eq!(results[1].host, "127.0.0.2");
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.host.as_str())
+                .collect::<Vec<_>>(),
+            expected_hosts
+        );
         assert_eq!(
             progress
                 .iter()
                 .map(|(_, scanned, total)| (*scanned, *total))
                 .collect::<Vec<_>>(),
-            vec![(1, 2), (2, 2)]
+            (1..=expected_hosts.len())
+                .map(|count| (count, expected_hosts.len()))
+                .collect::<Vec<_>>()
         );
         let (_cancel, mut cancellation) = watch::channel(true);
         assert!(matches!(

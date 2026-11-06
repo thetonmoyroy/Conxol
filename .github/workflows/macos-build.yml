@@ -50,8 +50,14 @@ jobs:
           GITHUB_REF_NAME=v$(node -p "require('./apps/desktop/package.json').version") node tools/release-assets.mjs check-version
       - name: Generate bundle icons
         run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
+      - name: Native diagnostic regression tests
+        run: |
+          cargo xtask test-ping
+          cargo xtask test-mtr
+          cargo xtask test-network
       - name: Build macOS DMG
-        run: pnpm --dir apps/desktop tauri build --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
+        working-directory: apps/desktop
+        run: node node_modules/@tauri-apps/cli/tauri.js build --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
       - name: Verify app and helper
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
