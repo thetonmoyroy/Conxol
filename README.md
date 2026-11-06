@@ -96,6 +96,8 @@ Switch light/dark themes, adjust terminal fonts and shortcuts, and keep settings
 
 ## Download Conxol 0.1.53
 
+**[Get Conxol from the Microsoft Store (Windows)](https://apps.microsoft.com/store/detail/9NZVQ7W665BH?cid=DevShareMCLPCS)**
+
 **[Download the Windows x64 installer](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.53/Conxol_0.1.53_x64-setup.exe)** · [Release notes and SHA-256 checksum](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.53)
 
 | macOS architecture | Download |
