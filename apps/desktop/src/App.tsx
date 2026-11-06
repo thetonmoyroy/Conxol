@@ -1,3 +1,4 @@
+import { ApplicationMenuBar } from "./ApplicationMenuBar";
 import { canReconnectTerminal, isReconnectKey } from "./terminal-reconnect";
 import { SessionRowActions } from "./SessionRowActions";
 import { mergeScanResults, openScanResults, scanProgress } from "./network-scan-model";
@@ -4508,7 +4509,7 @@ function App() {
     <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
       {fileTransferOpen && <FileTransferClient onClose={() => setFileTransferOpen(false)} onServerRunning={setTftpServerRunning} initialServer={tftpServerRunning} />}
       {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
-      <nav className="desktop-menubar" aria-label="Application menu" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onClick={(event) => { if ((event.target as HTMLElement).closest("button")) event.currentTarget.querySelectorAll("details[open]").forEach((menu) => menu.removeAttribute("open")); }} onKeyDown={(event) => { if (event.key === "Escape") { const menu = (event.target as HTMLElement).closest("details"); menu?.removeAttribute("open"); menu?.querySelector("summary")?.focus(); } }}>
+      <ApplicationMenuBar>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
           <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}>All sessions</button>
           <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}>Favorites</button>
@@ -4538,7 +4539,7 @@ function App() {
         <button onClick={() => setHelpOpen(true)}>Help</button>
         {activeView === "terminal" && !!selectedTerminalId && remoteProtocol !== "rdp" && remoteProtocol !== "vnc" && (terminalSearchOpen || settings.general.alwaysShowTerminalSearch) && <div className="terminal-search-bar" role="search"><Search size={14} /><input ref={terminalSearchInputRef} value={terminalSearchQuery} onChange={(event) => updateTerminalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeTerminalSearch(); } if (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Enter" || (!event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")))) { event.preventDefault(); event.stopPropagation(); findTerminalMatch(event.key === "ArrowUp" || (event.key === "Enter" && event.shiftKey) ? "previous" : "next"); } }} title="Up: previous match · Down: next match · Enter: next · Shift+Enter: previous" placeholder="Find in terminal" aria-label="Find in terminal" /><span>{terminalSearchResult.resultCount > 0 ? `${terminalSearchResult.resultIndex + 1}/${terminalSearchResult.resultCount}` : terminalSearchQuery ? "No match" : "Search"}</span><label><input type="checkbox" checked={terminalSearchCaseSensitive} onChange={(event) => setTerminalSearchCaseSensitive(event.target.checked)} /> Aa</label><button type="button" aria-label="Previous terminal match" title="Previous match (↑)" onClick={() => findTerminalMatch("previous")} disabled={!terminalSearchQuery}><ArrowUpFromLine size={13} /></button><button type="button" aria-label="Next terminal match" title="Next match (↓)" onClick={() => findTerminalMatch("next")} disabled={!terminalSearchQuery}><ArrowDownToLine size={13} /></button><button type="button" aria-label="Close terminal search" title="Close search" onClick={closeTerminalSearch}><X size={14} /></button></div>}
         <div className="desktop-menu-end">{tftpServerRunning && <button className="tftp-server-indicator" onClick={() => setFileTransferOpen(true)} title="TFTP server is running. Open to stop sharing.">TFTP serving</button>}{workspaceSecurity.status?.enabled && <button aria-label="Lock workspace" title="Lock workspace" onClick={() => void workspaceSecurity.lock()}><LockKeyhole size={14} strokeWidth={1.5} /></button>}<span className="desktop-menu-status" title={IS_TAURI ? "Desktop runtime" : "Browser preview"}><span className="live-dot" /> Conxol</span></div>
-      </nav>
+      </ApplicationMenuBar>
 
       <div className="app-body">
         <nav className="session-activity-strip" aria-label="Sidebar tools">
