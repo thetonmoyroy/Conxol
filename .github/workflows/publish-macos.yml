@@ -7,6 +7,15 @@ on:
         description: Successful macOS packages run ID
         required: true
         type: string
+      platform:
+        description: Packages to publish
+        required: true
+        type: choice
+        default: both
+        options:
+          - both
+          - macos-arm64
+          - macos-x64
 
 permissions:
   actions: read
@@ -20,24 +29,29 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
       SOURCE_RUN: ${{ inputs.run_id }}
+      PLATFORM: ${{ inputs.platform }}
     steps:
       - name: Verify source build succeeded
         run: |
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
           test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.name')" = 'macOS packages'
-          test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.conclusion')" = success
+          if [[ "$PLATFORM" = both ]]; then
+            test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.conclusion')" = success
+          else
+            [[ "$PLATFORM" = macos-arm64 || "$PLATFORM" = macos-x64 ]]
+            test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN/jobs" --jq ".jobs[] | select(.name == \"$PLATFORM\") | .conclusion")" = success
+          fi
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.run_id }}
-          pattern: installers-macos-*
+          pattern: installers-${{ inputs.platform == 'both' && 'macos-*' || inputs.platform }}
           merge-multiple: true
           path: macos-assets
       - name: Check hashes and upload release assets
         run: |
           version=$(node -p "require('./apps/desktop/package.json').version")
           cd macos-assets
-          sha256sum -c SHA256SUMS-macos-arm64.txt
-          sha256sum -c SHA256SUMS-macos-x64.txt
+          for manifest in SHA256SUMS-macos-*.txt; do sha256sum -c "$manifest"; done
           gh release upload "v$version" ./*.dmg ./SHA256SUMS-macos-*.txt --clobber
