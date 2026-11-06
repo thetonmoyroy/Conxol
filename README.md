@@ -6,7 +6,7 @@
 
 SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • reviewed automation
 
-[![Windows release](https://img.shields.io/badge/Windows-v0.1.53-c99870?style=for-the-badge)](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.53)
+[![Latest release](https://img.shields.io/badge/release-v0.1.53-c99870?style=for-the-badge)](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.53)
 [![Rust + Tauri](https://img.shields.io/badge/built_with-Rust_%2B_Tauri-536f60?style=for-the-badge)](docs/architecture.md)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-536f60?style=for-the-badge)](LICENSE)
 
@@ -98,7 +98,12 @@ Switch light/dark themes, adjust terminal fonts and shortcuts, and keep settings
 
 **[Download the Windows x64 installer](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.53/Conxol_0.1.53_x64-setup.exe)** · [Release notes and SHA-256 checksum](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.53)
 
-The Windows installer is an unsigned preview. macOS and Linux source is included; this repository's v0.1.53 release does not provide binaries for those platforms. RDP remains experimental and excluded from normal bundles.
+| macOS architecture | Download |
+| --- | --- |
+| Apple Silicon (M1 and newer) | [ARM64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.53/Conxol-0.1.53-macos-arm64.dmg) |
+| Intel | [x64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.53/Conxol-0.1.53-macos-x64.dmg) |
+
+Open the DMG and move Conxol to Applications. Both Mac packages are ad hoc signed and not notarized; the Windows installer is unsigned. Architecture, bundled VNC helper, signature and CLI startup checks passed for both Mac packages. Linux source is included, but no v0.1.53 Linux binary is published. RDP remains experimental and excluded from normal bundles.
 
 ## Features in the current source
 
