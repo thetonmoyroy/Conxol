@@ -31,9 +31,9 @@ jobs:
         with:
           node-version: '22'
           package-manager-cache: false
-      - uses: pnpm/action-setup@v6.1.0
+      - uses: pnpm/action-setup@v4
         with:
-          version: '10.15.0'
+          version: '10.33.0'
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -45,9 +45,9 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
       - run: pnpm install --frozen-lockfile
         working-directory: apps/desktop
-      - name: Verify version matches tag
-        if: startsWith(github.ref, 'refs/tags/')
-        run: node tools/release-assets.mjs check-version
+      - name: Verify release versions agree
+        shell: bash
+        run: GITHUB_REF_NAME=v$(node -p "require('./apps/desktop/package.json').version") node tools/release-assets.mjs check-version
       - name: Check release asset validation
         run: node --test tools/release-assets.test.mjs
       - name: Frontend checks
@@ -56,6 +56,11 @@ jobs:
       - name: Generate native bundle icons
         working-directory: apps/desktop
         run: pnpm tauri icon src-tauri/icons/icon.png
+      - name: Native diagnostic regression tests
+        run: |
+          cargo xtask test-ping
+          cargo xtask test-mtr
+          cargo xtask test-network
       - name: Build installers
         working-directory: apps/desktop
         run: pnpm tauri build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json -- --locked
@@ -65,8 +70,33 @@ jobs:
           binary=target/release/conxol
           if [[ "$RUNNER_OS" == Windows ]]; then binary="$binary.exe"; fi
           "$binary" --version
+      - name: Verify macOS bundle architecture and signature
+        if: runner.os == 'macOS'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+        run: |
+          expected=x86_64
+          if [[ "$PLATFORM" = macos-arm64 ]]; then expected=arm64; fi
+          app=target/release/bundle/macos/Conxol.app
+          test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$expected"
+          test "$(lipo -archs "$app/Contents/Resources/helpers/conxol-vnc-helper")" = "$expected"
+          codesign --verify --deep --strict "$app"
+          test ! -e "$app/Contents/Resources/helpers/conxol-rdp-helper"
       - name: Collect installers and checksums
         run: node tools/release-assets.mjs collect ${{ matrix.platform }}
+      - name: Build Microsoft Store update
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/package-msix.ps1 -SkipBuild
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Windows'
+        with:
+          name: store-windows-x64
+          path: |
+            target/release/bundle/msix/*.msix
+            target/release/bundle/msix/*.sha256
+            target/release/bundle/msix/*.inventory.json
+          if-no-files-found: error
       - uses: actions/upload-artifact@v6
         with:
           name: installers-${{ matrix.platform }}
