@@ -1239,6 +1239,15 @@ impl SshConnection {
     }
 
     pub async fn open_shell(&self, cols: u32, rows: u32) -> Result<SshShell, SshError> {
+        self.open_shell_inner(cols, rows, true).await
+    }
+
+    /// Open an independent CLI without replaying configured startup commands.
+    pub async fn open_branch_shell(&self, cols: u32, rows: u32) -> Result<SshShell, SshError> {
+        self.open_shell_inner(cols, rows, false).await
+    }
+
+    async fn open_shell_inner(&self, cols: u32, rows: u32, startup: bool) -> Result<SshShell, SshError> {
         let deadline = tokio::time::Instant::now() + self.connect_timeout;
         let mut channel = tokio::time::timeout_at(deadline, self.handle.channel_open_session())
             .await
@@ -1309,7 +1318,7 @@ impl SshConnection {
             finished: false,
         };
         let writer = SshShellWriter { channel: writer };
-        if let Some(startup) = build_startup_input(
+        if startup && let Some(startup) = build_startup_input(
             self.startup_directory.as_deref(),
             self.startup_command.as_deref(),
         ) {

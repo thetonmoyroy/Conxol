@@ -1,8 +1,8 @@
 import { shortcutSelectionText } from "./command-shortcuts";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Clipboard, Copy, ScanText, Plus } from "lucide-react";
-export function TerminalContextMenu({ x, y, selection, onCopy, onPaste, onSelectAll, onSaveShortcut, onClose }: { x: number; y: number; selection: string; onCopy: () => Promise<void>; onPaste: () => Promise<void>; onSelectAll: () => void; onSaveShortcut: (selection: string) => void; onClose: () => void }) {
+import { Clipboard, Copy, ScanText, Plus, GitBranch } from "lucide-react";
+export function TerminalContextMenu({ x, y, selection, onCopy, onPaste, onSelectAll, onSaveShortcut, onBranch, onClose }: { x: number; y: number; selection: string; onCopy: () => Promise<void>; onPaste: () => Promise<void>; onSelectAll: () => void; onSaveShortcut: (selection: string) => void; onBranch?: () => void; onClose: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +23,7 @@ export function TerminalContextMenu({ x, y, selection, onCopy, onPaste, onSelect
     catch { setError("Clipboard access was blocked. Use the keyboard shortcut or terminal toolbar."); }
     finally { gate.current = false; setBusy(false); }
   };
-  return createPortal(<div ref={menuRef} className="terminal-context-menu" role="menu" aria-label="Terminal actions" style={{ left: Math.max(4, Math.min(x, window.innerWidth - 234)), top: Math.max(4, Math.min(y, window.innerHeight - 220)) }} onContextMenu={event => event.preventDefault()} onKeyDown={event => {
+  return createPortal(<div ref={menuRef} className="terminal-context-menu" role="menu" aria-label="Terminal actions" style={{ left: Math.max(4, Math.min(x, window.innerWidth - 234)), top: Math.max(4, Math.min(y, window.innerHeight - (onBranch ? 260 : 220))) }} onContextMenu={event => event.preventDefault()} onKeyDown={event => {
     if (event.key === "Escape" || event.key === "Tab") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
     if (["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) {
       event.preventDefault();
@@ -36,6 +36,7 @@ export function TerminalContextMenu({ x, y, selection, onCopy, onPaste, onSelect
     <button type="button" role="menuitem" disabled={busy || !selection} onClick={() => void run(onCopy)}><Copy size={14} />Copy</button>
     <button type="button" role="menuitem" disabled={busy} onClick={() => void run(onPaste)}><Clipboard size={14} />Paste<small>Ctrl+V</small></button>
     <button type="button" role="menuitem" disabled={busy || shortcutSelectionText(selection) === null} title={shortcutSelectionText(selection) === null ? "Select a single line of command text first" : "Create a shortcut from selected text"} onClick={() => onSaveShortcut(selection)}><Plus size={14} />Save as shortcut</button>
+    {onBranch && <button type="button" role="menuitem" disabled={busy} title="Open a fresh SSH shell beside this terminal" onClick={onBranch}><GitBranch size={14} />Branch session<small>Split right</small></button>}
     <div className="terminal-context-divider" />
     <button type="button" role="menuitem" disabled={busy} onClick={() => { onSelectAll(); onClose(); }}><ScanText size={14} />Select all</button>
     {error && <p role="alert">{error}</p>}

@@ -212,3 +212,64 @@ partial-success flag on an authentication rejection. The generic connect-stage
 summary is suppressed when that attempt already has a more specific failure.
 Disposable loopback tests cover password-only and misleading advertisements,
 rejected responses, partial MFA, and cancellation without password transmission.
+
+## SSH terminal branches
+
+The text-terminal context menu offers Branch session for connected SSH terminals.
+It opens an independent PTY on the authenticated transport and places it in a
+right-hand split. Branch setup never replays the profile startup command or
+startup directory. Closing the branch closes its channel, not the transport;
+closing or losing the parent transport also ends its branches. Shared branches
+do not reconnect automatically or clone the parent's CLI/configuration mode.
+If opening another shell fails, a saved SSH profile can open a separate login
+after an explicit fallback prompt, using normal trust/authentication and omitting
+startup input. Unsaved connections need a saved profile for that fallback.
+
+Split layout operations live in `apps/desktop/src/terminal-layout.ts`. Placement
+is idempotent across login setup/completion. Terminal tab clicks and keyboard
+cycling preserve an existing split or restore its remembered group and ratios;
+closed or regrouped panes are removed when a saved layout is restored. Layout
+memory lasts for the current application run.
+
+`cargo xtask test-ssh-branch` runs sanitized native queue/admission regressions
+and real SSH loopback tests for channel isolation, skipped startup input,
+shared authentication, branch close and shell rejection. Frontend split regression
+coverage is included in `pnpm --dir apps/desktop test:unit`. Real Cisco, Juniper,
+and Huawei behavior still needs device acceptance testing.
+
+## CIDR scans and native DNS reports
+
+Port scan targets accept a single IP, hostname, or IPv4/IPv6 CIDR. A run is
+bounded to 256 expanded addresses, 4096 ports, 65536 aggregate host/port checks,
+and 128 workers shared across the whole range. IPv4 ranges up to /30 omit
+network/broadcast addresses; /31 and /32 include all addresses. IPv6 includes
+all addresses in the accepted bounded prefix. CIDR host bits are normalized.
+Progress includes the aggregate total and preserves each host/port result;
+frontend merging keys on both host and port. Cancellation aborts/joins all
+in-flight checks through the existing scheduler.
+
+`crates/conxol-network/src/dns.rs` implements native DNS diagnostics using Hickory
+for wire encoding/decoding and record formatting. The report includes response
+flags/code, question/answer/authority/additional sections, TTLs, EDNS when
+returned, selected server, transport, query duration, and received size. Query
+types include A, AAAA, CNAME, MX, NS, TXT, SOA, PTR, SRV, and CAA. PTR converts
+literal IPs into reverse names. An explicit resolver IP overrides system DNS;
+Windows uses active adapters via ipconfig and Unix reads /etc/resolv.conf.
+There is no public-resolver fallback or external dig dependency. UDP replies
+must match the query ID, opcode, question, and response bit; truncated replies
+retry on TCP under the same deadline. Wire packets and formatted output are
+bounded, with a 64 KiB report limit.
+
+`cargo xtask test-network` uses disposable loopback peers for DNS records,
+negative replies, wrong transaction IDs, UDP-to-TCP retry, timeouts and CIDR
+scans. It never queries a real DNS server or scans an external subnet.
+
+Port scan CLI rows display confirmed open ports only (UDP silence remains
+inconclusive and is excluded). Progress counts every completed host/port check,
+with an indeterminate bar during setup and a count/percentage once the native
+total arrives. Terminal/cancelled/failed scans retain their current progress.
+All diagnostic tool consoles provide Export text, saving an exact UTF-8 snapshot
+of the currently displayed report through a native Save dialog. Export works
+while a live test runs without stopping it. The native export accepts only known
+tool names and bounds content at 16 MiB; it is distinct from the sanitized
+support-diagnostics JSON export. Browser previews use a text download.

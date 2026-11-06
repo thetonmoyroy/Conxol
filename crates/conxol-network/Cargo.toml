@@ -12,3 +12,9 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+
+hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
+rand = "0.9"
+
+[target.'cfg(windows)'.dependencies]
+ipconfig = "0.3"

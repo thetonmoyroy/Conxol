@@ -44,3 +44,27 @@ secrets/
 .vscode/
 *.swp
 *.tmp
+
+# Local AI assistant instructions and state
+AGENT.md
+AGENTS.md
+CLAUDE.md
+GEMINI.md
+.codex/
+.claude/
+.cursor/
+.aider*
+.windsurf/
+.windsurfrules
+.cursorrules
+.cursorignore
+.github/copilot-instructions.md
+.github/instructions/
+.github/prompts/
+.openai/
+
+# Local publishing exports and audit scratch files
+/landing-conxol/
+/artifacts/*.tar.gz
+/artifacts/*audit*.txt
+/artifacts/

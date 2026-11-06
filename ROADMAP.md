@@ -6,7 +6,7 @@
 
 The maintainer requested this handoff and a stop. Continue only on a new request.
 
-**Positioning:** always keep **Free, open-source MobaXterm alternative built with Rust**.
+**Positioning:** **Open-source terminal and network workspace built with Rust**.
 **Progress:** 57/76 checklist items (75%), not a production-readiness score.
 
 **Finished on main:** bounded terminal input, deferred local startup, owned PTY

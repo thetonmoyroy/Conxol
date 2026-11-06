@@ -18,6 +18,7 @@ fn main() {
         "check" => check(),
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
+        "test-ssh-branch" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "-p", "conxol-ssh", "branch", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
         "test-file-transfers" => test_file_transfers(),
         "test-backup" => run_sanitized_test(
@@ -73,6 +74,7 @@ fn main() {
             );
             println!("cargo xtask test-file-transfers    Run isolated FTP/TFTP client fixtures");
             println!("cargo xtask test-ssh    Run isolated SSH tests and Unix OpenSSH fixtures");
+            println!("cargo xtask test-ssh-branch    Run isolated SSH branch lifecycle regressions");
             println!("cargo xtask test-diagnostics    Run isolated diagnostic export regressions");
             println!(
                 "cargo xtask test-backup    Run isolated encrypted workspace backup regressions"

@@ -341,6 +341,11 @@ struct SshX11Event {
 }
 
 enum SshCommand {
+    BranchShell {
+        cols: u32,
+        rows: u32,
+        reply: oneshot::Sender<Result<(Arc<SshConnection>, conxol_ssh::SshShell), String>>,
+    },
     Write(Vec<u8>),
     ListDirectory {
         path: String,
@@ -434,6 +439,12 @@ impl Default for SshManager {
             authentication: Arc::new(Mutex::new(HashMap::new())),
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshBranchResponse {
+    pub terminal_id: String,
 }
 
 struct SessionState {
@@ -1007,6 +1018,112 @@ impl SshManager {
         }
         state.attached = true;
         Ok(())
+    }
+
+    /// Branches share authentication/transport, but own their PTY and input queue.
+    pub async fn branch(
+        &self,
+        app: AppHandle,
+        source_id: &str,
+        cols: u32,
+        rows: u32,
+    ) -> Result<SshBranchResponse, SshManagerError> {
+        let sender = self.sender(source_id)?;
+        let (reply, response) = oneshot::channel();
+        Self::reserve_command(&sender)?.send(SshCommand::BranchShell {
+            cols: cols.max(1),
+            rows: rows.max(1),
+            reply,
+        });
+        let (connection, shell) = response
+            .await
+            .map_err(|_| SshManagerError::Closed)?
+            .map_err(SshManagerError::InvalidRequest)?;
+        let terminal_id = Uuid::new_v4().to_string();
+        let (branch_sender, commands) = mpsc::channel(COMMAND_CAPACITY);
+        let (size, size_receiver) = watch::channel((cols.max(1), rows.max(1)));
+        let (close, close_receiver) = watch::channel(false);
+        let (finished, finished_receiver) = watch::channel(false);
+        let registration = (|| {
+            let mut sessions = self.sessions.lock().map_err(|_| SshManagerError::Closed)?;
+            let source = sessions.get(source_id).ok_or(SshManagerError::Closed)?;
+            if *self.shutdown.borrow()
+                || *source.close.borrow()
+                || !source.sender.same_channel(&sender)
+                || sessions.len() >= 128
+            {
+                return Err(SshManagerError::Closed);
+            }
+            let parent_close = source.close.subscribe();
+            sessions.insert(
+                terminal_id.clone(),
+                SessionState {
+                    sender: branch_sender,
+                    size,
+                    close,
+                    finished: finished_receiver,
+                    attached: false,
+                    pending_output: Vec::new(),
+                    output_decoder: Utf8OutputDecoder::default(),
+                },
+            );
+            Ok::<_, SshManagerError>(parent_close)
+        })();
+        let parent_close = match registration {
+            Ok(close) => close,
+            Err(error) => {
+                let (reader, writer) = shell.split();
+                retire_shell_output(reader, &writer).await;
+                return Err(error);
+            }
+        };
+        let manager = self.clone();
+        let id = terminal_id.clone();
+        tauri::async_runtime::spawn(async move {
+            let (mut reader, writer) = shell.split();
+            let mut commands = commands;
+            let mut close = close_receiver;
+            let mut parent_close = parent_close;
+            let mut size = size_receiver;
+            let mut workers = JoinSet::new();
+            let parent_closed = *parent_close.borrow();
+            let result = if parent_closed {
+                ShellRunResult::Closed
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = parent_close.changed() => ShellRunResult::Closed,
+                    result = run_shell_once(&app, &manager, &id, &connection, &mut reader, &writer, &mut commands, &mut close, &mut size, &mut workers) => result,
+                }
+            };
+            manager
+                .retire_command_queue(
+                    &id,
+                    &mut commands,
+                    |event| manager.emit_transfer(&app, event),
+                    |event| manager.emit_tunnel(&app, event),
+                )
+                .await;
+            retire_shell_output(reader, &writer).await;
+            manager.finish_session_operations(&id, &mut workers).await;
+            manager.finish_output(&app, &id);
+            // Never disconnect the shared transport when a branch closes.
+            manager.remove(&id);
+            let reason = match result {
+                ShellRunResult::Closed => "closed".into(),
+                ShellRunResult::Lost(error) => error,
+            };
+            manager.emit_session_state(&app, &id, SshSessionState::Disconnected, 0, None);
+            let _ = app.emit(
+                "ssh://closed",
+                SshClosedEvent {
+                    terminal_id: id,
+                    reason,
+                },
+            );
+            finished.send_replace(true);
+        });
+        Ok(SshBranchResponse { terminal_id })
     }
 
     pub async fn list_directory(
@@ -1602,7 +1719,8 @@ impl SshManager {
         if workers.len() >= SESSION_OPERATION_LIMIT
             && matches!(
                 command,
-                SshCommand::ListDirectory { .. }
+                SshCommand::BranchShell { .. }
+                    | SshCommand::ListDirectory { .. }
                     | SshCommand::OpenTextFile { .. }
                     | SshCommand::CollectMonitor { .. }
                     | SshCommand::SaveTextFile { .. }
@@ -1638,6 +1756,7 @@ impl SshManager {
         tunnel_event: impl FnOnce(SshTunnelEvent),
     ) {
         match command {
+            SshCommand::BranchShell { reply, .. } => { let _ = reply.send(Err(reason.into())); }
             SshCommand::Write(_) => {}
             SshCommand::ListDirectory { reply, .. } => {
                 let _ = reply.send(Err(reason.into()));
@@ -2482,6 +2601,19 @@ fn spawn_session_operation(
     workers: &mut JoinSet<()>,
 ) -> Option<SshCommand> {
     match command {
+        SshCommand::BranchShell { cols, rows, reply } => {
+            workers.spawn(async move {
+                let result = connection
+                    .open_branch_shell(cols, rows)
+                    .await
+                    .map(|shell| (connection, shell))
+                    .map_err(|error| error.to_string());
+                if let Err(Ok((_, shell))) = reply.send(result) {
+                    let (reader, writer) = shell.split();
+                    retire_shell_output(reader, &writer).await;
+                }
+            });
+        }
         SshCommand::ListDirectory { path, reply } => {
             workers.spawn(async move {
                 let result = list_remote_directory(&connection, path).await;
@@ -4904,6 +5036,28 @@ mod tests {
         assert_eq!(fs::read(&temporary).unwrap(), b"replacement");
     }
 
+    #[tokio::test]
+    async fn branch_request_is_cancelled_when_its_source_queue_retires() {
+        let manager = SshManager::default();
+        let mut commands = queue_test_session(&manager, "branch-source");
+        let (reply, response) = oneshot::channel();
+        manager
+            .sender("branch-source")
+            .unwrap()
+            .try_send(super::SshCommand::BranchShell {
+                cols: 80,
+                rows: 24,
+                reply,
+            })
+            .unwrap();
+        manager
+            .retire_command_queue("branch-source", &mut commands, |_| {}, |_| {})
+            .await;
+        assert!(
+            matches!(response.await.unwrap(), Err(reason) if reason == super::QUEUED_COMMAND_CANCELLED)
+        );
+    }
+
     fn queue_test_session(
         manager: &SshManager,
         id: &str,
@@ -5479,7 +5633,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn saturated_session_rejects_work_settles_replies_and_keeps_input_available() {
+    async fn saturated_session_rejects_work_including_branch_and_keeps_input_available() {
         use super::{
             SESSION_OPERATION_BUSY, SESSION_OPERATION_LIMIT, SshCommand, SshFileOperation,
             TransferControl, TransferDirection, TransferJob,
@@ -5574,6 +5728,9 @@ mod tests {
         let (reply, response) = oneshot::channel();
         refuse(SshCommand::CollectMonitor { reply }, &mut workers);
         busy(response).await;
+        let (reply, response) = oneshot::channel();
+        refuse(SshCommand::BranchShell { cols: 80, rows: 24, reply }, &mut workers);
+        assert!(matches!(response.await.unwrap(), Err(reason) if reason == SESSION_OPERATION_BUSY));
 
         let (cancel, cancellation) = oneshot::channel();
         manager.transfers.lock().unwrap().insert(

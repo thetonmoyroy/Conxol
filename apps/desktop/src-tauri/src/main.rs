@@ -463,6 +463,57 @@ fn save_diagnostic_export(path: Option<PathBuf>) -> Result<bool, String> {
     Ok(true)
 }
 
+const MAX_NETWORK_OUTPUT_EXPORT_BYTES: usize = 16 * 1024 * 1024;
+
+fn network_diagnostic_output_tool(tool: &str) -> Result<&'static str, String> {
+    match tool {
+        "scan" => Ok("scan"),
+        "ping" => Ok("ping"),
+        "mtr" => Ok("mtr"),
+        "dns" => Ok("dns"),
+        "tcp" => Ok("tcp"),
+        "ssh" => Ok("ssh"),
+        _ => Err("unknown diagnostic output tool".into()),
+    }
+}
+
+// This exports the operator's displayed CLI report, separate from the sanitized
+// support snapshot above. Only the native Save dialog supplies a destination.
+#[tauri::command]
+async fn network_diagnostic_output_export(tool: String, content: String) -> Result<bool, String> {
+    let tool = network_diagnostic_output_tool(&tool)?;
+    if content.len() > MAX_NETWORK_OUTPUT_EXPORT_BYTES {
+        return Err("diagnostic text output exceeds 16 MiB".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let path = rfd::FileDialog::new()
+            .set_title("Export diagnostic text output")
+            .add_filter("Text file", &["txt"])
+            .set_file_name(format!("conxol-{tool}-{stamp}.txt"))
+            .save_file();
+        save_network_diagnostic_output(path, &content)
+    })
+    .await
+    .map_err(|_| "could not open the diagnostic output Save dialog".to_owned())?
+}
+
+fn save_network_diagnostic_output(path: Option<PathBuf>, content: &str) -> Result<bool, String> {
+    if content.len() > MAX_NETWORK_OUTPUT_EXPORT_BYTES {
+        return Err("diagnostic text output exceeds 16 MiB".into());
+    }
+    let Some(path) = path else {
+        return Ok(false);
+    };
+    std::fs::write(path, content.as_bytes()).map_err(|_| {
+        "could not save diagnostic text output; choose a writable destination".to_owned()
+    })?;
+    Ok(true)
+}
+
 #[tauri::command]
 fn session_list(store: State<'_, Mutex<SessionStore>>) -> Result<Vec<SessionRecord>, String> {
     store
@@ -1221,6 +1272,31 @@ fn session_save_remote_desktop(
         .map_err(|error| error.to_string())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct NetworkDnsRequest {
+    host: String,
+    timeout_ms: u64,
+    #[serde(default)]
+    record_type: conxol_network::DnsRecordType,
+    server: Option<String>,
+}
+
+#[tauri::command]
+async fn network_dns_lookup(
+    request: NetworkDnsRequest,
+) -> Result<conxol_network::DnsLookupResult, String> {
+    let timeout = diagnostic_timeout(request.timeout_ms)?;
+    conxol_network::lookup_dns(
+        &request.host,
+        request.record_type,
+        request.server.as_deref(),
+        timeout,
+    )
+    .await
+    .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
 async fn network_resolve_host(request: NetworkResolveRequest) -> Result<Vec<String>, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
@@ -1354,6 +1430,20 @@ fn ssh_trust_accept(
         .lock()
         .map_err(|_| "SSH trust store lock poisoned")?
         .accept(&host, port, &fingerprint)
+}
+
+#[tauri::command]
+async fn ssh_branch(
+    app: tauri::AppHandle,
+    manager: State<'_, SshManager>,
+    terminal_id: String,
+    cols: u32,
+    rows: u32,
+) -> Result<ssh::SshBranchResponse, String> {
+    manager
+        .branch(app, &terminal_id, cols, rows)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -2145,6 +2235,8 @@ fn main() {
             session_save_remote_desktop,
             session_delete,
             network_resolve_host,
+            network_dns_lookup,
+            network_diagnostic_output_export,
             network_check_tcp,
             ssh_inspect_host_key,
             ssh_trust_lookup,
@@ -2163,6 +2255,7 @@ fn main() {
             remote_desktop_clipboard,
             remote_desktop_stop,
             ssh_connect,
+            ssh_branch,
             ssh_authentication_answer,
             ssh_write,
             ssh_resize,
@@ -2279,6 +2372,33 @@ mod tests {
             paths.last().map(String::as_str),
             Some("/tmp/conxol-picker-15")
         );
+    }
+
+    #[test]
+    fn network_diagnostic_text_export_preserves_cli_output_and_handles_cancel() {
+        let root = tempfile::tempdir().unwrap();
+        assert!(!super::save_network_diagnostic_output(None, "snapshot").unwrap());
+        assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
+        let path = root.path().join("scan.txt");
+        let content = "PORT SCAN / TCP\n192.0.2.1    22 open\nUTF-8: café → ready\n";
+        assert!(super::save_network_diagnostic_output(Some(path.clone()), content).unwrap());
+        assert_eq!(std::fs::read_to_string(path).unwrap(), content);
+        assert_eq!(
+            super::save_network_diagnostic_output(
+                Some(root.path().join("missing/report.txt")),
+                content
+            )
+            .unwrap_err(),
+            "could not save diagnostic text output; choose a writable destination"
+        );
+        for tool in ["scan", "ping", "mtr", "dns", "tcp", "ssh"] {
+            assert!(super::network_diagnostic_output_tool(tool).is_ok());
+        }
+        assert!(super::network_diagnostic_output_tool("../report").is_err());
+        let too_large = "x".repeat(super::MAX_NETWORK_OUTPUT_EXPORT_BYTES + 1);
+        let path = root.path().join("too-large.txt");
+        assert!(super::save_network_diagnostic_output(Some(path.clone()), &too_large).is_err());
+        assert!(!path.exists());
     }
 
     #[test]

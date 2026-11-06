@@ -1,11 +1,14 @@
 //! Bounded, administration-focused network diagnostics.
 //!
 //! This crate deliberately does not provide an unrestricted scanner. Every
-//! scan has an explicit host, an explicit bounded port range, a timeout, and a
+//! scan has an explicit host or bounded CIDR, a bounded port range, a timeout, and a
 //! cancellation receiver. Tests use loopback listeners only.
 
+mod dns;
+pub use dns::{DnsLookupResult, DnsRecordType, lookup_dns};
+
 use std::io;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::process::{Output, Stdio};
 use std::time::Duration;
 
@@ -19,6 +22,8 @@ use tokio::task::JoinSet;
 use tokio::time::Instant;
 
 const MAX_PORTS_PER_SCAN: u16 = 4096;
+const MAX_SCAN_HOSTS: usize = 256;
+const MAX_SCAN_CHECKS: usize = 65_536;
 const MAX_CONCURRENCY: usize = 128;
 const MAX_TRACE_HOPS: u8 = 32;
 const MAX_TRACE_LINES: usize = 64;
@@ -31,6 +36,8 @@ pub enum NetworkDiagnosticError {
     InvalidTarget,
     #[error("port range is invalid or exceeds the bounded diagnostic limit")]
     InvalidPortRange,
+    #[error("CIDR scan must contain at most 256 hosts and 65536 host/port checks")]
+    InvalidScanRange,
     #[error("network diagnostic timed out")]
     Timeout,
     #[error("DNS lookup failed")]
@@ -173,7 +180,7 @@ pub struct PortScanOptions {
 
 impl PortScanOptions {
     pub fn validate(&self) -> Result<(), NetworkDiagnosticError> {
-        validate_host(&self.host)?;
+        let hosts = scan_targets(&self.host)?;
         if self.start_port == 0
             || self.end_port < self.start_port
             || self
@@ -187,8 +194,60 @@ impl PortScanOptions {
         {
             return Err(NetworkDiagnosticError::InvalidPortRange);
         }
+        if hosts.len() * (usize::from(self.end_port - self.start_port) + 1) > MAX_SCAN_CHECKS {
+            return Err(NetworkDiagnosticError::InvalidScanRange);
+        }
         Ok(())
     }
+    pub fn total_checks(&self) -> Result<usize, NetworkDiagnosticError> {
+        self.validate()?;
+        Ok(scan_targets(&self.host)?.len() * (usize::from(self.end_port - self.start_port) + 1))
+    }
+}
+
+/// Expand a small explicit network without DNS or allocating an unbounded range.
+fn scan_targets(target: &str) -> Result<Vec<String>, NetworkDiagnosticError> {
+    let Some((address, prefix)) = target.split_once('/') else {
+        validate_host(target)?;
+        return Ok(vec![target.to_owned()]);
+    };
+    let ip: IpAddr = address
+        .parse()
+        .map_err(|_| NetworkDiagnosticError::InvalidTarget)?;
+    let prefix: u32 = prefix
+        .parse()
+        .map_err(|_| NetworkDiagnosticError::InvalidTarget)?;
+    let bits = if ip.is_ipv4() { 32 } else { 128 };
+    if prefix > bits {
+        return Err(NetworkDiagnosticError::InvalidTarget);
+    }
+    let host_bits = bits - prefix;
+    // Even before shifting, reject ranges larger than the bounded target list.
+    if host_bits > 8 {
+        return Err(NetworkDiagnosticError::InvalidScanRange);
+    }
+    let count = 1usize << host_bits;
+    if count > MAX_SCAN_HOSTS {
+        return Err(NetworkDiagnosticError::InvalidScanRange);
+    }
+    let value = match ip {
+        IpAddr::V4(ip) => u128::from(u32::from(ip)),
+        IpAddr::V6(ip) => u128::from(ip),
+    };
+    let base = value & !((count as u128) - 1);
+    let skip_edges = ip.is_ipv4() && prefix <= 30;
+    let start = usize::from(skip_edges);
+    let end = count - usize::from(skip_edges);
+    Ok((start..end)
+        .map(|offset| {
+            let value = base + offset as u128;
+            if ip.is_ipv4() {
+                Ipv4Addr::from(value as u32).to_string()
+            } else {
+                Ipv6Addr::from(value).to_string()
+            }
+        })
+        .collect())
 }
 
 /// Scans one explicit bounded TCP range. The caller owns cancellation and may
@@ -231,19 +290,20 @@ where
     }
 
     let mut tasks = JoinSet::new();
-    let mut next_port = Some(options.start_port);
+    let mut next_check = 0;
+    let targets = scan_targets(&options.host)?;
     let mut results = Vec::new();
     let mut cancellation_closed = false;
-    let total = usize::from(options.end_port - options.start_port) + 1;
+    let total = options.total_checks()?;
 
-    schedule_ports(&mut tasks, &options, protocol, &mut next_port);
+    schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
     while !tasks.is_empty() {
         if cancellation_closed {
             if let Some(result) = tasks.join_next().await {
                 let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                 on_progress(&result, results.len() + 1, total);
                 results.push(result);
-                schedule_ports(&mut tasks, &options, protocol, &mut next_port);
+                schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
             }
             continue;
         }
@@ -265,40 +325,36 @@ where
                     let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                     on_progress(&result, results.len() + 1, total);
                     results.push(result);
-                    schedule_ports(&mut tasks, &options, protocol, &mut next_port);
+                    schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
                 }
             }
         }
     }
-    results.sort_by_key(|result| result.port);
+    results.sort_by(|a, b| a.host.cmp(&b.host).then(a.port.cmp(&b.port)));
     Ok(results)
 }
 
 fn schedule_ports(
     tasks: &mut JoinSet<Result<TcpCheckResult, NetworkDiagnosticError>>,
     options: &PortScanOptions,
+    targets: &[String],
     protocol: ScanProtocol,
-    next_port: &mut Option<u16>,
+    next_check: &mut usize,
 ) {
-    while tasks.len() < options.concurrency {
-        let Some(port) = *next_port else {
-            break;
-        };
-        if port > options.end_port {
-            break;
-        }
+    let ports = usize::from(options.end_port - options.start_port) + 1;
+    while tasks.len() < options.concurrency && *next_check < targets.len() * ports {
         let check = TcpCheckOptions {
-            host: options.host.clone(),
-            port,
+            host: targets[*next_check / ports].clone(),
+            port: options.start_port + (*next_check % ports) as u16,
             timeout: options.timeout,
         };
+        *next_check += 1;
         tasks.spawn(async move {
             match protocol {
                 ScanProtocol::Tcp => check_tcp(check).await,
                 ScanProtocol::Udp => check_udp(check).await,
             }
         });
-        *next_port = port.checked_add(1);
     }
 }
 
@@ -957,6 +1013,94 @@ mod tests {
                 "accepted invalid diagnostic host {host:?}"
             );
         }
+    }
+
+    #[test]
+    fn cidr_expansion_and_aggregate_work_are_bounded() {
+        assert_eq!(scan_targets("192.0.2.19").unwrap(), vec!["192.0.2.19"]);
+        assert_eq!(
+            scan_targets("192.0.2.3/30").unwrap(),
+            vec!["192.0.2.1", "192.0.2.2"]
+        );
+        assert_eq!(
+            scan_targets("192.0.2.0/31").unwrap(),
+            vec!["192.0.2.0", "192.0.2.1"]
+        );
+        assert_eq!(scan_targets("192.0.2.42/32").unwrap(), vec!["192.0.2.42"]);
+        assert_eq!(scan_targets("::1/128").unwrap(), vec!["::1"]);
+        assert_eq!(scan_targets("2001:db8::2/126").unwrap().len(), 4);
+        for target in [
+            "0.0.0.0/0",
+            "192.0.2.0/23",
+            "::/0",
+            "2001:db8::/64",
+            "192.0.2.1/33",
+            "::1/129",
+            "hostname/24",
+            "192.0.2.1/no",
+        ] {
+            assert!(scan_targets(target).is_err(), "{target}");
+        }
+        let mut options = PortScanOptions {
+            host: "192.0.2.0/24".into(),
+            start_port: 1,
+            end_port: 256,
+            concurrency: 16,
+            timeout: Duration::from_millis(50),
+        };
+        assert_eq!(options.total_checks().unwrap(), 254 * 256);
+        options.end_port = 1024;
+        assert!(matches!(
+            options.validate(),
+            Err(NetworkDiagnosticError::InvalidScanRange)
+        ));
+    }
+
+    #[tokio::test]
+    async fn cidr_scan_reports_each_loopback_host_on_the_same_port() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let listener2 = TcpListener::bind(("127.0.0.2", port)).await.unwrap();
+        let options = PortScanOptions {
+            host: "127.0.0.0/30".into(),
+            start_port: port,
+            end_port: port,
+            concurrency: 2,
+            timeout: Duration::from_secs(1),
+        };
+        let (_cancel, mut cancellation) = watch::channel(false);
+        let mut progress = Vec::new();
+        let results = scan_ports_with_progress(
+            options.clone(),
+            ScanProtocol::Tcp,
+            &mut cancellation,
+            |result, scanned, total| {
+                progress.push((result.host.clone(), scanned, total));
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 2);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.status == TcpPortStatus::Open && result.port == port)
+        );
+        assert_eq!(results[0].host, "127.0.0.1");
+        assert_eq!(results[1].host, "127.0.0.2");
+        assert_eq!(
+            progress
+                .iter()
+                .map(|(_, scanned, total)| (*scanned, *total))
+                .collect::<Vec<_>>(),
+            vec![(1, 2), (2, 2)]
+        );
+        let (_cancel, mut cancellation) = watch::channel(true);
+        assert!(matches!(
+            scan_tcp(options, &mut cancellation).await,
+            Err(NetworkDiagnosticError::Cancelled)
+        ));
+        drop((listener, listener2));
     }
 
     #[test]

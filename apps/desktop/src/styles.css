@@ -473,7 +473,7 @@ button:not(:disabled) { cursor: pointer; }
 .shutdown-state h1 { margin: 16px 0 8px; font-size: 24px; }
 .shutdown-state p { color: var(--muted); }
 
-/* MobaXterm-inspired desktop geometry; all colors inherit the Conxol theme. */
+/* Desktop workspace geometry; all colors inherit the Conxol theme. */
 .app-shell { height: 100dvh; min-height: 680px; display: flex; flex-direction: column; }
 .desktop-menubar { display: flex; align-items: center; flex: 0 0 23px; height: 23px; gap: 1px; padding: 0 3px; border-bottom: 1px solid var(--line); background: var(--panel); z-index: 20; }
 .desktop-menubar > button, .desktop-menubar summary { display: flex; align-items: center; height: 22px; padding: 0 7px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; list-style: none; }
@@ -493,7 +493,8 @@ button:not(:disabled) { cursor: pointer; }
 .session-activity-strip { display: flex; flex: 0 0 28px; flex-direction: column; align-items: stretch; border-right: 1px solid var(--line); background: var(--panel); }
 .session-activity-strip button { display: grid; place-items: center; width: 23px; height: 27px; margin: 1px 2px; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); }
 .session-activity-strip button:hover { background: var(--amber-soft); color: var(--amber); }
-.session-activity-strip .activity-settings { margin-top: auto; margin-bottom: 3px; }
+.session-activity-strip .activity-collapse { margin-top: auto; border-top-color: var(--line); }
+.session-activity-strip .activity-settings { margin-top: 0; margin-bottom: 3px; }
 .app-shell .sidebar { flex-basis: 190px; min-width: 0; padding: 0 3px 3px; overflow: hidden; transition: none; }
 .app-shell.sidebar-collapsed .sidebar { flex-basis: 0; padding: 0; }
 .app-shell .sidebar-toolbar, .app-shell .sidebar-nav, .app-shell .sidebar-footer { display: none; }
@@ -1133,13 +1134,38 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .session-activity-strip .activity-favorites[aria-pressed="true"] { background: var(--amber-soft); color: var(--amber); }
 .session-activity-strip .activity-favorites[aria-pressed="true"] svg { fill: currentColor; }
 
+/* Compact sidebar tabs using the application outline icon set. */
+.session-activity-strip { flex-basis: 34px; background: var(--panel); }
+.session-activity-strip button { box-sizing: border-box; flex-shrink: 0; width: 33px; height: 30px; margin: 0; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 0; }
+.session-activity-strip button svg { width: 16px; height: 16px; }
+.session-activity-strip button[aria-pressed="true"],
+.session-activity-strip .activity-favorites[aria-pressed="true"] { border-color: var(--line-strong); border-right-color: var(--bg); background: var(--bg); }
+.session-activity-strip button:hover { background: var(--panel-soft); }
+.session-activity-strip button[aria-pressed="false"]:not(:hover) svg { opacity: .72; }
+.session-activity-strip .activity-favorites[aria-pressed="true"] svg { fill: none; }
+
+/* The selected sidebar tab opens directly into the panel surface. */
+.app-shell .sidebar { background: var(--bg); }
+.session-activity-strip :is(.activity-favorites, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"] {
+  position: relative;
+  z-index: 1;
+  border-color: var(--line);
+  border-right-color: transparent;
+  background: var(--bg);
+}
+.session-activity-strip :is(.activity-favorites, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -2px;
+  width: 2px;
+  background: var(--bg);
+  pointer-events: none;
+}
+
 /* Diagnostics: compact controls above one full-height CLI report. */
 .diagnostics-cli { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--bg); color: var(--text); }
-.diagnostics-cli-header { display: flex; flex: 0 0 42px; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-.diagnostics-cli-header > div { display: flex; align-items: center; gap: 9px; }
-.diagnostics-cli-header svg { color: var(--mint); }
-.diagnostics-cli-header h2 { margin: 0; font-size: 15px; font-weight: 600; }
-.diagnostics-cli-header > span { color: var(--muted); font-family: var(--mono); font-size: 11px; }
 .diagnostics-cli-tools { display: flex; flex-shrink: 0; flex-wrap: wrap; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
 .diagnostics-cli-tools button { min-height: 30px; padding: 0 13px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
 .diagnostics-cli-tools button:hover { background: var(--panel-soft); color: var(--text); }
@@ -1182,3 +1208,136 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .help-about-details a:hover, .help-footer a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .help-about-details a:focus-visible, .help-footer a:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
 .help-profile-handle { display: block; margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 11px; }
+
+/* Notes remain mounted when switching panels so unsaved edits survive navigation. */
+.sidebar-notes-panel:not([hidden]) { display: flex; flex: 1; min-height: 0; min-width: 0; }
+.notes-panel { width: 100%; height: auto; min-height: 0; border: 0; background: transparent; }
+.notes-panel .session-editor-heading { padding: 9px 6px; gap: 4px; }
+.notes-panel h2 { font-size: 12px; }
+.notes-panel .session-editor-heading p { font-size: 10px; }
+.notes-panel .notes-layout { display: flex; flex-direction: column; overflow-y: auto; }
+.notes-panel .notes-sidebar { flex: 0 0 auto; max-height: none; padding: 6px; gap: 6px; border-right: 0; border-bottom: 1px solid var(--line); }
+.notes-panel .notes-list { max-height: 160px; }
+.notes-panel .notes-list > button { padding: 6px; gap: 2px; font-size: 11px; }
+.notes-panel .notes-editor { flex-shrink: 0; padding: 8px 6px; overflow: visible; }
+.notes-panel .notes-editor fieldset { gap: 10px; }
+.notes-panel .notes-fields { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.notes-panel .notes-editor label { gap: 4px; font-size: 11px; }
+.notes-panel input, .notes-panel textarea { box-sizing: border-box; padding: 6px; font-size: 11px; }
+.notes-panel .notes-content textarea { min-height: 180px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notes-panel .outline-button, .notes-panel .primary-button { padding: 5px; font-size: 10px; }
+.notes-panel .notes-actions { gap: 5px; }
+.notes-panel .notes-confirm { padding: 6px; }
+.notes-panel .notes-confirm button + button { margin: 5px 0 0; }
+
+.notes-browsing .notes-sidebar { flex: 1; min-height: 0; border-bottom: 0; }
+.notes-browsing .notes-list { flex: 1; max-height: none; }
+.notes-panel .notes-preview { flex: 1; min-width: 0; padding: 4px 7px 12px; }
+.notes-panel .notes-preview h3 { margin: 0; font-size: 14px; line-height: 1.45; font-weight: 600; overflow-wrap: anywhere; }
+.notes-panel .notes-preview small { color: var(--muted); font-size: 10px; }
+.notes-panel .notes-preview pre { margin: 0; padding: 12px 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.7 var(--mono); color: var(--text); user-select: text; tab-size: 4; }
+.notes-panel .notes-editor > .outline-button { margin-bottom: 10px; }
+
+.notes-preview-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 0 8px; border-bottom: 1px solid var(--line); }
+.notes-preview-toolbar > div { display: flex; gap: 2px; }
+.notes-panel .notes-back { display: inline-flex; align-items: center; gap: 5px; min-height: 26px; padding: 3px 0; border: 0; background: transparent; color: var(--muted); font-size: 11px; cursor: pointer; }
+.notes-panel .notes-back:hover { color: var(--text); }
+.notes-preview-toolbar .icon-button { width: 25px; height: 26px; padding: 4px; }
+.notes-preview-toolbar .notes-delete:hover { color: var(--coral); }
+.notes-preview-heading { display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 14px 2px; }
+.notes-vendor { max-width: 100%; box-sizing: border-box; padding: 2px 7px; border: 1px solid var(--line); border-radius: 4px; background: var(--panel-soft); color: var(--muted); font-size: 10px; overflow-wrap: anywhere; }
+.notes-preview-card { overflow: hidden; border: 1px solid var(--line); border-radius: 5px; background: var(--panel); }
+.notes-preview-caption { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.notes-preview-caption button { display: inline-flex; align-items: center; gap: 4px; min-height: 23px; padding: 2px 4px; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font-size: 10px; cursor: pointer; }
+.notes-preview-caption button:hover { background: var(--panel-soft); color: var(--text); }
+.notes-panel .notes-notice { margin: 0; padding: 5px 9px 10px; color: var(--mint); font-size: 10px; line-height: 1.5; }
+.notes-panel :is(.notes-back, .notes-preview-caption button):focus-visible { outline: 1px solid var(--amber); outline-offset: 1px; }
+
+/* Modeless diagnostics: the terminal and sidebar remain interactive. */
+.floating-diagnostics { position: fixed; z-index: 9; display: flex; flex-direction: column; width: min(820px, calc(100vw - 16px)); height: min(560px, calc(100dvh - 96px)); min-width: min(360px, calc(100vw - 16px)); min-height: min(280px, calc(100dvh - 16px)); max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); resize: both; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--bg); box-shadow: 0 12px 40px #0005; }
+.floating-diagnostics[hidden] { display: none; }
+.floating-diagnostics-title { display: flex; flex: 0 0 32px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 7px 0 10px; border-bottom: 1px solid var(--line); background: var(--panel); cursor: move; touch-action: none; user-select: none; }
+.floating-diagnostics-title > span { display: inline-flex; align-items: center; gap: 7px; color: var(--text); font-size: 12px; }
+.floating-diagnostics-title > span svg { color: var(--mint); }
+.floating-diagnostics-title .icon-button { width: 25px; height: 25px; padding: 4px; cursor: pointer; }
+.floating-diagnostics-title > span:focus-visible { outline: 1px solid var(--amber); outline-offset: 3px; }
+.floating-diagnostics .diagnostics-cli-controls { gap: 7px; padding: 8px 10px; }
+.floating-diagnostics .diagnostics-cli-console { min-height: 0; }
+.floating-diagnostics .diagnostics-cli-output { padding: 14px; font-size: 12px; }
+.floating-diagnostics .diagnostics-cli-footer { padding-right: 18px; }
+
+.floating-diagnostics-actions { display: flex; align-items: center; gap: 2px; }
+
+.diagnostics-cli-controls .diagnostics-dns-server { flex: 1 1 145px; }
+
+.diagnostics-scan-progress { flex-shrink: 0; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.diagnostics-scan-progress > div { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 5px; margin-bottom: 5px; color: var(--muted); font-size: 10px; }
+.diagnostics-scan-progress progress { display: block; width: 100%; height: 6px; overflow: hidden; border: 0; border-radius: 3px; background: var(--panel-soft); accent-color: var(--mint); }
+.diagnostics-scan-progress progress::-webkit-progress-bar { background: var(--panel-soft); border-radius: 3px; }
+.diagnostics-scan-progress progress::-webkit-progress-value { background: var(--mint); border-radius: 3px; transition: width .1s linear; }
+.diagnostics-export-notice { flex-shrink: 0; margin: 0; padding: 6px 12px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+
+.diagnostics-cli-console-bar { flex-wrap: wrap; gap: 4px; padding-top: 3px; padding-bottom: 3px; }
+.diagnostics-cli-console-bar > div { flex-wrap: wrap; }
+
+/* Reserve one action button so compact session rows have room for host names. */
+.app-shell .session-row .session-copy { flex: 1; }
+.app-shell .session-row-actions { flex: 0 0 22px; }
+.app-shell .session-row-actions:has(button[aria-expanded="true"]) { visibility: visible; pointer-events: auto; }
+
+.settings-modal .settings-general-options { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.settings-modal .settings-general-option { min-width: 0; }
+.settings-modal .settings-general-option .settings-check { min-height: 20px; }
+.settings-modal .settings-general-option small { display: block; margin: 3px 0 0 22px; line-height: 1.5; }
+
+/* Keep app notifications at the left edge, independent of terminal layout. */
+.app-notifications {
+  position: fixed;
+  left: 36px;
+  bottom: 8px;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(340px, calc(100vw - 44px));
+  max-height: min(50dvh, 420px);
+  overflow-y: auto;
+  pointer-events: none;
+}
+.app-shell .app-notifications > :is(.workspace-notice, .workspace-error) {
+  flex-shrink: 0;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 10px;
+  background: var(--panel);
+  box-shadow: 0 3px 12px #0003;
+  overflow-wrap: anywhere;
+  pointer-events: auto;
+}
+.app-notifications > div > svg { flex-shrink: 0; }
+.app-notifications > div > :is(div, span) { min-width: 0; }
+
+/* Fit terminal find into the existing menu row without reducing terminal height. */
+.desktop-menubar > .terminal-search-bar {
+  flex: 0 1 470px;
+  min-width: 280px;
+  height: 22px;
+  min-height: 0;
+  margin-left: auto;
+  padding: 0 6px;
+  gap: 5px;
+  border: 0;
+  background: transparent;
+}
+.desktop-menubar > .terminal-search-bar input:not([type="checkbox"]) {
+  min-width: 70px;
+  width: 100%;
+  height: 20px;
+  padding: 0 6px;
+}
+.desktop-menubar > .terminal-search-bar button { flex: 0 0 20px; width: 20px; height: 20px; border: 0; }
+.desktop-menubar > .terminal-search-bar > svg { flex-shrink: 0; }
+.desktop-menubar > .terminal-search-bar > span { min-width: 42px; white-space: nowrap; }
+.desktop-menubar > .terminal-search-bar + .desktop-menu-end { margin-left: 6px; }
+
+.desktop-home-actions .desktop-home-new-session { flex-basis: 100%; }

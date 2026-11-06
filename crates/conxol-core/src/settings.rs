@@ -21,6 +21,10 @@ pub struct GeneralSettings {
     pub confirm_multiline_paste: bool,
     #[serde(default = "default_true")]
     pub paste_preview: bool,
+    #[serde(default)]
+    pub always_show_terminal_search: bool,
+    #[serde(default)]
+    pub right_click_to_paste: bool,
 }
 
 impl Default for GeneralSettings {
@@ -29,6 +33,8 @@ impl Default for GeneralSettings {
             theme: ThemePreference::default(),
             confirm_multiline_paste: true,
             paste_preview: true,
+            always_show_terminal_search: false,
+            right_click_to_paste: false,
         }
     }
 }

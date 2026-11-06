@@ -127,7 +127,7 @@ impl NetworkManager {
             timeout: Duration::from_millis(request.timeout_ms),
         };
         options.validate()?;
-        let total = usize::from(options.end_port - options.start_port) + 1;
+        let total = options.total_checks()?;
         let scan_id = Uuid::new_v4().to_string();
         let (cancel_sender, mut cancellation) = watch::channel(false);
         register_operation(&self.scans, scan_id.clone(), cancel_sender)?;

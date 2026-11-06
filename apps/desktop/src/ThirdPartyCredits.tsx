@@ -4,6 +4,10 @@ import mtrLicense from "../../../tools/mtr/windows-x86_64/LICENSE.txt?raw";
 
 type Credit = { name: string; author: string; use: string; license: string; url: string };
 const groups: { title: string; entries: Credit[] }[] = [
+  { title: "Native DNS diagnostics", entries: [
+    { name: "Hickory DNS", author: "The Hickory DNS contributors", use: "DNS packet encoding, parsing and record formatting for Conxol’s built-in DNS diagnostics. No external dig executable is required.", license: "MIT OR Apache-2.0", url: "https://github.com/hickory-dns/hickory-dns" },
+    { name: "ipconfig", author: "The ipconfig contributors", use: "Discovers configured DNS resolver addresses on Windows.", license: "MIT OR Apache-2.0", url: "https://github.com/liranringel/ipconfig" },
+  ] },
   { title: "Bundled third-party binary", entries: [
     { name: "windows-mtr 1.2.9", author: "Benji Shohet (benjisho) and the Windows MTR contributors", use: "mtr.exe provides live MTR diagnostics on Windows. Distributed unmodified with its upstream license and provenance.", license: "Apache-2.0", url: "https://github.com/benjisho/windows-mtr/tree/v1.2.9" },
   ] },

@@ -43,6 +43,7 @@ enum SftpReply {
 #[derive(Clone, Copy, Debug)]
 enum ShellReply {
     Accept,
+    RejectAdditional,
     Reject,
     Silent,
     Close,
@@ -209,6 +210,10 @@ impl server::Handler for Handler {
                 .shell_requests
                 .fetch_add(1, Ordering::SeqCst);
             match self.shell_reply {
+                ShellReply::RejectAdditional if self.observations.shell_requests.load(Ordering::SeqCst) > 1 => {
+                    session.channel_failure(channel)?;
+                    return Ok(());
+                }
                 ShellReply::Reject => {
                     session.channel_failure(channel)?;
                     return Ok(());
@@ -2288,4 +2293,102 @@ async fn auto_authentication_does_not_fall_back_after_rejected_secret_or_partial
         assert_eq!(calls.load(Ordering::SeqCst),if matches!(method,Method::PartialInteractive) { 0 } else { 1 });
         fixture.finish().await;
     }
+}
+
+// Only synthetic loopback peers; branch setup must never replay device commands.
+#[tokio::test]
+async fn branch_shell_has_independent_input_and_skips_startup() {
+    let fixture = Fixture::start_configured(Method::Password, false, None, true).await;
+    let mut options = fixture.options(Method::Password, true);
+    options.startup_command = Some("parent-startup".into());
+    let connection = SshConnection::connect(options).await.unwrap();
+    let mut parent = connection.open_shell(80, 24).await.unwrap();
+    async fn receive(shell: &mut conxol_ssh::SshShell, expected: &[u8]) {
+        let bytes = tokio::time::timeout(DEADLINE, async {
+            let mut bytes = Vec::new();
+            while bytes.len() < expected.len() {
+                if let SshOutput::Stdout(data) | SshOutput::Stderr(data) =
+                    shell.next_output().await.unwrap().unwrap()
+                {
+                    bytes.extend(data);
+                }
+            }
+            bytes
+        })
+        .await
+        .unwrap();
+        assert_eq!(bytes, expected);
+    }
+    receive(&mut parent, &[SHELL_BANNER, b"parent-startup\n"].concat()).await;
+    let startup_bytes = fixture
+        .observations
+        .shell_input_bytes
+        .load(Ordering::SeqCst);
+    let mut branch = connection.open_branch_shell(80, 24).await.unwrap();
+    receive(&mut branch, SHELL_BANNER).await;
+    assert_eq!(
+        fixture
+            .observations
+            .shell_input_bytes
+            .load(Ordering::SeqCst),
+        startup_bytes
+    );
+    branch.write(b"branch-input").await.unwrap();
+    receive(&mut branch, b"branch-input").await;
+    parent.write(b"parent-input").await.unwrap();
+    receive(&mut parent, b"parent-input").await;
+    branch.close().await.unwrap();
+    drop(branch);
+    parent.write(b"parent-still-here").await.unwrap();
+    receive(&mut parent, b"parent-still-here").await;
+    assert_eq!(
+        fixture
+            .observations
+            .password_requests
+            .load(Ordering::SeqCst),
+        1
+    );
+    parent.close().await.unwrap();
+    drop(parent);
+    connection.disconnect().await.unwrap();
+    drop(connection);
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn rejected_branch_keeps_parent_shell_alive() {
+    let fixture = Fixture::start_with_shell(
+        Method::Password,
+        false,
+        None,
+        true,
+        ShellReply::RejectAdditional,
+    )
+    .await;
+    let connection = SshConnection::connect(fixture.options(Method::Password, true))
+        .await
+        .unwrap();
+    let mut parent = connection.open_shell(80, 24).await.unwrap();
+    assert!(matches!(
+        connection.open_branch_shell(80, 24).await,
+        Err(SshError::ChannelRequestRejected { request: "shell" })
+    ));
+    parent.write(b"still-connected").await.unwrap();
+    let bytes = tokio::time::timeout(DEADLINE, async {
+        let mut bytes = Vec::new();
+        while bytes.len() < SHELL_BANNER.len() + b"still-connected".len() {
+            if let SshOutput::Stdout(data) = parent.next_output().await.unwrap().unwrap() {
+                bytes.extend(data);
+            }
+        }
+        bytes
+    })
+    .await
+    .unwrap();
+    assert_eq!(bytes, [SHELL_BANNER, b"still-connected"].concat());
+    parent.close().await.unwrap();
+    drop(parent);
+    connection.disconnect().await.unwrap();
+    drop(connection);
+    fixture.finish().await;
 }

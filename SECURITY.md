@@ -6,7 +6,7 @@ workflow. Older previews are not promised backported fixes.
 
 Do not put passwords, keys, passphrases, tokens, production targets, profile
 exports, terminal transcripts, or unredacted logs in public issues. Use
-[GitHub's private vulnerability reporting channel](https://github.com/OthmaneBlial/MobaRust/security/advisories/new)
+[GitHub's private vulnerability reporting channel](https://github.com/thetonmoyroy/Conxol/security/advisories/new)
 to send the maintainers a confidential report.
 
 Include a reproduction using disposable fixtures, the impact, and whether the
