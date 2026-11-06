@@ -14,6 +14,27 @@ SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • r
 
 </div>
 
+## What makes Conxol different
+
+**Developed and customized by [Tonmoy Roy](https://github.com/thetonmoyroy)** for everyday network administration. Conxol's additions and refinements focus on a compact desktop workflow, device-oriented tools, and keeping diagnostics beside your terminal.
+
+| Conxol addition or refinement | What it gives you |
+| --- | --- |
+| **Reworked desktop and session sidebar** | A compact menu and activity strip, full-height terminals, a resizable sidebar, inline SSH file browsing, custom folder/host icons and colors, and compact session action menus. |
+| **SSH session branching** | Open another independent shell in a split using the existing authenticated connection. Branches have separate input/output and skip startup commands; split groups and sizes are remembered during the app run. |
+| **Floating network diagnostics** | Move diagnostics beside your terminal, minimize them while probes keep running, and export the displayed report as text. |
+| **CIDR scans and built-in DNS reports** | Scan bounded IPv4/IPv6 ranges with aggregate progress and confirmed open-port results. Inspect DNS records, TTLs, headers, resolver, timing and transport without an external `dig` executable. |
+| **Network configuration generator** | Turn command templates and nested numeric loops into repeatable configuration text, with previews and bounded output. |
+| **Device-scoped command shortcuts** | Search shared or device-specific commands with a double Shift tap, or save a selected command from the terminal. Shortcuts paste one line without automatically executing it. |
+| **Editable terminal highlighting** | Customize word groups and literal matches for network output, save your own rules, and apply them to live terminal scrollback. |
+| **FTP / FTPS and TFTP tools** | Transfer files outside the SSH browser, or explicitly start a read-only TFTP server for one selected file, with progress and cancellation controls. |
+| **Workspace PIN and encrypted backups** | Protect the workspace with a 4–12 digit numeric PIN and create password-encrypted `.cxb` backups covering sessions, settings, shortcuts, notes, trust data and required credentials. Restore includes a preview before activation. |
+| **SSH login and troubleshooting refinements** | In-terminal secret prompts, automatic authentication selection, Windows OpenSSH-agent/Pageant support, RSA-SHA2 host verification and sanitized support-diagnostic export. |
+
+[Workflow and implementation details](docs/architecture.md) · [Shortcut guide](docs/keyboard-shortcuts.md) · [Download the Windows release](#download)
+
+These highlights describe Conxol's development focus and implemented changes. They do not claim exclusive ownership of the underlying terminal, SSH, or file-transfer technology. Protocol and platform limitations are listed below.
+
 ## ✨ One workspace, from connection to completion
 
 <img src="docs/assets/workstation-map.svg" alt="Connect with SSH, work in terminal tabs and splits, move files with SFTP/SCP, and reach services through tunnels." width="100%" />
