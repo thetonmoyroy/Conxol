@@ -61,9 +61,9 @@ jobs:
         run: pnpm install --dir apps/desktop --frozen-lockfile
       - name: Check source version and frontend
         env:
-          GITHUB_REF_NAME: ${{ inputs.source_ref }}
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
-          node tools/release-assets.mjs check-version
+          GITHUB_REF_NAME="$SOURCE_REF" node tools/release-assets.mjs check-version
           pnpm --dir apps/desktop check
           pnpm --dir apps/desktop lint
           pnpm --dir apps/desktop test:unit
