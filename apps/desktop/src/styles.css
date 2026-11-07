@@ -659,7 +659,7 @@ button:not(:disabled) { cursor: pointer; }
 .session-row-main[aria-busy="true"] { color: var(--amber); background: var(--mint-soft); cursor: progress; opacity: 1; }
 .session-row-main[aria-busy="true"] .session-type { color: var(--amber); letter-spacing: 0; }
 .session-row-main:disabled, .desktop-recent-sessions button:disabled, .recovery-session:disabled { cursor: progress; }
-.session-settings { width: min(900px, calc(100vw - 40px)); max-height: calc(100vh - 40px); overflow-y: auto; background: var(--panel); }
+.session-settings { width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 40px); overflow-y: auto; background: var(--panel); }
 .session-settings .quick-connect-heading { border-bottom: 0; }
 .session-settings .quick-connect-heading h2 { font-size: 16px; }
 .session-protocols { display: flex; gap: 6px; padding: 6px 0 16px; overflow-x: auto; }
@@ -1345,38 +1345,63 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 /* Indent each nested session folder while preserving fixed session row geometry. */
 .session-folder-group > .session-folder-group { margin-left: 12px; }
 
-/* Compact device library: a fixed search area and an independently scrolling list. */
-.saved-session-picker { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 24px 80px #0006; overflow: auto; }
+/* Saved sessions: search above a folder rail and a dense device list. */
+.saved-session-picker { box-sizing: border-box; width: min(1120px, calc(100vw - 64px)); height: min(660px, calc(100dvh - 96px)); max-width: none; max-height: none; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel); box-shadow: 0 20px 80px #0006; }
+.saved-session-picker[open] { display: flex; flex-direction: column; overflow: hidden; }
 .saved-session-picker::backdrop { background: #0009; }
-.saved-session-picker header, .saved-session-picker footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; }
-.saved-session-eyebrow { display: block; color: var(--amber); font-size: 9px; letter-spacing: .14em; margin-bottom: 5px; }
-.saved-session-picker h2 { margin: 0; font-size: 18px; font-weight: 600; }
-.saved-session-picker header button, .saved-session-search button { display: inline-flex; padding: 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
-.saved-session-views { display: flex; gap: 5px; padding: 0 20px 14px; }
-.saved-session-views button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
-.saved-session-views button.active { background: var(--amber-soft); color: var(--amber); border-color: var(--line-strong); }
-.saved-session-views button span { font-size: 10px; opacity: .7; }
-.saved-session-search { display: flex; align-items: center; gap: 8px; margin: 0 20px 10px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--muted); }
-.saved-session-search:focus-within { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-soft); }
-.saved-session-search input { flex: 1; width: 100%; min-width: 0; padding: 11px 0; color: var(--text); font: inherit; font-size: 12px; background: transparent; border: 0; outline: none; }
-.saved-session-filters { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 7px; padding: 0 20px 14px; }
-.saved-session-filters select { width: 100%; min-width: 0; padding: 7px; font: inherit; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; }
-.saved-session-list-heading { display: flex; justify-content: space-between; padding: 9px 43px 9px 22px; border-top: 1px solid var(--line-strong); color: var(--muted); font-size: 9px; letter-spacing: .08em; }
-.saved-session-results { max-height: min(430px, 46dvh); overflow: auto; scrollbar-gutter: stable; padding: 0 10px 5px; }
-.saved-session-results > button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 49px; padding: 7px 10px; text-align: left; color: var(--text); background: transparent; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 6px; cursor: pointer; }
-.saved-session-results > button:hover, .saved-session-results > button.selected { background: var(--amber-soft); border-color: var(--line-strong); }
+.saved-session-picker header { display: flex; align-items: center; gap: 12px; padding: 16px 20px 12px; flex-shrink: 0; }
+.session-browser-title { flex: 1; }
+.session-browser-title h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.session-browser-title small { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.saved-session-picker header > button:last-child, .saved-session-search button { display: inline-flex; padding: 5px; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+.session-browser-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) 135px 125px; gap: 10px; padding: 0 20px 16px; border-bottom: 1px solid var(--line-strong); flex-shrink: 0; }
+.saved-session-search { display: flex; align-items: center; gap: 9px; padding: 0 10px; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 4px; }
+.saved-session-search:focus-within { border-color: var(--amber); }
+.saved-session-search input { min-width: 0; flex: 1; width: 100%; padding: 10px 0; font: inherit; font-size: 12px; outline: 0; border: 0; color: var(--text); background: transparent; }
+.session-browser-toolbar select { min-width: 0; width: 100%; padding: 7px; font: inherit; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 4px; }
+.session-browser-body { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: 0; flex: 1; }
+.session-browser-folders { padding: 12px 8px; border-right: 1px solid var(--line-strong); overflow: auto; }
+.session-browser-folders button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; border: 0; border-radius: 4px; font: inherit; font-size: 11px; text-align: left; color: var(--muted); background: transparent; cursor: pointer; }
+.session-browser-folders button > svg { flex-shrink: 0; }
+.session-browser-folders button > span { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-browser-folders button > small { font-size: 10px; opacity: .7; }
+.session-browser-folders button:hover, .session-browser-folders button.active { color: var(--text); background: var(--amber-soft); }
+.session-browser-folders button.active > svg { color: var(--amber); }
+.session-browser-section { padding: 22px 12px 8px; font-size: 10px; color: var(--muted); }
+.session-browser-devices { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.session-browser-context { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 18px; font-size: 12px; }
+.session-browser-context strong { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; }
+.session-browser-context > span { flex-shrink: 0; color: var(--muted); font-size: 10px; }
+.saved-session-list-heading, .saved-session-results > button { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1fr) 62px; align-items: center; gap: 12px; }
+.saved-session-list-heading { padding: 9px 18px; border-block: 1px solid var(--line); color: var(--muted); font-size: 10px; }
+.saved-session-results { min-height: 0; flex: 1; overflow: auto; padding: 4px 8px; scrollbar-gutter: stable; }
+.saved-session-results > button { width: 100%; min-height: 39px; padding: 9px 10px; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 3px; color: var(--text); background: transparent; text-align: left; cursor: pointer; }
+.saved-session-results > button:hover, .saved-session-results > button.selected { border-color: var(--line-strong); background: var(--amber-soft); }
+.saved-device-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.saved-device-name > svg { flex-shrink: 0; color: var(--amber); }
+.saved-device-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
+.saved-device-address, .saved-device-folder { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted); }
+.saved-device-address { font-family: var(--mono); font-size: 10px; }
+.saved-device-protocol { font-size: 9px; color: var(--muted); }
+.saved-session-empty { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 50px 16px; color: var(--muted); font-size: 12px; text-align: center; }
+.saved-session-empty p { margin: 0; }
+.saved-session-picker footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--line-strong); color: var(--muted); font-size: 10px; flex-shrink: 0; }
+.saved-session-picker footer small { font-size: 10px; }
 .saved-session-picker button:focus-visible, .saved-session-picker select:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
-.saved-device-icon { display: inline-flex; align-items: center; justify-content: center; width: 29px; height: 29px; flex: 0 0 29px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--amber); }
-.saved-device-copy { min-width: 0; flex: 1; }
-.saved-device-copy strong { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
-.saved-device-copy small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
-.saved-device-star { flex-shrink: 0; color: var(--amber); }
-.saved-device-protocol { flex-shrink: 0; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--muted); font-size: 9px; letter-spacing: .04em; }
-.saved-device-connect { flex-shrink: 0; color: var(--muted); }
-.saved-session-empty { display: flex; flex-direction: column; align-items: center; padding: 32px 16px; text-align: center; color: var(--muted); gap: 10px; }
-.saved-session-empty strong { color: var(--text); font-size: 13px; }
-.saved-session-empty p { margin: 0 0 5px; font-size: 12px; }
-.saved-session-picker footer { border-top: 1px solid var(--line-strong); padding: 12px 20px; }
-.saved-session-picker footer span { font-size: 11px; color: var(--text); }
-.saved-session-picker footer small { display: block; margin-top: 4px; font-size: 9px; color: var(--muted); }
-@media (max-width: 420px) { .saved-session-views { gap: 0; padding-inline: 10px; } .saved-session-views button { padding-inline: 6px; } .saved-session-picker footer small { display: none; } }
+@media (max-width: 720px) {
+  .saved-session-picker { width: calc(100vw - 24px); height: calc(100dvh - 48px); }
+  .session-browser-body { grid-template-columns: 150px minmax(0, 1fr); }
+  .session-browser-toolbar { grid-template-columns: minmax(0, 1fr) 110px; padding-inline: 12px; }
+  .session-browser-toolbar .saved-session-search { grid-column: 1 / -1; }
+  .saved-session-list-heading, .saved-session-results > button { grid-template-columns: minmax(0, 1fr) 54px; gap: 6px; }
+  .saved-session-list-heading > span:nth-child(2), .saved-session-list-heading > span:nth-child(3), .saved-device-folder { display: none; }
+  .saved-device-address { grid-column: 1; grid-row: 2; padding-left: 23px; }
+  .saved-device-protocol { grid-column: 2; grid-row: 1 / 3; }
+  .saved-session-picker footer small, .session-browser-title small { display: none; }
+}
+.session-settings .session-protocols { flex-wrap: wrap; gap: 4px; padding-bottom: 8px; }
+.session-settings .session-protocols button { flex: 1 0 55px; flex-direction: row; justify-content: center; gap: 5px; padding: 8px 5px; font-size: 11px; }
+.session-settings .session-protocols button svg { width: 15px; height: 15px; }
+.session-settings .session-settings-panel { min-height: 120px; padding: 12px; }
+.session-settings .session-settings-tabs { overflow-x: auto; }
+.session-settings .quick-connect-footer { position: sticky; bottom: -20px; padding-bottom: 10px; background: var(--panel); z-index: 1; }

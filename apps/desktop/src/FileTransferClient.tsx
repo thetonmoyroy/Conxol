@@ -1,3 +1,4 @@
+import { literalInputProps } from "./literal-input";
 import { TftpServerPanel } from "./TftpServerPanel";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -75,7 +76,7 @@ export function FileTransferClient({ onClose, onServerRunning, initialServer = f
           <label className="file-transfer-host">Host<input required value={host} onChange={event => { setHost(event.target.value); setEntries([]); }} placeholder="Hostname or IP address" /></label>
           <label>Port<input type="number" required min={1} max={65535} value={port} onChange={event => setPort(event.target.value)} /></label>
         </div>
-        {protocol !== "tftp" && <div className="file-transfer-login"><label>Username<input value={username} onChange={event => setUsername(event.target.value)} autoComplete="off" /></label><label>Password<input ref={password} type="password" autoComplete="new-password" /></label></div>}
+        {protocol !== "tftp" && <div className="file-transfer-login"><label>Username<input {...literalInputProps} value={username} onChange={event => setUsername(event.target.value)} autoComplete="off" /></label><label>Password<input {...literalInputProps} ref={password} type="password" autoComplete="new-password" /></label></div>}
         <label>Remote {protocol === "tftp" ? "filename" : "folder or filename"}<input value={path} onChange={event => { setPath(event.target.value); setEntries([]); }} placeholder={protocol === "tftp" ? "firmware.bin" : "Folder, or folder/file.bin"} /></label>
         <p>{protocol === "tftp" ? "TFTP transfers files by name; it cannot browse folders. Binary files up to 1 GiB; files beyond the device’s block-number limit require rollover support." : "FTP paths start in the login folder. FTPS uses explicit TLS with certificate verification. Files up to 1 GiB."} {protocol === "tftp" ? "TFTP transfers stop after 30 minutes." : "Transfers stop after 5 minutes."}</p>
         {protocol === "tftp" && <label className="file-transfer-check"><input type="checkbox" checked={compatibility} onChange={event => setCompatibility(event.target.checked)} />Compatibility mode: use 512-byte blocks for older devices.</label>}

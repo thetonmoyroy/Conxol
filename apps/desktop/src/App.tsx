@@ -1,3 +1,4 @@
+import { literalInputProps } from "./literal-input";
 import { ApplicationMenuBar } from "./ApplicationMenuBar";
 import { canReconnectTerminal, isReconnectKey } from "./terminal-reconnect";
 import { SessionRowActions } from "./SessionRowActions";
@@ -2752,110 +2753,110 @@ function App() {
     await sshConnectionAttempt.current.run(async () => {
       setSshConnecting(true);
       try {
-    setConnectionError(null);
-    setSessionNotice(null);
-    if (!IS_TAURI) {
-      setConnectionError("SSH connections require the desktop runtime.");
-      return;
-    }
-    let connectingTerminal: WorkspaceTerminal | null = null;
-    try {
-      request = structuredClone(request);
-      const sshSettings = { ...settingsRef.current.ssh };
-      const macroAtApproval = macroRunRef.current;
-      const stillAllowed = () => !macroAtApproval || (!macroCancelRef.current && macroRunRef.current === macroAtApproval);
-      if (!await confirmSessionStartup(request.startupCommand, `SSH ${request.username}@${request.host}:${request.port}`, sshSettings.reconnectEnabled && sshSettings.reconnectAttempts > 0, stillAllowed) || !stillAllowed()) return;
-      const trustServices = {
-        lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
-        inspect: (target: { host: string; port: number }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs } }),
-        confirm: (target: { host: string; port: number }, fingerprint: string) => confirmAction(`Unknown SSH host key\n\nHost: ${target.host}:${target.port}\nSHA-256 fingerprint:\n${fingerprint}\n\nVerify this fingerprint with the server administrator. Accept and save this key for future connections?` , { title: "Unknown SSH host key", acceptLabel: "Accept and save" }),
-        save: (target: { host: string; port: number }, fingerprint: string) => invoke<void>("ssh_trust_accept", { host: target.host, port: target.port, fingerprint }),
-      };
-      // Only the first hop is directly reachable; never inspect a private jump target over a different route.
-      for (const [index, jump] of (request.jumpHosts ?? []).entries()) {
-        if (!await approveUnknownHost(jump, trustServices, stillAllowed, index === 0)) return;
-      }
-      if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
-      const authentication = new TerminalAuthentication();
-      const pendingTerminal = createWorkspaceTerminal({
-        label: `${displayName ?? request.username}@${request.host}`,
-        customName: displayName,
-        remoteProtocol: "ssh", remoteHost: request.host,
-        authentication, connecting: true,
-        shortcutDeviceId: shortcutDeviceId ?? `ssh:${JSON.stringify([request.host.toLowerCase(), request.port, request.username])}`,
-      });
-      connectingTerminal = pendingTerminal;
-      setTerminalTabs(current => [...current, pendingTerminal]);
-      setActiveTerminalId(pendingTerminal.id);
-      setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, pendingTerminal.id) : { kind: "pane", terminalId: pendingTerminal.id });
-      setActiveView("terminal");
-      setQuickConnectOpen(false);
-      const authEvents = new Channel<SshAuthEvent>();
-      // Installed before IPC; this channel also owns this session's reconnect
-      // prompts. A closed request cannot deliver answers to another attempt.
-      authEvents.onmessage = createSshAuthHandler(setConnectionError, (message, signal) => {
-        if (authentication.closed) return Promise.resolve(null);
-        setActiveTerminalId(pendingTerminal.id);
-        setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, pendingTerminal.id) : { kind: "pane", terminalId: pendingTerminal.id });
-        setActiveView("terminal");
-        return authentication.ask(message, signal);
-      });
-      const response = await invoke<SshConnectResponse>("ssh_connect", {
-        authEvents,
-        request: {
-          ...request,
-          reconnectAttempts: sshSettings.reconnectEnabled ? sshSettings.reconnectAttempts : 0,
-          connectTimeoutMs: sshSettings.connectTimeoutMs,
-        },
-      });
-      if (authentication.closed) {
-        await invoke("ssh_close", { terminalId: response.terminalId }).catch(() => undefined);
-        return;
-      }
-      recordAudit("sessionOpened", "SSH");
-      const terminal: WorkspaceTerminal = {
-        ...pendingTerminal,
-        label: `${displayName ?? request.username}@${response.host}`,
-        remoteSessionId: response.terminalId,
-        remoteProtocol: "ssh",
-        remoteHost: response.host,
-        connecting: false,
-      };
-      setTerminalTabs((current) => current.map(item => item.id === terminal.id ? terminal : item));
-      setActiveTerminalId(terminal.id);
-      setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
-      setActiveView("terminal");
-      setQuickConnectOpen(false);
-      if (offerSave) {
-        const suggestedName = `${request.username}@${response.host}`;
-        const name = displayName?.trim() || await promptText("Save this SSH session as", suggestedName);
-        requestTerminalFocus(terminal.id);
-        if (name?.trim()) {
-          try {
-            const saved = await invoke<SavedSession>("session_save_ssh", { payload: { name: name.trim(), folder: folder?.trim() || null, request } });
-            setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, label: `${name.trim()}@${response.host}`, customName: name.trim(), shortcutDeviceId: saved.id } : item));
-            refreshSavedSessions();
-          } catch (error) {
-            setConnectionError(`Connected, but the session could not be saved: ${String(error)}`);
-          }
-        }
-      }
-    } catch (error) {
-      if (connectingTerminal) {
-        connectingTerminal.authentication?.cancel();
-        const failedId = connectingTerminal.id;
-        setTerminalTabs(current => current.filter(terminal => terminal.id !== failedId));
-        setTerminalLayout(current => removeLayoutNode(current, failedId) ?? { kind: "pane", terminalId: "" });
-        setActiveTerminalId(current => current === failedId ? "" : current);
-        if (!terminalTabsRef.current.some(terminal => terminal.id !== failedId)) setActiveView("home");
-      }
-      if (String(error).includes("SSH authentication was cancelled")) {
         setConnectionError(null);
-        return;
-      }
-      recordAudit("connectionFailed", "SSH");
-      setConnectionError(String(error));
-    }
+        setSessionNotice(null);
+        if (!IS_TAURI) {
+          setConnectionError("SSH connections require the desktop runtime.");
+          return;
+        }
+        let connectingTerminal: WorkspaceTerminal | null = null;
+        try {
+          request = structuredClone(request);
+          const sshSettings = { ...settingsRef.current.ssh };
+          const macroAtApproval = macroRunRef.current;
+          const stillAllowed = () => !macroAtApproval || (!macroCancelRef.current && macroRunRef.current === macroAtApproval);
+          if (!await confirmSessionStartup(request.startupCommand, `SSH ${request.username}@${request.host}:${request.port}`, sshSettings.reconnectEnabled && sshSettings.reconnectAttempts > 0, stillAllowed) || !stillAllowed()) return;
+          const trustServices = {
+            lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
+            inspect: (target: { host: string; port: number }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs } }),
+            confirm: (target: { host: string; port: number }, fingerprint: string) => confirmAction(`Unknown SSH host key\n\nHost: ${target.host}:${target.port}\nSHA-256 fingerprint:\n${fingerprint}\n\nVerify this fingerprint with the server administrator. Accept and save this key for future connections?` , { title: "Unknown SSH host key", acceptLabel: "Accept and save" }),
+            save: (target: { host: string; port: number }, fingerprint: string) => invoke<void>("ssh_trust_accept", { host: target.host, port: target.port, fingerprint }),
+          };
+          // Only the first hop is directly reachable; never inspect a private jump target over a different route.
+          for (const [index, jump] of (request.jumpHosts ?? []).entries()) {
+            if (!await approveUnknownHost(jump, trustServices, stillAllowed, index === 0)) return;
+          }
+          if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
+          const authentication = new TerminalAuthentication();
+          const pendingTerminal = createWorkspaceTerminal({
+            label: `${displayName ?? request.username}@${request.host}`,
+            customName: displayName,
+            remoteProtocol: "ssh", remoteHost: request.host,
+            authentication, connecting: true,
+            shortcutDeviceId: shortcutDeviceId ?? `ssh:${JSON.stringify([request.host.toLowerCase(), request.port, request.username])}`,
+          });
+          connectingTerminal = pendingTerminal;
+          setTerminalTabs(current => [...current, pendingTerminal]);
+          setActiveTerminalId(pendingTerminal.id);
+          setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, pendingTerminal.id) : { kind: "pane", terminalId: pendingTerminal.id });
+          setActiveView("terminal");
+          setQuickConnectOpen(false);
+          const authEvents = new Channel<SshAuthEvent>();
+          // Installed before IPC; this channel also owns this session's reconnect
+          // prompts. A closed request cannot deliver answers to another attempt.
+          authEvents.onmessage = createSshAuthHandler(setConnectionError, (message, signal) => {
+            if (authentication.closed) return Promise.resolve(null);
+            setActiveTerminalId(pendingTerminal.id);
+            setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, pendingTerminal.id) : { kind: "pane", terminalId: pendingTerminal.id });
+            setActiveView("terminal");
+            return authentication.ask(message, signal);
+          });
+          const response = await invoke<SshConnectResponse>("ssh_connect", {
+            authEvents,
+            request: {
+              ...request,
+              reconnectAttempts: sshSettings.reconnectEnabled ? sshSettings.reconnectAttempts : 0,
+              connectTimeoutMs: sshSettings.connectTimeoutMs,
+            },
+          });
+          if (authentication.closed) {
+            await invoke("ssh_close", { terminalId: response.terminalId }).catch(() => undefined);
+            return;
+          }
+          recordAudit("sessionOpened", "SSH");
+          const terminal: WorkspaceTerminal = {
+            ...pendingTerminal,
+            label: `${displayName ?? request.username}@${response.host}`,
+            remoteSessionId: response.terminalId,
+            remoteProtocol: "ssh",
+            remoteHost: response.host,
+            connecting: false,
+          };
+          setTerminalTabs((current) => current.map(item => item.id === terminal.id ? terminal : item));
+          setActiveTerminalId(terminal.id);
+          setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
+          setActiveView("terminal");
+          setQuickConnectOpen(false);
+          if (offerSave) {
+            const suggestedName = `${request.username}@${response.host}`;
+            const name = displayName?.trim() || await promptText("Save this SSH session as", suggestedName);
+            requestTerminalFocus(terminal.id);
+            if (name?.trim()) {
+              try {
+                const saved = await invoke<SavedSession>("session_save_ssh", { payload: { name: name.trim(), folder: folder?.trim() || null, request } });
+                setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, label: `${name.trim()}@${response.host}`, customName: name.trim(), shortcutDeviceId: saved.id } : item));
+                refreshSavedSessions();
+              } catch (error) {
+                setConnectionError(`Connected, but the session could not be saved: ${String(error)}`);
+              }
+            }
+          }
+        } catch (error) {
+          if (connectingTerminal) {
+            connectingTerminal.authentication?.cancel();
+            const failedId = connectingTerminal.id;
+            setTerminalTabs(current => current.filter(terminal => terminal.id !== failedId));
+            setTerminalLayout(current => removeLayoutNode(current, failedId) ?? { kind: "pane", terminalId: "" });
+            setActiveTerminalId(current => current === failedId ? "" : current);
+            if (!terminalTabsRef.current.some(terminal => terminal.id !== failedId)) setActiveView("home");
+          }
+          if (String(error).includes("SSH authentication was cancelled")) {
+            setConnectionError(null);
+            return;
+          }
+          recordAudit("connectionFailed", "SSH");
+          setConnectionError(String(error));
+        }
       } finally {
         setSshConnecting(false);
       }
@@ -5689,7 +5690,7 @@ function SavedSessionPicker({ sessions, onClose, onNew, onSelect }: { sessions: 
   const protocols = [...new Set(sessions.map(session => session.protocol))].sort();
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const matches = sessions.filter(session => (view !== "favorites" || session.favorite) && (view !== "recent" || !!session.last_used_at)
-    && (!folder || (folder === "__unfiled__" ? !session.folder : sessionFolderWithin(session.folder ?? "", folder))) && (!protocol || session.protocol === protocol)).filter(session => terms.every(term => `${session.name} ${session.hostname} ${session.username ?? ""} ${session.folder ?? ""} ${session.tags.join(" ")} ${session.protocol}`.toLowerCase().includes(term)))
+    && (!folder || (folder === "unfiled" ? !session.folder : sessionFolderWithin(session.folder ?? "", folder.slice(7)))) && (!protocol || session.protocol === protocol)).filter(session => terms.every(term => `${session.name} ${session.hostname} ${session.username ?? ""} ${session.folder ?? ""} ${session.tags.join(" ")} ${session.protocol}`.toLowerCase().includes(term)))
     .sort((a, b) => ((sort === "recent" || view === "recent") ? (b.last_used_at ?? 0) - (a.last_used_at ?? 0) : sort === "folder" ? (a.folder ?? "").localeCompare(b.folder ?? "", undefined, { numeric: true }) : 0)
       || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
   const resetFilters = () => { setQuery(""); setFolder(""); setProtocol(""); setView("all"); setActiveIndex(0); };
@@ -5701,16 +5702,29 @@ function SavedSessionPicker({ sessions, onClose, onNew, onSelect }: { sessions: 
   }, []);
   useEffect(() => { document.getElementById(`saved-session-choice-${activeIndex}`)?.scrollIntoView({ block: "nearest" }); }, [activeIndex, query, folder, protocol, view, sort]);
   return <dialog ref={dialogRef} className="saved-session-picker" aria-labelledby="saved-session-picker-title" onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
-    <header><div><span className="saved-session-eyebrow">SESSION LIBRARY</span><h2 id="saved-session-picker-title">Connect to a device</h2></div><button type="button" aria-label="Close saved sessions" onClick={onClose}><X size={18} /></button></header>
-    <div className="saved-session-views" aria-label="Session views">{([['all', 'All devices'], ['favorites', 'Favorites'], ['recent', 'Recent']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={view === id} className={view === id ? "active" : ""} onClick={() => { setView(id); setActiveIndex(0); }}>{id === "favorites" ? <Star size={13} /> : id === "recent" ? <History size={13} /> : <Server size={13} />}{label}<span>{sessions.filter(session => id === "all" || (id === "favorites" ? session.favorite : !!session.last_used_at)).length}</span></button>)}</div>
-    <div className="saved-session-search"><Search size={16} /><input autoFocus aria-label="Search saved sessions" placeholder="Search name, host, folder or tag…" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveIndex(index => matches.length ? (index + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length : 0); }
-      if (event.key === "Enter" && matches[activeIndex]) { event.preventDefault(); if (!event.repeat) selectSession(matches[activeIndex]); }
-    }} />{query && <button type="button" aria-label="Clear search" onClick={() => { setQuery(""); setActiveIndex(0); }}><X size={14} /></button>}</div>
-    <div className="saved-session-filters"><select aria-label="Filter by folder" value={folder} onChange={event => { setFolder(event.target.value); setActiveIndex(0); }}><option value="">All folders</option><option value="__unfiled__">Unfiled</option>{folders.map(path => <option key={path} value={path}>{path}</option>)}</select><select aria-label="Filter by protocol" value={protocol} onChange={event => { setProtocol(event.target.value); setActiveIndex(0); }}><option value="">All protocols</option>{protocols.map(value => <option key={value}>{value}</option>)}</select><select aria-label="Sort sessions" value={view === "recent" ? "recent" : sort} disabled={view === "recent"} onChange={event => { setSort(event.target.value); setActiveIndex(0); }}><option value="name">Name A–Z</option><option value="folder">Folder</option><option value="recent">Last used</option></select></div>
-    <div className="saved-session-list-heading"><span>DEVICE / LOCATION</span><span>PROTOCOL</span></div>
-    <div className="saved-session-results">{matches.map((session, index) => <button type="button" id={`saved-session-choice-${index}`} key={session.id} className={index === activeIndex ? "selected" : ""} title={[session.name, session.hostname, session.folder, session.tags.join(", ")].filter(Boolean).join(" · ")} onFocus={() => setActiveIndex(index)} onClick={() => selectSession(session)}><span className="saved-device-icon">{session.protocol === "LOCAL" ? <TerminalIcon size={16} /> : <Server size={16} />}</span><span className="saved-device-copy"><strong>{session.name}{session.favorite && <Star size={11} className="saved-device-star" />}</strong><small>{[session.hostname || (session.protocol === "LOCAL" ? "Local terminal" : session.protocol), session.folder].filter(Boolean).join(" · ")}</small></span><span className="saved-device-protocol">{session.protocol}</span><ChevronRight size={13} className="saved-device-connect" /></button>)}{!matches.length && <div className="saved-session-empty"><Search size={26} /><strong>{sessions.length ? "No devices found" : "Your devices belong here"}</strong><p>{sessions.length ? "Try another search or clear your filters." : "Create a session to start building your library."}</p>{sessions.length > 0 && <button type="button" className="outline-button" onClick={resetFilters}>Clear filters</button>}</div>}</div>
-    <footer><div><span aria-live="polite">{matches.length} of {sessions.length} devices</span><small>↑ ↓ navigate · Enter connect · Esc close</small></div><button type="button" className="outline-button" onClick={onNew}><Plus size={14} /> New session</button></footer>
+    <header className="session-browser-top"><div className="session-browser-title"><h2 id="saved-session-picker-title">Sessions</h2><small>Choose a device to connect</small></div><button type="button" className="outline-button" onClick={onNew}><Plus size={14} /> New session</button><button type="button" aria-label="Close saved sessions" onClick={onClose}><X size={18} /></button></header>
+    <div className="session-browser-toolbar">
+      <div className="saved-session-search"><Search size={16} /><input autoFocus aria-label="Search saved sessions" placeholder="Search devices, addresses, folders or tags…" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveIndex(index => matches.length ? (index + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length : 0); }
+        if (event.key === "Enter" && matches[activeIndex]) { event.preventDefault(); if (!event.repeat) selectSession(matches[activeIndex]); }
+      }} />{query && <button type="button" aria-label="Clear search" onClick={() => { setQuery(""); setActiveIndex(0); }}><X size={14} /></button>}</div>
+      <select aria-label="Filter by protocol" value={protocol} onChange={event => { setProtocol(event.target.value); setActiveIndex(0); }}><option value="">All protocols</option>{protocols.map(value => <option key={value}>{value}</option>)}</select>
+      <select aria-label="Sort sessions" value={view === "recent" ? "recent" : sort} disabled={view === "recent"} onChange={event => { setSort(event.target.value); setActiveIndex(0); }}><option value="name">Name A–Z</option><option value="folder">Folder</option><option value="recent">Last used</option></select>
+    </div>
+    <div className="session-browser-body">
+      <nav className="session-browser-folders" aria-label="Browse saved sessions">
+        {([['all', 'All devices'], ['favorites', 'Favorites'], ['recent', 'Recent']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={view === id && !folder} className={view === id && !folder ? "active" : ""} onClick={() => { setView(id); setFolder(""); setActiveIndex(0); }}>{id === "favorites" ? <Star size={14} /> : id === "recent" ? <History size={14} /> : <Server size={14} />}<span>{label}</span><small>{sessions.filter(session => id === "all" || (id === "favorites" ? session.favorite : !!session.last_used_at)).length}</small></button>)}
+        <div className="session-browser-section">Folders</div>
+        <button type="button" aria-pressed={folder === "unfiled"} className={folder === "unfiled" ? "active" : ""} onClick={() => { setFolder("unfiled"); setView("all"); setActiveIndex(0); }}><Folder size={14} /><span>Unfiled</span><small>{sessions.filter(session => !session.folder).length}</small></button>
+        {folders.map(path => <button type="button" key={path} title={path} aria-pressed={folder === `folder:${path}`} className={folder === `folder:${path}` ? "active" : ""} style={{ paddingLeft: 12 + Math.min(path.split("/").length - 1, 8) * 12 }} onClick={() => { setFolder(`folder:${path}`); setView("all"); setActiveIndex(0); }}><Folder size={14} /><span>{path.slice(path.lastIndexOf("/") + 1)}</span><small>{sessions.filter(session => sessionFolderWithin(session.folder ?? "", path)).length}</small></button>)}
+      </nav>
+      <section className="session-browser-devices" aria-label="Devices">
+        <div className="session-browser-context"><strong>{folder === "unfiled" ? "Unfiled" : folder ? folder.slice(7) : view === "favorites" ? "Favorites" : view === "recent" ? "Recent devices" : "All devices"}</strong><span>{matches.length} devices</span></div>
+        <div className="saved-session-list-heading"><span>Device</span><span>Address</span><span>Folder</span><span>Protocol</span></div>
+        <div className="saved-session-results">{matches.map((session, index) => <button type="button" id={`saved-session-choice-${index}`} key={session.id} className={index === activeIndex ? "selected" : ""} title={[session.name, session.hostname, session.folder, session.tags.join(", ")].filter(Boolean).join(" · ")} onFocus={() => setActiveIndex(index)} onClick={() => selectSession(session)}><span className="saved-device-name">{session.protocol === "LOCAL" ? <TerminalIcon size={15} /> : <Server size={15} />}<strong>{session.name}</strong>{session.favorite && <Star size={11} className="saved-device-star" />}</span><span className="saved-device-address">{session.hostname || (session.protocol === "LOCAL" ? "Local terminal" : "—")}</span><span className="saved-device-folder">{session.folder || "Unfiled"}</span><span className="saved-device-protocol">{session.protocol}</span></button>)}{!matches.length && <div className="saved-session-empty"><Search size={24} /><strong>{sessions.length ? "No matching devices" : "No saved sessions yet"}</strong><p>{sessions.length ? "Try another search or clear the filters." : "Create a new session to add your first device."}</p>{sessions.length > 0 && <button type="button" className="outline-button" onClick={resetFilters}>Clear filters</button>}</div>}</div>
+      </section>
+    </div>
+    <footer><span aria-live="polite">{matches.length} of {sessions.length} devices</span><small>↑ ↓ navigate · Enter connect · Esc close</small></footer>
   </dialog>;
 }
 
@@ -5862,8 +5876,8 @@ function CredentialVaultModal({ portableVaultStatus, onClose, onSave, onDelete, 
   return <div className="palette-backdrop" role="presentation" onMouseDown={close}><form className="credential-modal" role="dialog" aria-modal="true" aria-label="Credential vault" onMouseDown={(event) => event.stopPropagation()} onSubmit={save}>
     <div className="session-editor-heading"><div><span className="eyebrow">NATIVE SECURITY</span><h2>Credential vault</h2><p>Save an opaque reference. Stored secrets remain in native storage and are never listed or returned to React.</p></div><button type="button" className="icon-button" aria-label="Close credential vault" onClick={close}><X size={17} /></button></div>
     <div className="credential-modal-body">
-      <label>Credential reference<input required autoFocus value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder="prod-bastion-password" autoComplete="off" /><small>Letters, numbers, dots, dashes, and underscores only.</small></label>
-      <label>Secret<input required type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Enter only for this explicit save" autoComplete="new-password" /><small>The field is cleared after the native operation. It is not persisted in app state.</small></label>
+      <label>Credential reference<input {...literalInputProps} required autoFocus value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder="prod-bastion-password" autoComplete="off" /><small>Letters, numbers, dots, dashes, and underscores only.</small></label>
+      <label>Secret<input {...literalInputProps} required type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Enter only for this explicit save" autoComplete="new-password" /><small>The field is cleared after the native operation. It is not persisted in app state.</small></label>
       <label>Storage backend<select value={backend} onChange={(event) => setBackend(event.target.value as VaultBackend)}><option value="platform">Platform secure store</option><option value="portable" disabled={!portableReady}>Encrypted portable vault{portableReady ? "" : " (unlock in Settings)"}</option></select></label>
     </div>
     <div className="credential-modal-note"><KeyRound size={14} /><span>{backend === "portable" ? "Encrypted portable storage uses the explicit unlock passphrase and is kept separate from the platform keyring." : "Uses macOS Keychain, Windows Credential Manager, or Linux Secret Service through Rust."} No vault operation runs until you confirm.</span></div>
@@ -6228,7 +6242,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
           <span className="settings-section-label">Portable encrypted vault</span>
           <div className="settings-grid settings-vault-grid">
             <div className="settings-vault-status"><strong>{portableVaultStatus?.enabled ? portableVaultStatus.unlocked ? "Unlocked" : portableVaultStatus.exists ? "Locked" : "Not created" : "Unavailable"}</strong><small>{portableVaultStatus?.enabled ? `File: ${portableVaultStatus.path}` : "Portable mode activates only when portable.flag is beside the executable."}</small></div>
-            <label>Unlock passphrase<input type="password" value={portablePassphrase} onChange={(event) => setPortablePassphrase(event.target.value)} autoComplete="new-password" placeholder="Vault passphrase" /><small>Cleared after each vault action.</small></label>
+            <label>Unlock passphrase<input {...literalInputProps} type="password" value={portablePassphrase} onChange={(event) => setPortablePassphrase(event.target.value)} autoComplete="new-password" placeholder="Vault passphrase" /><small>Cleared after each vault action.</small></label>
             <div className="settings-vault-actions">{portableVaultStatus?.enabled && !portableVaultStatus.unlocked && portableVaultStatus.exists ? <button type="button" className="outline-button" onClick={() => void runPortableAction(onPortableUnlock)} disabled={portableBusy || !portablePassphrase}>Unlock</button> : null}{portableVaultStatus?.enabled && !portableVaultStatus.unlocked && !portableVaultStatus.exists ? <button type="button" className="outline-button" onClick={() => void runPortableAction(onPortableCreate)} disabled={portableBusy || !portablePassphrase}>Create encrypted vault</button> : null}{portableVaultStatus?.unlocked && <button type="button" className="outline-button danger-button" onClick={() => void onPortableLock()} disabled={portableBusy}>Lock vault</button>}</div>
           </div>
         </div>
@@ -6646,7 +6660,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                 <>
                   <label className="session-basic-username">
                     Username
-                    <input required value={username} onChange={(event) => setUsername(event.target.value)} placeholder="ops" />
+                    <input {...literalInputProps} required value={username} onChange={(event) => setUsername(event.target.value)} placeholder="ops" />
                   </label>
                   <div className="session-settings-tabs quick-connect-wide" role="tablist" aria-label="SSH settings">
                     {([
@@ -6670,19 +6684,19 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     <>
                       <label className="quick-connect-wide">
                         Private key path
-                        <input required value={keyPath} onChange={(event) => setKeyPath(event.target.value)} placeholder="~/.ssh/id_ed25519" />
+                        <input {...literalInputProps} required value={keyPath} onChange={(event) => setKeyPath(event.target.value)} placeholder="~/.ssh/id_ed25519" />
                         <small>The key stays on disk; only its path crosses IPC.</small>
                       </label>
                       <label className="quick-connect-wide">
                         Passphrase credential reference <span className="optional">optional</span>
-                        <input value={passphraseCredentialId} onChange={(event) => setPassphraseCredentialId(event.target.value)} placeholder="prod-key-passphrase" />
+                        <input {...literalInputProps} value={passphraseCredentialId} onChange={(event) => setPassphraseCredentialId(event.target.value)} placeholder="prod-key-passphrase" />
                         <small>Encrypted-key passphrases are retrieved natively from the vault.</small>
                       </label>
                     </>
                   ) : method === "password" || method === "keyboardInteractive" ? (
                     <label className="quick-connect-wide">
                       {method === "keyboardInteractive" ? "Keyboard-interactive response reference" : "Saved password name"}
-                      <input required value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder="prod-bastion-password" />
+                      <input {...literalInputProps} required value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder="prod-bastion-password" />
                       <small>{method === "keyboardInteractive" ? "The native layer answers non-echo prompts with this vault secret; echo prompts are refused." : "Enter the name of a password saved in the credential vault."}</small>
                     </label>
                   ) : (
@@ -6706,7 +6720,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                       </label>
                       <label>
                         Jump username
-                        <input required value={jumpUsername} onChange={(event) => setJumpUsername(event.target.value)} placeholder={username || "ops"} />
+                        <input {...literalInputProps} required value={jumpUsername} onChange={(event) => setJumpUsername(event.target.value)} placeholder={username || "ops"} />
                       </label>
                     </>
                   )}
@@ -6758,7 +6772,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                 <>
                   <label className="quick-connect-wide">
                     Username <span className="optional">{protocol === "vnc" ? "optional for no-auth servers" : "required"}</span>
-                    <input required={protocol === "rdp"} value={username} onChange={(event) => setUsername(event.target.value)} placeholder={protocol === "rdp" ? "Administrator" : "viewer"} />
+                    <input {...literalInputProps} required={protocol === "rdp"} value={username} onChange={(event) => setUsername(event.target.value)} placeholder={protocol === "rdp" ? "Administrator" : "viewer"} />
                   </label>
                   {protocol === "rdp" && <label>
                     Domain <span className="optional">optional</span>
@@ -6772,17 +6786,17 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     </label>
                     <label>
                       Gateway username <span className="optional">required with gateway</span>
-                      <input value={gatewayUsername} onChange={(event) => setGatewayUsername(event.target.value)} placeholder="gateway-user" />
+                      <input {...literalInputProps} value={gatewayUsername} onChange={(event) => setGatewayUsername(event.target.value)} placeholder="gateway-user" />
                     </label>
                     <label className="quick-connect-wide">
                       Gateway credential reference <span className="optional">required with gateway</span>
-                      <input value={gatewayCredentialId} onChange={(event) => setGatewayCredentialId(event.target.value)} placeholder="rdg-password" autoComplete="off" />
+                      <input {...literalInputProps} value={gatewayCredentialId} onChange={(event) => setGatewayCredentialId(event.target.value)} placeholder="rdg-password" autoComplete="off" />
                       <small>Separate opaque vault reference; the secret is sent only through the native helper pipe.</small>
                     </label>
                   </>}
                   <label className="quick-connect-wide">
                     Credential reference <span className="optional">{protocol === "vnc" ? "optional for no-auth" : "required"}</span>
-                    <input required={protocol === "rdp"} value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder={protocol === "rdp" ? "windows-admin-password" : "vnc-password"} />
+                    <input {...literalInputProps} required={protocol === "rdp"} value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder={protocol === "rdp" ? "windows-admin-password" : "vnc-password"} />
                     <small>Only an opaque vault reference crosses IPC. The secret is handed to the isolated native helper.</small>
                   </label>
                   <label>

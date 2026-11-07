@@ -1,3 +1,4 @@
+import { literalInputProps } from "./literal-input";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { TerminalAuthentication } from "./terminal-authentication";
 import type { ColorTheme } from "./theme";
@@ -25,7 +26,7 @@ export function TerminalSshLogin({ authentication, connecting, label, colorTheme
       authentication.submit(value);
     }} onKeyDown={event => { event.stopPropagation(); if (event.key === "Escape" || (event.ctrlKey && event.key === "c")) { event.preventDefault(); authentication.submit(null); } }}>
       <pre>{question.message}</pre>
-      <label>Password: <input ref={input} type="password" maxLength={16384} aria-label="SSH password" autoComplete="off" autoCapitalize="off" spellCheck={false} /></label>
+      <label>Password: <input {...literalInputProps} ref={input} type="password" maxLength={16384} aria-label="SSH password" autoComplete="off" /></label>
       <p className="terminal-login-help">Enter to continue · Ctrl+C or Escape to cancel</p>
     </form> : <p role="status">Waiting for the SSH server…</p>}
   </section>;
