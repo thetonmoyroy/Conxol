@@ -19,6 +19,7 @@ fn main() {
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
         "test-ssh-branch" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "-p", "conxol-ssh", "branch", "--", "--nocapture"], None),
+        "test-settings" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "settings::tests", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
         "test-mtr" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-mtr", "--", "--nocapture"], None),
         "test-ping" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-ping", "--", "--nocapture"], None),

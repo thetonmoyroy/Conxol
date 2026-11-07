@@ -1341,3 +1341,42 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .desktop-menubar > .terminal-search-bar + .desktop-menu-end { margin-left: 6px; }
 
 .desktop-home-actions .desktop-home-new-session { flex-basis: 100%; }
+
+/* Indent each nested session folder while preserving fixed session row geometry. */
+.session-folder-group > .session-folder-group { margin-left: 12px; }
+
+/* Compact device library: a fixed search area and an independently scrolling list. */
+.saved-session-picker { width: min(600px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); padding: 0; color: var(--text); background: var(--panel); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: 0 24px 80px #0006; overflow: auto; }
+.saved-session-picker::backdrop { background: #0009; }
+.saved-session-picker header, .saved-session-picker footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; }
+.saved-session-eyebrow { display: block; color: var(--amber); font-size: 9px; letter-spacing: .14em; margin-bottom: 5px; }
+.saved-session-picker h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.saved-session-picker header button, .saved-session-search button { display: inline-flex; padding: 5px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.saved-session-views { display: flex; gap: 5px; padding: 0 20px 14px; }
+.saved-session-views button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-size: 11px; cursor: pointer; }
+.saved-session-views button.active { background: var(--amber-soft); color: var(--amber); border-color: var(--line-strong); }
+.saved-session-views button span { font-size: 10px; opacity: .7; }
+.saved-session-search { display: flex; align-items: center; gap: 8px; margin: 0 20px 10px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--muted); }
+.saved-session-search:focus-within { border-color: var(--amber); box-shadow: 0 0 0 2px var(--amber-soft); }
+.saved-session-search input { flex: 1; width: 100%; min-width: 0; padding: 11px 0; color: var(--text); font: inherit; font-size: 12px; background: transparent; border: 0; outline: none; }
+.saved-session-filters { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr); gap: 7px; padding: 0 20px 14px; }
+.saved-session-filters select { width: 100%; min-width: 0; padding: 7px; font: inherit; font-size: 11px; color: var(--muted); background: var(--surface); border: 1px solid var(--line-strong); border-radius: 5px; }
+.saved-session-list-heading { display: flex; justify-content: space-between; padding: 9px 43px 9px 22px; border-top: 1px solid var(--line-strong); color: var(--muted); font-size: 9px; letter-spacing: .08em; }
+.saved-session-results { max-height: min(430px, 46dvh); overflow: auto; scrollbar-gutter: stable; padding: 0 10px 5px; }
+.saved-session-results > button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 49px; padding: 7px 10px; text-align: left; color: var(--text); background: transparent; border: 1px solid transparent; border-bottom-color: var(--line); border-radius: 6px; cursor: pointer; }
+.saved-session-results > button:hover, .saved-session-results > button.selected { background: var(--amber-soft); border-color: var(--line-strong); }
+.saved-session-picker button:focus-visible, .saved-session-picker select:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.saved-device-icon { display: inline-flex; align-items: center; justify-content: center; width: 29px; height: 29px; flex: 0 0 29px; border: 1px solid var(--line-strong); border-radius: 7px; color: var(--amber); }
+.saved-device-copy { min-width: 0; flex: 1; }
+.saved-device-copy strong { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.saved-device-copy small { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; }
+.saved-device-star { flex-shrink: 0; color: var(--amber); }
+.saved-device-protocol { flex-shrink: 0; padding: 3px 5px; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--muted); font-size: 9px; letter-spacing: .04em; }
+.saved-device-connect { flex-shrink: 0; color: var(--muted); }
+.saved-session-empty { display: flex; flex-direction: column; align-items: center; padding: 32px 16px; text-align: center; color: var(--muted); gap: 10px; }
+.saved-session-empty strong { color: var(--text); font-size: 13px; }
+.saved-session-empty p { margin: 0 0 5px; font-size: 12px; }
+.saved-session-picker footer { border-top: 1px solid var(--line-strong); padding: 12px 20px; }
+.saved-session-picker footer span { font-size: 11px; color: var(--text); }
+.saved-session-picker footer small { display: block; margin-top: 4px; font-size: 9px; color: var(--muted); }
+@media (max-width: 420px) { .saved-session-views { gap: 0; padding-inline: 10px; } .saved-session-views button { padding-inline: 6px; } .saved-session-picker footer small { display: none; } }

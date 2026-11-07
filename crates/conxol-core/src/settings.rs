@@ -25,6 +25,8 @@ pub struct GeneralSettings {
     pub always_show_terminal_search: bool,
     #[serde(default)]
     pub right_click_to_paste: bool,
+    #[serde(default)]
+    pub tab_plus_saved_sessions: bool,
 }
 
 impl Default for GeneralSettings {
@@ -35,6 +37,7 @@ impl Default for GeneralSettings {
             paste_preview: true,
             always_show_terminal_search: false,
             right_click_to_paste: false,
+            tab_plus_saved_sessions: false,
         }
     }
 }
@@ -413,6 +416,19 @@ fn default_shortcut_emergency_broadcast_disable() -> String {
 #[cfg(test)]
 mod tests {
     use super::{AppSettings, SettingsValidationError};
+
+    #[test]
+    fn tab_plus_preference_migrates_and_round_trips() {
+        let mut general: super::GeneralSettings = serde_json::from_str("{}").unwrap();
+        assert!(!general.tab_plus_saved_sessions);
+        general.tab_plus_saved_sessions = true;
+        let json = serde_json::to_string(&general).unwrap();
+        assert!(json.contains("\"tabPlusSavedSessions\":true"));
+        assert_eq!(
+            serde_json::from_str::<super::GeneralSettings>(&json).unwrap(),
+            general
+        );
+    }
 
     #[test]
     fn retired_transparency_settings_are_discarded_on_save() {

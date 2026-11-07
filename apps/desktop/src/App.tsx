@@ -31,7 +31,7 @@ import { WorkspaceLockSettings } from "./WorkspaceSecurity";
 import { useWorkspaceLock, isWorkspaceLocked } from "./workspace-lock-state";
 import { approveUnknownHost } from "./ssh-host-trust";
 import { ConnectionAttemptGate } from "./connection-attempt";
-import { parseSessionFolderState, parseSessionFolders, unfileSessionFolder } from "./session-folders";
+import { parseSessionFolderState, parseSessionFolders, unfileSessionFolder, groupSessionFolders, planSessionFolderMove, sessionFolderAncestors, sessionFolderWithin, sessionFolderParent, sessionFolderOpenState } from "./session-folders";
 import { TerminalAuthentication } from "./terminal-authentication";
 import { TerminalSshLogin } from "./TerminalSshLogin";
 import { sidebarWidth, DEFAULT_SIDEBAR_WIDTH } from "./sidebar-layout";
@@ -159,6 +159,7 @@ type AppSettings = {
     pastePreview: boolean;
     alwaysShowTerminalSearch: boolean;
     rightClickToPaste: boolean;
+    tabPlusSavedSessions: boolean;
   };
   appearance: {
     fontSize: number;
@@ -204,7 +205,7 @@ type PortableVaultStatus = {
 type VaultBackend = "platform" | "portable";
 
 const defaultSettings: AppSettings = {
-  general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false },
+  general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false, tabPlusSavedSessions: false },
   appearance: { fontSize: 14 },
   terminal: { ...defaultTerminalAppearance, scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
   keyboard: {
@@ -1592,6 +1593,7 @@ function App() {
   const [sidebarMode, setSidebarMode] = useState<"sessions" | "files" | "shortcuts" | "notes">("sessions");
   const [activeToolDialog, setActiveToolDialog] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useToolDialog("palette", activeToolDialog, setActiveToolDialog);
+  const [savedSessionPickerOpen, setSavedSessionPickerOpen] = useToolDialog("savedSessionPicker", activeToolDialog, setActiveToolDialog);
   const [quickConnectOpen, setQuickConnectOpen] = useToolDialog("quickConnect", activeToolDialog, setActiveToolDialog);
   const [wslTerminalOpen, setWslTerminalOpen] = useToolDialog("wslTerminal", activeToolDialog, setActiveToolDialog);
   const [helpOpen, setHelpOpen] = useToolDialog("help", activeToolDialog, setActiveToolDialog);
@@ -1665,21 +1667,26 @@ function App() {
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
   const folderDeletionInProgress = useRef(false);
   const draggedSessionId = useRef<string | null>(null);
+  const folderMoveInProgress = useRef(false);
+  const folderDrag = useRef<{ folder: string; x: number; y: number; active: boolean } | null>(null);
+  const suppressFolderClick = useRef(false);
   const [sessionDropTarget, setSessionDropTarget] = useState<string | null>(null);
-  const createSessionFolder = async () => {
-    const name = (await promptText("New session folder", ""))?.trim();
+  const createSessionFolder = async (parent = "") => {
+    const name = (await promptText("New session folder (use / for nesting)", parent ? `${parent}/` : ""))?.trim();
     if (!name) return;
     if (name.length > 128) { setConnectionError("Folder names must be 128 characters or fewer."); return; }
     setCreatedSessionFolders(current => [...new Set([...current, name])]);
-    setSessionFolderState(current => ({ ...current, [`folder:${name}`]: true }));
+    setSessionFolderState(current => ({ ...current, ...sessionFolderOpenState(name) }));
   };
   const changeSessionFolder = (key: string, open: boolean) => setSessionFolderState(current =>
     (current[key] ?? true) === open ? current : { ...current, [key]: open });
   const expandSessionFolders = (open: boolean) => setSessionFolderState(Object.fromEntries([
-    ...createdSessionFolders.map(folder => [`folder:${folder}`, open]),
-    ...sessionRows.filter(session => session.folder.trim()).map(session => [`folder:${session.folder.trim()}`, open]),
+    ...createdSessionFolders.flatMap(folder => sessionFolderAncestors(folder).map(path => [`folder:${path}`, open])),
+    ...sessionRows.flatMap(session => sessionFolderAncestors(session.folder.trim()).map(path => [`folder:${path}`, open])),
   ]));
   const savedSessionAttempt = useRef(new ConnectionAttemptGate());
+  const sshConnectionAttempt = useRef(new ConnectionAttemptGate());
+  const [sshConnecting, setSshConnecting] = useState(false);
   const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<SessionNotice | null>(null);
   const [closing, setClosing] = useState(false);
@@ -2311,6 +2318,24 @@ function App() {
     setActiveView("terminal");
   }, [selectedTerminalId, terminalTabs]);
 
+  useEffect(() => {
+    const onMouseNavigation = (event: MouseEvent) => {
+      if (event.button !== 3 && event.button !== 4) return;
+      // Reserve both side buttons for tabs, including over terminal panes.
+      // Cancel every phase so WebView history and remote mouse input stay idle.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (event.type !== "mousedown" || closing || isWorkspaceLocked() || editingRemoteFile
+        || document.querySelector('[role="dialog"], dialog[open]')) return;
+      cycleTerminal(event.button === 3 ? -1 : 1);
+    };
+    const events = ["mousedown", "mouseup", "auxclick"] as const;
+    for (const type of events) window.addEventListener(type, onMouseNavigation, true);
+    return () => {
+      for (const type of events) window.removeEventListener(type, onMouseNavigation, true);
+    };
+  }, [closing, cycleTerminal, editingRemoteFile]);
+
   const handleWorkspaceTabKeyDown = useCallback((event: ReactKeyboardEvent<HTMLButtonElement>) => {
     const tabs = Array.from(event.currentTarget.closest('[role="tablist"]')?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? []);
     if (tabs.length < 2) return;
@@ -2724,6 +2749,9 @@ function App() {
   }, [setCredentialsOpen]);
 
   const connectSsh = useCallback(async (request: SshConnectRequest, offerSave = true, displayName?: string, folder?: string, shortcutDeviceId?: string, branchParentId?: string) => {
+    await sshConnectionAttempt.current.run(async () => {
+      setSshConnecting(true);
+      try {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2828,6 +2856,10 @@ function App() {
       recordAudit("connectionFailed", "SSH");
       setConnectionError(String(error));
     }
+      } finally {
+        setSshConnecting(false);
+      }
+    });
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
   const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string) => {
@@ -3047,7 +3079,7 @@ function App() {
     if (!IS_TAURI) return;
     try {
       await invoke<SavedSession>("session_save", { session });
-      setSessionFolderState(current => ({ ...current, ...(session.folder?.trim() ? { [`folder:${session.folder.trim()}`]: true } : {}) }));
+      setSessionFolderState(current => ({ ...current, ...(session.folder?.trim() ? sessionFolderOpenState(session.folder.trim()) : {}) }));
       setEditingSession(null);
       refreshSavedSessions();
       setSessionNotice(`Saved ${session.name}. Secret references were left unchanged.`);
@@ -3063,18 +3095,18 @@ function App() {
     if (!session || (session.folder ?? "") === folder) return;
     try {
       await invoke<SavedSession>("session_save", { session: { ...session, folder: folder || null } });
-      setSessionFolderState(current => ({ ...current, [`folder:${folder}`]: true }));
+      setSessionFolderState(current => ({ ...current, ...sessionFolderOpenState(folder) }));
       refreshSavedSessions();
     } catch (error) { setConnectionError(`Could not move session: ${String(error)}`); }
   };
 
   const deleteSessionFolder = async (folder: string) => {
-    if (folderDeletionInProgress.current || sessionRows.some(session => session.folder.trim() === folder) || savedSessions.some(session => session.folder?.trim() === folder)) return;
+    if (createdSessionFolders.some(path => path !== folder && sessionFolderWithin(path, folder)) || folderDeletionInProgress.current || sessionRows.some(session => sessionFolderWithin(session.folder.trim(), folder)) || savedSessions.some(session => sessionFolderWithin(session.folder?.trim() ?? "", folder))) return;
     folderDeletionInProgress.current = true;
     setDeletingFolder(folder);
     setFolderContextMenu(null);
     try {
-      const members = savedSessions.filter(session => session.folder?.trim() === folder);
+      const members = savedSessions.filter(session => sessionFolderWithin(session.folder?.trim() ?? "", folder));
       if (members.length && !IS_TAURI) throw new Error("Moving saved sessions requires the desktop runtime.");
       await unfileSessionFolder(folder, savedSessions, session => invoke("session_save", { session }));
       setCreatedSessionFolders(current => current.filter(name => name !== folder));
@@ -3096,15 +3128,17 @@ function App() {
     }
   };
 
-  const saveFolderCustomization = async (name: string, style: FolderStyle) => {
-    const original = customizingFolder;
-    if (!original) return;
-    if (name !== original && [...createdSessionFolders, ...savedSessions.map(item => item.folder?.trim())].includes(name)) throw new Error("A folder with that name already exists.");
+  const relocateSessionFolder = async (original: string, name: string, style?: FolderStyle) => {
+    if (folderMoveInProgress.current) throw new Error("A folder move is already in progress.");
+    const allFolders = [...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(item => sessionFolderAncestors(item.folder?.trim() ?? ""))])];
+    const renamed = planSessionFolderMove(original, name, allFolders);
+    folderMoveInProgress.current = true;
+    try {
     const moved: SavedSession[] = [];
     try {
       if (name !== original) {
-        for (const session of savedSessions.filter(item => item.folder?.trim() === original)) {
-          await invoke("session_save", { session: { ...session, folder: name } });
+        for (const session of savedSessions.filter(item => sessionFolderWithin(item.folder?.trim() ?? "", original))) {
+          await invoke("session_save", { session: { ...session, folder: renamed(session.folder!.trim()) } });
           moved.push(session);
         }
       }
@@ -3113,12 +3147,33 @@ function App() {
       refreshSavedSessions();
       throw new Error(`Could not rename folder: ${String(error)}${rollback.some(result => result.status === "rejected") ? ". Some sessions could not be restored; review both folders." : ""}`);
     }
-    setCreatedSessionFolders(current => [...new Set([...current.filter(folder => folder !== original), name])]);
-    setFolderStyles(current => { const next = { ...current }; delete next[original]; next[name] = style; return next; });
-    setSessionFolderState(current => { const next = { ...current }; delete next[`folder:${original}`]; next[`folder:${name}`] = current[`folder:${original}`] ?? true; return next; });
-    setEditingSession(current => current?.folder?.trim() === original ? { ...current, folder: name } : current);
+    setCreatedSessionFolders(current => [...new Set([...allFolders.map(renamed), ...current.map(renamed), name])]);
+    setFolderStyles(current => ({ ...Object.fromEntries(Object.entries(current).map(([path, value]) => [renamed(path), value])), ...(style ? { [name]: style } : {}) }));
+    setSessionFolderState(current => ({ ...Object.fromEntries(Object.entries(current).map(([key, value]) => [key.startsWith("folder:") ? `folder:${renamed(key.slice(7))}` : key, value])), ...sessionFolderOpenState(name) }));
+    setEditingSession(current => current?.folder && sessionFolderWithin(current.folder.trim(), original) ? { ...current, folder: renamed(current.folder.trim()) } : current);
     refreshSavedSessions();
+    } finally { folderMoveInProgress.current = false; }
+  };
+
+  const saveFolderCustomization = async (name: string, style: FolderStyle) => {
+    if (!customizingFolder) return;
+    await relocateSessionFolder(customizingFolder, name, style);
     setCustomizingFolder(null);
+  };
+
+  const folderDropAt = (x: number, y: number) => {
+    const target = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-session-folder]")?.dataset.sessionFolder ?? null;
+    const source = folderDrag.current?.folder;
+    return target !== null && source && !sessionFolderWithin(target, source) ? target : null;
+  };
+  const dropFolder = async (original: string, parent: string) => {
+    const leaf = original.slice(original.lastIndexOf("/") + 1);
+    const destination = parent ? `${parent}/${leaf}` : leaf;
+    if (original === destination || isWorkspaceLocked()) return;
+    try {
+      await relocateSessionFolder(original, destination);
+      setSessionNotice(`Moved folder “${original}” to “${destination}”.`);
+    } catch (error) { setConnectionError(`Could not move folder: ${String(error)}`); }
   };
 
   const deleteSavedSession = useCallback(async (session: SavedSession) => {
@@ -4599,8 +4654,10 @@ function App() {
             <div className="list-heading"><span>{recentOnly ? "Recent sessions" : favoritesOnly ? "Favorite sessions" : "User sessions"}</span><span className="list-actions"><button aria-label="Import OpenSSH config" title="Import OpenSSH config" onClick={importOpenSshConfig}><Upload size={14} /></button><button aria-label="Import Conxol session export" title="Import Conxol session export" onClick={importSessions}><ArrowDownToLine size={14} /></button><button aria-label="Export Conxol sessions" title="Export secret-free session definitions" onClick={exportSessions}><ArrowUpFromLine size={14} /></button></span></div>
             {sessionListError && <div className="connect-error" role="alert"><span>{sessionListError}</span><button type="button" className="outline-button" onClick={refreshSavedSessions}>Retry</button></div>}
             {!favoritesOnly && <div className="session-folder-controls"><button type="button" title="Expand all folders" aria-label="Expand all folders" onClick={() => expandSessionFolders(true)}><ChevronsUpDown size={14} /></button><button type="button" title="Collapse all folders" aria-label="Collapse all folders" onClick={() => expandSessionFolders(false)}><ChevronsDownUp size={14} /></button><button type="button" title="Create folder" aria-label="Create folder" onClick={() => void createSessionFolder()}><FolderPlus size={14} /></button></div>}
-            {sessionGroups.map(([folder, sessions]) => {
-              const folderHasHosts = sessionRows.some(session => session.folder.trim() === folder);
+            {(() => {
+              const renderGroup = ([folder, sessions]: [string, SessionListItem[]]): ReactNode => {
+              const children = folder ? sessionGroups.filter(([path]) => path && sessionFolderParent(path) === folder) : [];
+              const folderHasHosts = sessionRows.some(session => sessionFolderWithin(session.folder.trim(), folder)) || createdSessionFolders.some(path => path !== folder && sessionFolderWithin(path, folder));
               const rows = sessions.map((session) => (
                   <SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
                     const saved = savedSessions.find((item) => item.id === session.id);
@@ -4614,8 +4671,37 @@ function App() {
                   } : undefined} onToggleFavorite={() => void toggleFavorite(session)} />
                 ));
               return folder ? (
-                <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={search.trim() && sessions.length > 0 ? true : (sessionFolderState[`folder:${folder}`] ?? true)} onToggle={event => { if (!search.trim()) changeSessionFolder(`folder:${folder}`, event.currentTarget.open); }}>
-                  <summary className="folder-heading session-folder-heading" onContextMenu={event => {
+                <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={search.trim() ? true : (sessionFolderState[`folder:${folder}`] ?? true)} onToggle={event => { if (event.target === event.currentTarget && !search.trim()) changeSessionFolder(`folder:${folder}`, event.currentTarget.open); }}>
+                  <summary className="folder-heading session-folder-heading" title={`${folder} · Drag onto a folder to nest, or onto User sessions to move to the root`}
+                    onPointerDown={event => {
+                      if (event.button !== 0 || (event.target as HTMLElement).closest("button") || folderMoveInProgress.current || isWorkspaceLocked()) return;
+                      suppressFolderClick.current = false;
+                      folderDrag.current = { folder, x: event.clientX, y: event.clientY, active: false };
+                    }}
+                    onPointerMove={event => {
+                      const drag = folderDrag.current;
+                      if (!drag || drag.folder !== folder || !(event.buttons & 1)) return;
+                      if (!drag.active && Math.hypot(event.clientX - drag.x, event.clientY - drag.y) >= 6) {
+                        drag.active = true;
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }
+                      if (drag.active) { event.preventDefault(); setSessionDropTarget(folderDropAt(event.clientX, event.clientY)); }
+                    }}
+                    onPointerUp={event => {
+                      const drag = folderDrag.current;
+                      if (drag?.active && drag.folder === folder) {
+                        suppressFolderClick.current = true;
+                        const parent = folderDropAt(event.clientX, event.clientY);
+                        if (parent !== null) void dropFolder(folder, parent);
+                        if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+                      }
+                      folderDrag.current = null;
+                      setSessionDropTarget(null);
+                    }}
+                    onPointerCancel={() => { folderDrag.current = null; setSessionDropTarget(null); }}
+                    onLostPointerCapture={() => { folderDrag.current = null; setSessionDropTarget(null); }}
+                    onClickCapture={event => { if (suppressFolderClick.current) { event.preventDefault(); event.stopPropagation(); suppressFolderClick.current = false; } }}
+                    onContextMenu={event => {
                     event.preventDefault(); event.stopPropagation();
                     setFolderContextMenu({ folder, x: event.clientX, y: event.clientY });
                   }} onKeyDown={event => {
@@ -4624,11 +4710,14 @@ function App() {
                       const rect = event.currentTarget.getBoundingClientRect();
                       setFolderContextMenu({ folder, x: rect.left, y: rect.bottom });
                     }
-                  }}><ChevronDown size={11} /><SessionFolderIcon appearance={folderStyles[folder]} /> {folder} <span>{sessions.length}</span><button type="button" className="session-folder-edit" aria-label={`Customize folder ${folder}`} title="Customize folder" onClick={event => { event.preventDefault(); event.stopPropagation(); setCustomizingFolder(folder); }}><Pencil size={12} /></button>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
+                  }}><ChevronDown size={11} /><SessionFolderIcon appearance={folderStyles[folder]} /> {folder.slice(folder.lastIndexOf("/") + 1)} <span>{filteredSessions.filter(session => sessionFolderWithin(session.folder.trim(), folder)).length}</span><button type="button" className="session-folder-edit" aria-label={`Customize folder ${folder}`} title="Customize folder" onClick={event => { event.preventDefault(); event.stopPropagation(); setCustomizingFolder(folder); }}><Pencil size={12} /></button>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
+                  {children.map(renderGroup)}
                   {rows}
                 </details>
               ) : <div key="unfiled">{rows}</div>;
-            })}
+              };
+              return sessionGroups.filter(([path]) => !sessionFolderParent(path)).map(renderGroup);
+            })()}
             {filteredSessions.length === 0 && <div className="empty-search">No matching sessions</div>}
           </div>
           </>}
@@ -4682,7 +4771,7 @@ function App() {
                       );
                     })}</div>
             {activeView !== "home" && activeView !== "terminal" && <div className="desktop-tool-tab"><span>{activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)}</span><button aria-label="Close tool" onClick={() => setActiveView(selectedTerminalId ? "terminal" : "home")}><X size={12} /></button></div>}
-            <button className="desktop-add-tab" aria-label="New session" title="New session" onClick={() => setQuickConnectOpen(true)}><Plus size={14} /></button>
+            <button className="desktop-add-tab" aria-label={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} title={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} onClick={() => settings.general.tabPlusSavedSessions ? setSavedSessionPickerOpen(true) : setQuickConnectOpen(true)}><Plus size={14} /></button>
             {activeView === "terminal" && (<div className="terminal-toolbar">
                   <div className="terminal-toolbar-actions"><button type="button" className={`terminal-broadcast-button ${broadcastEnabled ? "active" : ""}`} aria-label="Configure broadcast input" title="Configure broadcast input" onClick={() => setBroadcastOpen(true)}><Radio size={14} /> {broadcastEnabled ? `${broadcastTargetIds.length} targets` : "Broadcast"}</button><button type="button" className="terminal-new-tab" aria-label="New terminal tab" title="New terminal tab" onClick={() => startNewTerminal()}><Plus size={14} /></button><button type="button" aria-label="Split terminal right" title="Split right" onClick={() => openSplit("right")}><PanelRight size={14} /></button><button type="button" aria-label="Split terminal down" title="Split down" onClick={() => openSplit("down")}><PanelBottom size={14} /></button><span className="terminal-chip">{remoteProtocol === "rdp" || remoteProtocol === "vnc" ? "RGBA" : "UTF-8"}</span><span className="terminal-chip">{remoteProtocol === "rdp" || remoteProtocol === "vnc" ? "native" : "256 colors"}</span><button type="button" className={macroRecording ? "terminal-record-button active" : ""} aria-label={macroRecording ? "Stop macro recording" : "Record macro from terminal input"} title={macroRecording ? "Stop macro recording" : "Record macro from terminal input"} onClick={macroRecording ? stopMacroRecording : startMacroRecording} disabled={remoteProtocol === "rdp" || remoteProtocol === "vnc"}><Radio size={14} /></button><button type="button" aria-label="Search terminal" title="Search terminal" onClick={openTerminalSearch} disabled={remoteProtocol === "rdp" || remoteProtocol === "vnc"}><Search size={14} /></button><button type="button" aria-label="Copy terminal selection" title="Copy selected terminal text" onClick={() => void copyTerminalSelection()} disabled={remoteProtocol === "rdp" || remoteProtocol === "vnc"}><Copy size={14} /></button><button type="button" aria-label="Clear terminal scrollback" title="Clear terminal scrollback" onClick={clearTerminalScrollback} disabled={remoteProtocol === "rdp" || remoteProtocol === "vnc"}><Trash2 size={14} /></button><button type="button" aria-label="Terminal options" title="Open terminal settings" onClick={openSettings}><MoreHorizontal size={16} /></button></div>
                   </div>)}
@@ -4778,22 +4867,26 @@ function App() {
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
       {helpOpen && <HelpModal onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
       {recoveryOpen && <div className="palette-backdrop" role="presentation" onMouseDown={() => setRecoveryOpen(false)}><section className="session-recovery-dialog" role="dialog" aria-modal="true" aria-label="Recover previous sessions" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setRecoveryOpen(false); }}><header><h2>Recover previous sessions</h2><button autoFocus aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}><X size={16} /></button></header><p>Select a recently used session to reconnect.</p>{sessionRows.filter((session) => session.lastUsedAt != null).sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)).map((session) => <button className="recovery-session" disabled={pendingSavedSession !== null && session.type !== "LOCAL"} key={session.id ?? session.name} onClick={() => { setRecoveryOpen(false); const saved = savedSessions.find((item) => item.id === session.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (session.type === "LOCAL") startNewTerminal(); else setQuickConnectOpen(true); }}><TerminalIcon size={15} /><span>{session.name}<small>{session.detail}</small></span></button>)}{!sessionRows.some((session) => session.lastUsedAt != null) && <p>No previous sessions yet. Start a local terminal or create a session with the + tab.</p>}</section></div>}
-      {folderContextMenu && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} disabled={deletingFolder !== null || sessionRows.some(session => session.folder.trim() === folderContextMenu.folder)} onCustomize={() => { setCustomizingFolder(folderContextMenu.folder); setFolderContextMenu(null); }} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
-      {customizingHost && <FolderCustomization key={customizingHost.id} host folder={customizingHost.name} bookmark={{ folder: customizingHost.folder ?? "", tags: customizingHost.tags, notes: customizingHost.notes ?? "", favorite: customizingHost.favorite }} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder).filter((folder): folder is string => !!folder)])].sort()} appearance={hostStyles[customizingHost.id] ?? { icon: customizingHost.protocol === "LOCAL" ? "terminal" : "server", color: "" }} onClose={() => setCustomizingHost(null)} onSave={async (name, style, bookmark) => {
+      {folderContextMenu && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} onCreate={() => { const parent = folderContextMenu.folder; setFolderContextMenu(null); void createSessionFolder(parent); }} disabled={deletingFolder !== null || createdSessionFolders.some(path => path !== folderContextMenu.folder && sessionFolderWithin(path, folderContextMenu.folder)) || sessionRows.some(session => sessionFolderWithin(session.folder.trim(), folderContextMenu.folder))} onCustomize={() => { setCustomizingFolder(folderContextMenu.folder); setFolderContextMenu(null); }} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
+      {customizingHost && <FolderCustomization key={customizingHost.id} host folder={customizingHost.name} bookmark={{ folder: customizingHost.folder ?? "", tags: customizingHost.tags, notes: customizingHost.notes ?? "", favorite: customizingHost.favorite }} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} appearance={hostStyles[customizingHost.id] ?? { icon: customizingHost.protocol === "LOCAL" ? "terminal" : "server", color: "" }} onClose={() => setCustomizingHost(null)} onSave={async (name, style, bookmark) => {
         if (!bookmark) return;
         const session = { ...customizingHost, name, folder: bookmark.folder || null, tags: bookmark.tags, notes: bookmark.notes, favorite: bookmark.favorite };
         if (IS_TAURI) await invoke<SavedSession>("session_save", { session });
-        setSessionFolderState(current => ({ ...current, ...(bookmark.folder ? { [`folder:${bookmark.folder}`]: true } : {}) }));
+        setSessionFolderState(current => ({ ...current, ...(bookmark.folder ? sessionFolderOpenState(bookmark.folder) : {}) }));
         refreshSavedSessions();
         setSessionNotice(`Saved ${name}.`);
         setHostStyles(current => ({ ...current, [customizingHost.id]: style }));
         setCustomizingHost(null);
       }} />}
       {customizingFolder && <FolderCustomization key={customizingFolder} folder={customizingFolder} appearance={folderStyles[customizingFolder] ?? defaultFolderStyle} onClose={() => setCustomizingFolder(null)} onSave={saveFolderCustomization} />}
-      {quickConnectOpen && <QuickConnectDialog error={connectionError} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder).filter((folder): folder is string => !!folder)])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder)} onConnectTelnet={connectTelnet} onConnectSerial={connectSerial} onConnectRemoteDesktop={connectRemoteDesktop} onShell={() => startNewTerminal()} onWsl={openWslTerminalPicker} />}
+      {savedSessionPickerOpen && <SavedSessionPicker sessions={savedSessions} onClose={() => setSavedSessionPickerOpen(false)} onNew={() => setQuickConnectOpen(true)} onSelect={session => {
+        setSavedSessionPickerOpen(false);
+        if (!isWorkspaceLocked()) void connectSavedSession(session);
+      }} />}
+      {quickConnectOpen && <QuickConnectDialog connecting={sshConnecting} error={connectionError} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder)} onConnectTelnet={connectTelnet} onConnectSerial={connectSerial} onConnectRemoteDesktop={connectRemoteDesktop} onShell={() => startNewTerminal()} onWsl={openWslTerminalPicker} />}
       {tunnelDraft && <TunnelDialog kind={tunnelDraft.kind} onClose={() => setTunnelDraft(null)} onStart={startTunnel} />}
       {wslTerminalOpen && <WslTerminalDialog onClose={() => setWslTerminalOpen(false)} onSelect={startWslTerminal} />}
-      {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onConnectRemoteDesktop={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders, ...savedSessions.map(session => session.folder?.trim()).filter((folder): folder is string => !!folder)])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
+      {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onConnectRemoteDesktop={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
       {settingsOpen && <SettingsModal canRestore={terminalTabs.length === 0 && pendingSavedSession === null} settings={settings} error={settingsError} portableVaultStatus={portableVaultStatus} onClose={() => setSettingsOpen(false)} onSave={saveSettings} onReset={resetSettings} onExport={exportSettings} onImport={importSettings} onPortableCreate={createPortableVault} onPortableUnlock={unlockPortableVault} onPortableLock={lockPortableVault} />}
       {credentialsOpen && <CredentialVaultModal portableVaultStatus={portableVaultStatus} onClose={() => setCredentialsOpen(false)} onSave={saveCredential} onDelete={deleteCredential} onPortableSave={savePortableCredential} onPortableDelete={deletePortableCredential} />}
       {editingRemoteFile && <RemoteEditorModal key={`${editingRemoteFile.sessionId}:${editingRemoteFile.document.path}:${editingRemoteFile.document.revision}`} document={editingRemoteFile.document} onClose={() => setEditingRemoteFile(null)} onReload={reloadRemoteTextFile} onSave={saveRemoteTextFile} onSaveAs={saveRemoteTextFileAs} />}
@@ -4905,20 +4998,10 @@ function toSessionListItem(session: SavedSession): SessionListItem {
 }
 
 function groupSessionsByFolder(sessions: SessionListItem[], folders: string[] = []): Array<[string, SessionListItem[]]> {
-  const groups = new Map<string, SessionListItem[]>(folders.map(folder => [folder, []]));
-  sessions.forEach((session) => {
-    const folder = session.folder.trim();
-    groups.set(folder, [...(groups.get(folder) ?? []), session]);
-  });
-  // Folders precede unfiled sessions; drops only change folder membership.
-  return [...groups.entries()].sort(([first], [second]) => {
-    if (!first) return second ? 1 : 0;
-    if (!second) return -1;
-    return first.localeCompare(second, undefined, { numeric: true, sensitivity: "base" });
-  });
+  return groupSessionFolders(sessions, folders);
 }
 
-function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustomize }: { folder: string; x: number; y: number; disabled: boolean; onClose: () => void; onDelete: () => void; onCustomize: () => void }) {
+function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustomize, onCreate }: { folder: string; x: number; y: number; disabled: boolean; onClose: () => void; onDelete: () => void; onCustomize: () => void; onCreate: () => void }) {
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const previousFocus = document.activeElement;
@@ -4939,6 +5022,7 @@ function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustom
     };
   }, [onClose]);
   return <div ref={menuRef} className="session-folder-menu" role="menu" aria-label={`Folder ${folder}`} style={{ left: Math.max(4, Math.min(x, window.innerWidth - 228)), top: Math.max(4, Math.min(y, window.innerHeight - 120)) }}>
+    <button type="button" role="menuitem" onClick={onCreate}><FolderPlus size={14} />New subfolder</button>
     <button type="button" role="menuitem" onClick={onCustomize}><Pencil size={14} /><span>Customize folder<small>Name, icon and color</small></span></button>
     <button type="button" role="menuitem" disabled={disabled} onClick={onDelete}><Trash2 size={14} /><span>Delete folder<small>Keep sessions in the main list</small></span></button>
   </div>;
@@ -5587,6 +5671,49 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
   </div>;
 }
 
+function SavedSessionPicker({ sessions, onClose, onNew, onSelect }: { sessions: SavedSession[]; onClose: () => void; onNew: () => void; onSelect: (session: SavedSession) => void }) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  const selectionCommitted = useRef(false);
+  const selectSession = (session: SavedSession) => {
+    if (selectionCommitted.current) return;
+    selectionCommitted.current = true;
+    onSelect(session);
+  };
+  const [query, setQuery] = useState("");
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [view, setView] = useState<"all" | "favorites" | "recent">("all");
+  const [folder, setFolder] = useState("");
+  const [protocol, setProtocol] = useState("");
+  const [sort, setSort] = useState("name");
+  const folders = [...new Set(sessions.flatMap(session => sessionFolderAncestors(session.folder ?? "")))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const protocols = [...new Set(sessions.map(session => session.protocol))].sort();
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const matches = sessions.filter(session => (view !== "favorites" || session.favorite) && (view !== "recent" || !!session.last_used_at)
+    && (!folder || (folder === "__unfiled__" ? !session.folder : sessionFolderWithin(session.folder ?? "", folder))) && (!protocol || session.protocol === protocol)).filter(session => terms.every(term => `${session.name} ${session.hostname} ${session.username ?? ""} ${session.folder ?? ""} ${session.tags.join(" ")} ${session.protocol}`.toLowerCase().includes(term)))
+    .sort((a, b) => ((sort === "recent" || view === "recent") ? (b.last_used_at ?? 0) - (a.last_used_at ?? 0) : sort === "folder" ? (a.folder ?? "").localeCompare(b.folder ?? "", undefined, { numeric: true }) : 0)
+      || a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  const resetFilters = () => { setQuery(""); setFolder(""); setProtocol(""); setView("all"); setActiveIndex(0); };
+  useEffect(() => {
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => { dialog?.close(); if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
+  }, []);
+  useEffect(() => { document.getElementById(`saved-session-choice-${activeIndex}`)?.scrollIntoView({ block: "nearest" }); }, [activeIndex, query, folder, protocol, view, sort]);
+  return <dialog ref={dialogRef} className="saved-session-picker" aria-labelledby="saved-session-picker-title" onCancel={event => { event.preventDefault(); onClose(); }} onClick={event => { if (event.target === event.currentTarget) { const rect = event.currentTarget.getBoundingClientRect(); if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) onClose(); } }}>
+    <header><div><span className="saved-session-eyebrow">SESSION LIBRARY</span><h2 id="saved-session-picker-title">Connect to a device</h2></div><button type="button" aria-label="Close saved sessions" onClick={onClose}><X size={18} /></button></header>
+    <div className="saved-session-views" aria-label="Session views">{([['all', 'All devices'], ['favorites', 'Favorites'], ['recent', 'Recent']] as const).map(([id, label]) => <button type="button" key={id} aria-pressed={view === id} className={view === id ? "active" : ""} onClick={() => { setView(id); setActiveIndex(0); }}>{id === "favorites" ? <Star size={13} /> : id === "recent" ? <History size={13} /> : <Server size={13} />}{label}<span>{sessions.filter(session => id === "all" || (id === "favorites" ? session.favorite : !!session.last_used_at)).length}</span></button>)}</div>
+    <div className="saved-session-search"><Search size={16} /><input autoFocus aria-label="Search saved sessions" placeholder="Search name, host, folder or tag…" value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} onKeyDown={event => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); setActiveIndex(index => matches.length ? (index + (event.key === "ArrowDown" ? 1 : -1) + matches.length) % matches.length : 0); }
+      if (event.key === "Enter" && matches[activeIndex]) { event.preventDefault(); if (!event.repeat) selectSession(matches[activeIndex]); }
+    }} />{query && <button type="button" aria-label="Clear search" onClick={() => { setQuery(""); setActiveIndex(0); }}><X size={14} /></button>}</div>
+    <div className="saved-session-filters"><select aria-label="Filter by folder" value={folder} onChange={event => { setFolder(event.target.value); setActiveIndex(0); }}><option value="">All folders</option><option value="__unfiled__">Unfiled</option>{folders.map(path => <option key={path} value={path}>{path}</option>)}</select><select aria-label="Filter by protocol" value={protocol} onChange={event => { setProtocol(event.target.value); setActiveIndex(0); }}><option value="">All protocols</option>{protocols.map(value => <option key={value}>{value}</option>)}</select><select aria-label="Sort sessions" value={view === "recent" ? "recent" : sort} disabled={view === "recent"} onChange={event => { setSort(event.target.value); setActiveIndex(0); }}><option value="name">Name A–Z</option><option value="folder">Folder</option><option value="recent">Last used</option></select></div>
+    <div className="saved-session-list-heading"><span>DEVICE / LOCATION</span><span>PROTOCOL</span></div>
+    <div className="saved-session-results">{matches.map((session, index) => <button type="button" id={`saved-session-choice-${index}`} key={session.id} className={index === activeIndex ? "selected" : ""} title={[session.name, session.hostname, session.folder, session.tags.join(", ")].filter(Boolean).join(" · ")} onFocus={() => setActiveIndex(index)} onClick={() => selectSession(session)}><span className="saved-device-icon">{session.protocol === "LOCAL" ? <TerminalIcon size={16} /> : <Server size={16} />}</span><span className="saved-device-copy"><strong>{session.name}{session.favorite && <Star size={11} className="saved-device-star" />}</strong><small>{[session.hostname || (session.protocol === "LOCAL" ? "Local terminal" : session.protocol), session.folder].filter(Boolean).join(" · ")}</small></span><span className="saved-device-protocol">{session.protocol}</span><ChevronRight size={13} className="saved-device-connect" /></button>)}{!matches.length && <div className="saved-session-empty"><Search size={26} /><strong>{sessions.length ? "No devices found" : "Your devices belong here"}</strong><p>{sessions.length ? "Try another search or clear your filters." : "Create a session to start building your library."}</p>{sessions.length > 0 && <button type="button" className="outline-button" onClick={resetFilters}>Clear filters</button>}</div>}</div>
+    <footer><div><span aria-live="polite">{matches.length} of {sessions.length} devices</span><small>↑ ↓ navigate · Enter connect · Esc close</small></div><button type="button" className="outline-button" onClick={onNew}><Plus size={14} /> New session</button></footer>
+  </dialog>;
+}
+
 function CommandPalette({ keyboard, onClose, onNewTerminal, onNewShell, onNewWslTerminal, onQuickConnect, onOpenFiles, onOpenSettings, onOpenCredentials, onOpenSnippets, onOpenMacros, onOpenNotes, onOpenAudit, onToggleSidebar, onFocusPane }: { keyboard: AppSettings["keyboard"]; onClose: () => void; onNewTerminal: () => void; onNewShell: (shell: LocalShellChoice) => void; onNewWslTerminal: () => void; onQuickConnect: () => void; onOpenFiles: () => void; onOpenSettings: () => void; onOpenCredentials: () => void; onOpenSnippets: () => void; onOpenMacros: () => void; onOpenNotes: () => void; onOpenAudit: () => void; onToggleSidebar: () => void; onFocusPane: () => void }) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -5920,6 +6047,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
   type SettingsTab = typeof settingsTabs[number]["id"];
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
   const [theme, setTheme] = useState(settings.general.theme);
+  const [tabPlusSavedSessions, setTabPlusSavedSessions] = useState(settings.general.tabPlusSavedSessions ?? false);
   const [confirmMultilinePaste, setConfirmMultilinePaste] = useState(settings.general.confirmMultilinePaste);
   const [pastePreview, setPastePreview] = useState(settings.general.pastePreview);
   const [rightClickToPaste, setRightClickToPaste] = useState(settings.general.rightClickToPaste);
@@ -5960,7 +6088,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     onSave({
-      general: { theme, confirmMultilinePaste, pastePreview, alwaysShowTerminalSearch, rightClickToPaste },
+      general: { theme, confirmMultilinePaste, pastePreview, alwaysShowTerminalSearch, rightClickToPaste, tabPlusSavedSessions },
       appearance: { fontSize: Number(fontSize) },
       terminal: { ...terminalAppearance, scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
       keyboard,
@@ -6007,6 +6135,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
         <div className="settings-section">
           <span className="settings-section-label">General & appearance</span>
           <div className="settings-grid settings-appearance-grid">
+            <label>Tab + button opens<select value={tabPlusSavedSessions ? "saved" : "new"} onChange={event => setTabPlusSavedSessions(event.target.value === "saved")}><option value="new">New session</option><option value="saved">Saved sessions (with search)</option></select></label>
             <label>Theme<select value={theme} onChange={(event) => setTheme(event.target.value as AppSettings["general"]["theme"])}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
           </div>
         </div>
@@ -6118,7 +6247,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
   );
 }
 
-function QuickConnectDialog({ initialSession, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onConnectRemoteDesktop, onShell, onWsl }: { initialSession?: SavedSession; onSave?: (session: SavedSession) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: { name: string; folder: string }) => void; onConnectTelnet: (request: TelnetConnectRequest) => void; onConnectSerial: (request: SerialConnectRequest) => void; onConnectRemoteDesktop: (request: RemoteDesktopConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
+function QuickConnectDialog({ connecting = false, initialSession, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onConnectRemoteDesktop, onShell, onWsl }: { connecting?: boolean; initialSession?: SavedSession; onSave?: (session: SavedSession) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: { name: string; folder: string }) => void; onConnectTelnet: (request: TelnetConnectRequest) => void; onConnectSerial: (request: SerialConnectRequest) => void; onConnectRemoteDesktop: (request: RemoteDesktopConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
   const [sshTab, setSshTab] = useState<"advanced" | "terminal" | "network">("advanced");
   const [bookmarkOpen, setBookmarkOpen] = useState(() => {
     try { return localStorage.getItem("conxol.sessionBookmarkOpen") === "true"; } catch { return false; }
@@ -6221,6 +6350,7 @@ function QuickConnectDialog({ initialSession, onSave, error, folders, onClose, o
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (connecting) return;
     if (initialSession && onSave) {
       try {
         if (!sessionName.trim()) { throw new Error("Enter a session name."); }
@@ -6435,7 +6565,7 @@ function QuickConnectDialog({ initialSession, onSave, error, folders, onClose, o
           <summary className="session-basic-heading">Bookmark</summary>
           <div className="quick-connect-grid session-bookmark-grid">
                     <label>Session name<input required={!!initialSession} value={sessionName} onChange={event => setSessionName(event.target.value)} placeholder={username && host ? `${username}@${host}` : "My server"} /><small>{initialSession ? "Used for the saved session and terminal tab." : "Optional. Used for the saved session and terminal tab."}</small></label>
-                    <label>Folder<input list="new-session-folders" value={sessionFolder} onChange={event => setSessionFolder(event.target.value)} placeholder="Choose or type a folder" /><datalist id="new-session-folders">{folders.map(folder => <option key={folder} value={folder} />)}</datalist></label>
+                    <label>Folder<input list="new-session-folders" value={sessionFolder} onChange={event => setSessionFolder(event.target.value)} placeholder="e.g. Production/Routers" /><datalist id="new-session-folders">{folders.map(folder => <option key={folder} value={folder} />)}</datalist></label>
           {initialSession && <>
           <label>Tags<input value={tags} onChange={event => setTags(event.target.value)} placeholder="Separate with commas" /></label>
           <label className="quick-connect-check-row"><input type="checkbox" checked={favorite} onChange={event => setFavorite(event.target.checked)} />Favorite</label>
@@ -6743,9 +6873,9 @@ function QuickConnectDialog({ initialSession, onSave, error, folders, onClose, o
           </span>
           <div>
             <button type="button" className="outline-button" onClick={onClose}>Cancel</button>
-            <button className="primary-button" type="submit">
+            <button className="primary-button" type="submit" disabled={connecting} aria-busy={connecting}>
               <Network size={14} />
-              {initialSession ? "Save session" : `Connect ${protocol === "ssh" ? "SSH" : protocol === "telnet" ? "Telnet" : protocol === "rdp" ? "RDP" : protocol === "vnc" ? "VNC" : "Serial"}`}
+              {connecting ? "Connecting…" : initialSession ? "Save session" : `Connect ${protocol === "ssh" ? "SSH" : protocol === "telnet" ? "Telnet" : protocol === "rdp" ? "RDP" : protocol === "vnc" ? "VNC" : "Serial"}`}
             </button>
           </div>
         </div>

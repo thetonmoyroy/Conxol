@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseSessionFolderState, parseSessionFolders, unfileSessionFolder } from '../src/session-folders.ts';
+import { parseSessionFolderState, parseSessionFolders, unfileSessionFolder, sessionFolderAncestors, sessionFolderParent, sessionFolderWithin, sessionFolderOpenState, groupSessionFolders, planSessionFolderMove } from '../src/session-folders.ts';
 assert.deepEqual(parseSessionFolderState(null), {});
 assert.deepEqual(parseSessionFolderState('invalid'), {});
 assert.deepEqual(parseSessionFolderState('[]'), {});
@@ -30,3 +30,27 @@ assert.equal(await unfileSessionFolder('Empty folder', records, async () => asse
 let attempts = 0;
 await assert.rejects(unfileSessionFolder('Lab', records, async () => { attempts++; throw new Error('write failed'); }), /write failed/);
 assert.equal(attempts, 1, 'failed persistence stops before further moves');
+
+assert.deepEqual(sessionFolderAncestors('Production/Routers/Edge'), ['Production', 'Production/Routers', 'Production/Routers/Edge']);
+assert.equal(sessionFolderParent('Production/Routers/Edge'), 'Production/Routers');
+assert.equal(sessionFolderParent('Production'), '');
+assert.equal(sessionFolderWithin('Production/Routers', 'Production'), true);
+assert.equal(sessionFolderWithin('Production2/Routers', 'Production'), false);
+assert.deepEqual(sessionFolderOpenState('Production/Routers'), { 'folder:Production': true, 'folder:Production/Routers': true });
+const nestedSessions = [{ name: 'Edge', folder: 'Production/Routers' }, { name: 'Root', folder: '' }];
+const nestedGroups = groupSessionFolders(nestedSessions, ['Lab/Empty']);
+assert.deepEqual(nestedGroups.map(([path]) => path), ['Lab', 'Lab/Empty', 'Production', 'Production/Routers', '']);
+assert.deepEqual(nestedGroups.find(([path]) => path === 'Production')[1], []);
+assert.deepEqual(nestedGroups.find(([path]) => path === 'Production/Routers')[1], [nestedSessions[0]]);
+assert.deepEqual(groupSessionFolders([], ['Lab/Empty']).map(([path]) => path), ['Lab', 'Lab/Empty']);
+
+// Dragging a folder moves its descendants but leaves similarly named siblings alone.
+const relocate = planSessionFolderMove('Lab', 'Production/Lab', ['Lab', 'Lab/Routers', 'Lab2', 'Production']);
+assert.deepEqual(['Lab', 'Lab/Routers', 'Lab2', 'Production'].map(relocate), ['Production/Lab', 'Production/Lab/Routers', 'Lab2', 'Production']);
+const toRoot = planSessionFolderMove('Production/Lab', 'Lab', ['Production', 'Production/Lab', 'Production/Lab/Routers']);
+assert.equal(toRoot('Production/Lab/Routers'), 'Lab/Routers');
+assert.throws(() => planSessionFolderMove('Lab', 'Lab/Routers/Lab', ['Lab', 'Lab/Routers']), /inside itself/);
+assert.throws(() => planSessionFolderMove('Lab', 'Production/Lab', ['Lab', 'Production/Lab/Existing']), /already exists/);
+assert.throws(() => planSessionFolderMove('Lab', 'x'.repeat(125) + '/Lab', ['Lab']), /128/);
+assert.throws(() => planSessionFolderMove('Lab', 'x'.repeat(120), ['Lab', 'Lab/12345678']), /128/);
+assert.equal(planSessionFolderMove('Lab', 'Lab', ['Lab'])('Lab'), 'Lab');
