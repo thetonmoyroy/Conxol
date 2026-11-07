@@ -1,11 +1,5 @@
-## Problem and resulting behavior
+Conxol does not accept external code contributions or pull requests.
 
-Describe the concrete trigger, the change, and any operator-visible behavior.
+Please submit bug reports, feature requests, and suggestions through [GitHub Issues](https://github.com/thetonmoyroy/Conxol/issues).
 
-## Validation
-
-List exact checks run, regression coverage, and platform/fixture limitations.
-Separate local tests, CI, GUI/hardware, and release evidence.
-
-- [ ] Tests use disposable targets and contain no credentials or personal data.
-- [ ] Public behavior/documentation agree; experimental work is labeled honestly.
+See the [contribution policy](https://github.com/thetonmoyroy/Conxol/blob/main/CONTRIBUTING.md).

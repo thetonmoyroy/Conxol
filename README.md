@@ -10,7 +10,7 @@ SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • r
 [![Rust + Tauri](https://img.shields.io/badge/built_with-Rust_%2B_Tauri-536f60?style=for-the-badge)](docs/architecture.md)
 [![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-536f60?style=for-the-badge)](LICENSE)
 
-**[⬇️ Download](#download)** · **[🧭 Roadmap](ROADMAP.md)** · **[📖 Docs](docs/architecture.md)** · **[🤝 Contribute](CONTRIBUTING.md)**
+**[⬇️ Download](#download)** · **[🧭 Roadmap](ROADMAP.md)** · **[📖 Docs](docs/architecture.md)** · **[Contribution policy](CONTRIBUTING.md)**
 
 </div>
 
@@ -133,9 +133,9 @@ Rust owns protocols, processes, saved credentials and persistence. Unknown SSH h
 [Threat model](docs/security/threat-model.md) · [Dependency audit](docs/security/dependency-audit.md) · [Private vulnerability reporting](SECURITY.md)
 
 <details>
-<summary><strong>🛠️ Build and contribute</strong></summary>
+<summary><strong>🛠️ Build from source</strong></summary>
 
-Use Rust stable **1.90+**, Node.js **22**, pnpm **10**, and the [native Tauri prerequisites](CONTRIBUTING.md).
+Use Rust stable **1.90+**, Node.js **22**, pnpm **10**, and the [native Tauri prerequisites](docs/development.md).
 
 ```bash
 git clone https://github.com/thetonmoyroy/Conxol.git Conxol
@@ -152,9 +152,15 @@ cargo xtask check-rust  # Native workspace tests and Clippy
 
 The full check covers frontend, Rust, isolated protocol helpers, package layouts and fuzz compilation. Fixtures use disposable state and generated credentials.
 
-[Contributing](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [Safe testing](docs/security/safe-testing.md) · [Benchmarks](benchmarks/README.md)
+[Contribution policy](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [Safe testing](docs/security/safe-testing.md) · [Benchmarks](benchmarks/README.md)
 
 </details>
+
+## Contribution Guidelines
+
+Conxol is independently developed and maintained. Bug reports, feature requests, and suggestions are welcome through [GitHub Issues](https://github.com/thetonmoyroy/Conxol/issues). External code contributions and pull requests are not accepted.
+
+You may use, modify, and fork Conxol under its open-source license. See the [contribution policy](CONTRIBUTING.md).
 
 ## Acknowledgements
 
