@@ -576,6 +576,10 @@ type SshConnectResponse = {
 };
 
 type TelnetConnectRequest = {
+  username?: string;
+  password?: string;
+  savePassword?: boolean;
+  credentialId?: string;
   host: string;
   port: number;
   terminal: string;
@@ -585,6 +589,7 @@ type TelnetConnectRequest = {
 };
 
 type TelnetConnectResponse = {
+  credentialId?: string;
   terminalId: string;
   host: string;
 };
@@ -853,7 +858,8 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     };
     const terminal = new Terminal({
       allowProposedApi: true,
-      convertEol: false,
+      // Serial devices may emit bare LF; start the next prompt at column zero.
+      convertEol: remoteProtocol === "serial",
       cursorBlink: terminalOptionsRef.current.cursorBlink,
       cursorStyle: "bar",
       fontFamily: '"Conxol Terminal", Consolas, "SFMono-Regular", monospace',
@@ -1690,6 +1696,13 @@ function App() {
   const [sshConnecting, setSshConnecting] = useState(false);
   const [sessionListError, setSessionListError] = useState<string | null>(null);
   const [sessionNotice, setSessionNotice] = useState<SessionNotice | null>(null);
+  useEffect(() => {
+    if (typeof sessionNotice !== "string") return;
+    const timer = window.setTimeout(() => {
+      setSessionNotice(current => current === sessionNotice ? null : current);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [sessionNotice]);
   const [closing, setClosing] = useState(false);
   const [tftpServerRunning, setTftpServerRunning] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useToolDialog("fileTransfer", activeToolDialog, setActiveToolDialog);
@@ -2872,6 +2885,7 @@ function App() {
     }
     try {
       const response = await invoke<TelnetConnectResponse>("telnet_connect", { request });
+      request.password = undefined;
       recordAudit("sessionOpened", "TELNET");
       const terminal = createWorkspaceTerminal({
         label: displayName ? `${displayName}@${response.host}` : `Telnet · ${response.host}`,
@@ -2886,13 +2900,12 @@ function App() {
       setTerminalLayout({ kind: "pane", terminalId: terminal.id });
       setActiveView("terminal");
       setQuickConnectOpen(false);
-      setSessionNotice("Connected over Telnet. This connection is unencrypted.");
       if (offerSave) {
         const suggestedName = `Telnet · ${response.host}`;
         const name = await promptText("Save this Telnet session as", suggestedName);
         if (name?.trim()) {
           try {
-            const saved = await invoke<SavedSession>("session_save_telnet", { payload: { name: name.trim(), request } });
+            const saved = await invoke<SavedSession>("session_save_telnet", { payload: { name: name.trim(), request: { ...request, password: undefined, credentialId: response.credentialId, savePassword: false } } });
             setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, shortcutDeviceId: saved.id } : item));
             refreshSavedSessions();
           } catch (error) {
@@ -2902,12 +2915,13 @@ function App() {
       }
       requestTerminalFocus(terminal.id);
     } catch (error) {
+      request.password = undefined;
       recordAudit("connectionFailed", "TELNET");
       setConnectionError(String(error));
     }
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
-  const connectSerial = useCallback(async (request: SerialConnectRequest, offerSave = true, shortcutDeviceId?: string) => {
+  const connectSerial = useCallback(async (request: SerialConnectRequest, shortcutDeviceId?: string) => {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2929,25 +2943,12 @@ function App() {
       setTerminalLayout({ kind: "pane", terminalId: terminal.id });
       setActiveView("terminal");
       setQuickConnectOpen(false);
-      setSessionNotice(`Connected to ${response.device}. Serial traffic is not encrypted by Conxol.`);
-      if (offerSave) {
-        const suggestedName = `${response.device} · ${request.baudRate}`;
-        const name = await promptText("Save this serial profile as", suggestedName);
-        if (name?.trim()) {
-          try {
-            const saved = await invoke<SavedSession>("session_save_serial", { payload: { name: name.trim(), request } });
-            setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, shortcutDeviceId: saved.id } : item));
-            refreshSavedSessions();
-          } catch (error) {
-            setConnectionError(`Connected, but the serial profile could not be saved: ${String(error)}`);
-          }
-        }
-      }
+      requestTerminalFocus(terminal.id);
     } catch (error) {
       recordAudit("connectionFailed", "SERIAL");
       setConnectionError(String(error));
     }
-  }, [recordAudit, refreshSavedSessions, setQuickConnectOpen]);
+  }, [recordAudit, requestTerminalFocus, setQuickConnectOpen]);
 
   const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string) => {
     if (request.protocol === "vnc" && request.allowInsecureVnc && !await confirmAction("VNC over TCP is unencrypted. Continue only if this target is trusted or protected by an external tunnel?")) {
@@ -2968,7 +2969,6 @@ function App() {
     setTerminalLayout({ kind: "pane", terminalId: terminal.id });
     setActiveView("terminal");
     setQuickConnectOpen(false);
-    setSessionNotice(`${request.protocol.toUpperCase()} session queued. The native helper will report its actual connection state.`);
     if (offerSave && IS_TAURI) {
       const suggestedName = `${request.username ? `${request.username}@` : ""}${request.host}`;
       const name = await promptText(`Save this ${request.protocol.toUpperCase()} session as`, suggestedName);
@@ -3073,7 +3073,6 @@ function App() {
       environment: session.environment?.length ? session.environment : undefined,
       startupCommand: startupCommand || undefined,
     }, session.name, session.id);
-    setSessionNotice(`Opened local profile ${session.name}.`);
   }, [recordAudit, startNewTerminal, touchSavedSession]);
 
   const saveEditedSession = useCallback(async (session: SavedSession) => {
@@ -3204,6 +3203,8 @@ function App() {
       return connectTelnet({
         host: session.hostname,
         port: session.port,
+        username: session.username ?? undefined,
+        credentialId: "credentialRef" in session.auth ? session.auth.credentialRef ?? undefined : undefined,
         terminal: profile.terminal,
         encoding: profile.encoding,
         columns: profile.columns,
@@ -3224,7 +3225,7 @@ function App() {
         parity: profile.parity,
         flowControl: profile.flow_control,
         lineEnding: profile.line_ending,
-      }, false, session.id);
+      }, session.id);
     }
     if (session.protocol === "RDP" || session.protocol === "VNC") {
       const profile = session.remote_desktop_profile;
@@ -3294,7 +3295,6 @@ function App() {
       }
       setTerminalTabs(current => current.map(item => item.id === pending.id ? { ...item, remoteSessionId: response.terminalId, connecting: false } : item));
       recordAudit("sessionOpened", "SSH");
-      setSessionNotice("Branched SSH shell opened at a fresh prompt. Closing the original connection also closes its branches.");
     } catch {
       const cancelled = authentication.closed || isWorkspaceLocked();
       removePending();
@@ -4567,6 +4567,8 @@ function App() {
       {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
       <ApplicationMenuBar>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
+          <button onClick={() => setQuickConnectOpen(true)}>New session…</button>
+          <hr />
           <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}>All sessions</button>
           <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}>Favorites</button>
           <button onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(true); }}>Recent sessions</button>
@@ -4806,7 +4808,7 @@ function App() {
               {activeView === "generator" ? null : activeView === "home" ? (
                 <section className="desktop-home" aria-label="Home">
                   <div className="desktop-home-content">
-                    <div className="desktop-home-brand"><div className="desktop-home-logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path className="conxol-mark-frame" d="M36 10H22a14 14 0 0 0 0 28h14" /><path className="conxol-mark-prompt" d="m21 19 6 5-6 5m10 1h7" /></svg></div><h1>Conxol</h1></div>
+                    <div className="desktop-home-brand"><div className="desktop-home-logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path className="conxol-mark-frame" pathLength="1" d="M36 10H22a14 14 0 0 0 0 28h14" /><path className="conxol-mark-prompt" d="m21 19 6 5-6 5" /><path className="conxol-mark-prompt conxol-mark-cursor" d="M31 30h7" /></svg></div><h1>Conxol</h1></div>
                     <div className="desktop-home-actions"><button className="outline-button" onClick={() => startNewTerminal()}><Plus size={14} /> Start local terminal</button><button className="outline-button" onClick={() => setRecoveryOpen(true)}><History size={14} /> Recover previous sessions</button><button className="outline-button desktop-home-new-session" onClick={() => setQuickConnectOpen(true)}><Plus size={14} /> New session</button></div>
                   </div>
                 </section>
@@ -6306,6 +6308,8 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [jumpHost, setJumpHost] = useState(initialSession?.jump_host_profiles?.[0]?.host ?? "");
   const [jumpPort, setJumpPort] = useState(String(initialSession?.jump_host_profiles?.[0]?.port ?? 22));
   const [jumpUsername, setJumpUsername] = useState(initialSession?.jump_host_profiles?.[0]?.username ?? "");
+  const telnetPassword = useRef<HTMLInputElement>(null);
+  const [saveTelnetPassword, setSaveTelnetPassword] = useState(false);
   const [terminal, setTerminal] = useState(initialSession?.telnet_profile?.terminal ?? "xterm-256color");
   const [encoding, setEncoding] = useState<"utf-8" | "windows-1252">(initialSession?.telnet_profile?.encoding ?? "utf-8");
   const [serialDevice, setSerialDevice] = useState(initialSession?.serial_profile?.device ?? "");
@@ -6395,8 +6399,8 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           ...initialSession, name: sessionName.trim(), folder: sessionFolder.trim() || null,
           hostname: protocol === "local" ? initialSession.hostname : protocol === "serial" ? serialDevice.trim() : host.trim(),
           port: protocol === "local" || protocol === "serial" ? initialSession.port : Number(port),
-          username: protocol === "ssh" || protocol === "rdp" || protocol === "vnc" ? username.trim() || null : initialSession.username,
-          auth, tags: [...new Set(tags.split(",").map(tag => tag.trim()).filter(Boolean))], notes: notes.trim() || null, favorite,
+          username: protocol === "ssh" || protocol === "telnet" || protocol === "rdp" || protocol === "vnc" ? username.trim() || null : initialSession.username,
+          auth: protocol === "telnet" && (host.trim() !== initialSession.hostname || Number(port) !== initialSession.port || (username.trim() || null) !== initialSession.username) ? { kind: "none" } : auth, tags: [...new Set(tags.split(",").map(tag => tag.trim()).filter(Boolean))], notes: notes.trim() || null, favorite,
           startup_directory: startupDirectory.trim() || null, startup_command: startupCommand.trim() || null,
           environment: protocol === "ssh" || protocol === "local" ? parseSessionEnvironment(environmentText) : initialSession.environment,
           ...(protocol === "ssh" ? {
@@ -6421,7 +6425,11 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
     }
     setValidationError(null);
     if (protocol === "telnet") {
+      const password = telnetPassword.current?.value || undefined;
+      if (password && !username.trim()) { setValidationError("Enter a username for Telnet auto login."); return; }
+      if (telnetPassword.current) telnetPassword.current.value = "";
       onConnectTelnet({
+        username: username.trim() || undefined, password, savePassword: saveTelnetPassword,
         host: host.trim(),
         port: Number(port),
         terminal: terminal.trim(),
@@ -6558,7 +6566,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           {[
             { value: "ssh", label: "SSH", icon: KeyRound },
             { value: "telnet", label: "Telnet", icon: TerminalIcon },
-            { value: "serial", label: "Serial", icon: Cable },
+            { value: "serial", label: "Console", icon: Cable },
             { value: "rdp", label: "RDP", icon: Monitor },
             { value: "vnc", label: "VNC", icon: Monitor },
           ].map(item => <button key={item.value} type="button" disabled={!!initialSession && protocol !== item.value} aria-pressed={protocol === item.value} className={protocol === item.value ? "selected" : ""} onClick={() => {
@@ -6587,21 +6595,25 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           </>}
           </div>
         </details>}
-        <div className="session-basic-heading">Basic {protocol === "ssh" ? "SSH" : protocol === "telnet" ? "Telnet" : protocol.toUpperCase()} settings</div>
+        <div className="session-basic-heading">{protocol === "serial" ? "Console settings" : `Basic ${protocol.toUpperCase()} settings`}</div>
         <div className="quick-connect-grid">
           {protocol === "local" ? <p className="quick-connect-wide">Local shell profile</p> : protocol === "serial" ? (
             <>
               <label className="quick-connect-wide">
-                Device path
+                Serial port
                 <div className="serial-device-input"><input autoFocus required list="serial-device-options" value={serialDevice} onChange={(event) => setSerialDevice(event.target.value)} placeholder="/dev/tty.usbserial-… or COM3" /><button type="button" className="outline-button" onClick={() => void refreshSerialDevices()} disabled={serialDevicesLoading}>{serialDevicesLoading ? "Refreshing" : "Refresh"}</button></div>
                 <datalist id="serial-device-options">{serialDevices.map((item) => <option key={item.device} value={item.device}>{item.kind}</option>)}</datalist>
-                <small>Refresh is explicit and reads port metadata only; manual entry remains available.</small>
+                <small>Select a port or type one, such as COM3.</small>
                 {serialDevicesError && <small className="connect-error-inline" role="alert">{serialDevicesError}</small>}
               </label>
               <label>
                 Baud rate
-                <input required inputMode="numeric" pattern="[0-9]+" value={baudRate} onChange={(event) => setBaudRate(event.target.value)} />
+                <input required list="console-baud-rates" inputMode="numeric" pattern="[0-9]+" value={baudRate} onChange={(event) => setBaudRate(event.target.value)} />
+                <datalist id="console-baud-rates">{[9600, 19200, 38400, 57600, 115200].map(rate => <option key={rate} value={rate} />)}</datalist>
               </label>
+              <details className="quick-connect-wide">
+                <summary>Advanced console settings</summary>
+                <div className="quick-connect-grid">
               <label>
                 Data bits
                 <select value={dataBits} onChange={(event) => setDataBits(event.target.value as SerialConnectRequest["dataBits"])}>
@@ -6643,6 +6655,8 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                   <option value="none">None</option>
                 </select>
               </label>
+                </div>
+              </details>
             </>
           ) : (
             <>
@@ -6838,6 +6852,19 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                 </>
               ) : (
                 <>
+                  <label className="quick-connect-wide">Username (optional)
+                    <input {...literalInputProps} value={username} maxLength={256} onChange={event => setUsername(event.target.value)} autoComplete="off" />
+                  </label>
+                  {!initialSession && <>
+                    <label className="quick-connect-wide">Password (optional)
+                      <input {...literalInputProps} ref={telnetPassword} type="password" maxLength={4096} autoComplete="new-password" />
+                    </label>
+                    <label className="quick-connect-wide quick-connect-check-row">
+                      <input type="checkbox" checked={saveTelnetPassword} onChange={event => setSaveTelnetPassword(event.target.checked)} />
+                      <span>Save password in the system credential store</span>
+                    </label>
+                    <small className="quick-connect-wide">Leave blank to log in manually. Telnet sends credentials unencrypted.</small>
+                  </>}
                   <label className="quick-connect-wide">
                     Terminal type
                     <input required value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder="xterm-256color" />
@@ -6883,13 +6910,13 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                   ? "RDP uses the isolated helper; credentials stay in the native vault boundary."
                   : protocol === "vnc"
                     ? "VNC capability is isolated; legacy VNC password transport is not SSH-level encryption."
-                : "Serial device traffic is not encrypted by Conxol."}
+                : "Connect directly to a serial console. This connection is not saved."}
           </span>
           <div>
             <button type="button" className="outline-button" onClick={onClose}>Cancel</button>
             <button className="primary-button" type="submit" disabled={connecting} aria-busy={connecting}>
               <Network size={14} />
-              {connecting ? "Connecting…" : initialSession ? "Save session" : `Connect ${protocol === "ssh" ? "SSH" : protocol === "telnet" ? "Telnet" : protocol === "rdp" ? "RDP" : protocol === "vnc" ? "VNC" : "Serial"}`}
+              {connecting ? "Connecting…" : initialSession ? "Save session" : `Connect ${protocol === "ssh" ? "SSH" : protocol === "telnet" ? "Telnet" : protocol === "rdp" ? "RDP" : protocol === "vnc" ? "VNC" : "console"}`}
             </button>
           </div>
         </div>

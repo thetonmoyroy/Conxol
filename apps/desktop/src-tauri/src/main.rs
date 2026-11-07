@@ -144,7 +144,7 @@ struct SaveSerialSessionRequest {
     request: SerialConnectRequest,
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveTelnetSessionRequest {
     name: String,
@@ -1145,6 +1145,7 @@ fn session_save_telnet(
         encoding,
         columns,
         rows,
+        username, credential_id, ..
     } = request;
     let encoding = match encoding {
         conxol_telnet::TelnetEncoding::Utf8 => "utf-8",
@@ -1156,8 +1157,8 @@ fn session_save_telnet(
         protocol: Protocol::Telnet,
         hostname: host,
         port,
-        username: None,
-        auth: AuthMethod::None,
+        username,
+        auth: credential_id.map(|credential_ref| AuthMethod::Password { credential_ref }).unwrap_or(AuthMethod::None),
         last_used_at: None,
         known_hosts_path: None,
         pinned_fingerprint: None,

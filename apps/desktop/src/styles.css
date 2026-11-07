@@ -1034,6 +1034,33 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 
 .desktop-home .desktop-home-logo { flex-basis: 64px; width: 64px; height: 64px; }
 .desktop-home .desktop-home-logo svg { width: 64px; height: 64px; }
+.desktop-home-brand .conxol-mark-frame {
+  stroke-dasharray: 1;
+  animation: home-logo-draw 1s ease-out both;
+}
+.desktop-home-brand .desktop-home-logo {
+  animation: home-logo-glow 4.8s ease-in-out 1s infinite;
+}
+.desktop-home-brand .conxol-mark-cursor {
+  animation: home-cursor-blink 1.4s steps(1, end) 1s infinite;
+}
+@keyframes home-logo-draw {
+  from { stroke-dashoffset: 1; opacity: .3; }
+  to { stroke-dashoffset: 0; opacity: 1; }
+}
+@keyframes home-logo-glow {
+  0%, 100% { filter: drop-shadow(0 0 0 transparent); }
+  50% { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--mint) 40%, transparent)); }
+}
+@keyframes home-cursor-blink {
+  0%, 55%, 100% { opacity: 1; }
+  56%, 99% { opacity: .15; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .desktop-home-brand .conxol-mark-frame,
+  .desktop-home-brand .desktop-home-logo,
+  .desktop-home-brand .conxol-mark-cursor { animation: none; }
+}
 .desktop-home-actions .outline-button svg, .desktop-home-search svg, .desktop-recent-sessions button svg { width: 18px; height: 18px; flex-shrink: 0; }
 @media (max-width: 700px) {
   .desktop-recent-sessions { grid-template-columns: repeat(2, minmax(0, 1fr)); }

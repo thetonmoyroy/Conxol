@@ -275,3 +275,18 @@ of the currently displayed report through a native Save dialog. Export works
 while a live test runs without stopping it. The native export accepts only known
 tool names and bounds content at 16 MiB; it is distinct from the sanitized
 support-diagnostics JSON export. Browser previews use a text download.
+
+
+## Telnet form login
+
+New Telnet sessions accept optional username/password fields and an explicit
+Save password checkbox. The password field is uncontrolled and cleared on submit;
+secrets are sent only to the native manager, outside terminal input recording and
+broadcast. Saved profiles contain username and an opaque system credential-store
+reference, never password text. Blank fields preserve manual terminal login.
+The native manager recognizes conventional initial username/login/password prompts,
+including fragmented ANSI-colored prompts, and sends each field once per connection.
+Rejected credentials fall back to manual login; reconnect resets the prompt tracker.
+Automatic login expires after 60 seconds and stops at a conventional shell prompt.
+Telnet remains unencrypted. Nonstandard device prompts need manual login.
+Run `cargo xtask test-telnet` for isolated synthetic prompt/attachment regressions.

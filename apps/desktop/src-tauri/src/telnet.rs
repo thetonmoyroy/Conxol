@@ -1,23 +1,33 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
 use conxol_core::{
     ConnectionState, TerminalInputError, Utf8OutputDecoder, validate_terminal_input,
 };
 use conxol_telnet::{TelnetConnection, TelnetEncoding, TelnetError, TelnetOptions};
+use conxol_vault::{CredentialId, PlatformVault, SecretMaterial};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tauri::{AppHandle, Emitter};
 use thiserror::Error;
 use tokio::sync::mpsc;
 use uuid::Uuid;
+use zeroize::Zeroizing;
 
 const COMMAND_CAPACITY: usize = 64;
 const PENDING_OUTPUT_CHUNKS: usize = 32;
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TelnetConnectRequest {
     pub host: String,
     pub port: u16,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub password: Option<Zeroizing<String>>,
+    #[serde(default)]
+    pub credential_id: Option<String>,
+    #[serde(default)]
+    pub save_password: bool,
     #[serde(default = "default_terminal")]
     pub terminal: String,
     #[serde(default)]
@@ -33,6 +43,7 @@ pub struct TelnetConnectRequest {
 pub struct TelnetConnectResponse {
     pub terminal_id: String,
     pub host: String,
+    pub credential_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -105,6 +116,40 @@ impl TelnetManager {
         request: TelnetConnectRequest,
     ) -> Result<TelnetConnectResponse, TelnetManagerError> {
         let host = request.host.clone();
+        let username = request.username.clone().unwrap_or_default();
+        if username.len() > 256 || username.chars().any(char::is_control) {
+            return Err(TelnetManagerError::InvalidRequest(
+                "invalid login username".into(),
+            ));
+        }
+        let vault = PlatformVault::default();
+        let mut credential_id = request.credential_id.clone();
+        let password = if let Some(password) = request.password {
+            Some(SecretMaterial::from_zeroizing(password))
+        } else if let Some(id) = &credential_id {
+            Some(
+                vault
+                    .get(&CredentialId::new(id.clone()).map_err(|_| {
+                        TelnetManagerError::InvalidRequest("invalid credential reference".into())
+                    })?)
+                    .map_err(|_| {
+                        TelnetManagerError::InvalidRequest(
+                            "saved Telnet password is unavailable".into(),
+                        )
+                    })?,
+            )
+        } else {
+            None
+        };
+        if let Some(password) = &password {
+            if username.is_empty()
+                || password.as_str().len() > 4096
+                || password.as_str().chars().any(char::is_control)
+            {
+                return Err(TelnetManagerError::InvalidRequest("Telnet auto login requires a username and a single-line password (maximum 4096 bytes)".into()));
+            }
+        }
+        let save_password = request.save_password;
         let options = TelnetOptions {
             host: request.host,
             port: request.port,
@@ -117,7 +162,21 @@ impl TelnetManager {
         options
             .validate()
             .map_err(|error| TelnetManagerError::InvalidRequest(error.to_string()))?;
-        let connection = TelnetConnection::connect(options).await?;
+        let mut connection = TelnetConnection::connect(options).await?;
+        if save_password {
+            if let Some(password) = &password {
+                let id = CredentialId::new(format!("telnet-{}", Uuid::new_v4()))
+                    .expect("generated credential identifier");
+                if vault.put(&id, password).is_err() {
+                    let _ = connection.close().await;
+                    return Err(TelnetManagerError::InvalidRequest(
+                        "the system credential store could not save the Telnet password".into(),
+                    ));
+                }
+                credential_id = Some(id.to_string());
+            }
+        }
+        let login = TelnetLogin::new(username, password);
         let terminal_id = Uuid::new_v4().to_string();
         let (sender, receiver) = mpsc::channel(COMMAND_CAPACITY);
         self.sessions
@@ -135,10 +194,14 @@ impl TelnetManager {
         let manager = self.clone();
         let id_for_task = terminal_id.clone();
         tauri::async_runtime::spawn(async move {
-            run_telnet_session(manager, app, id_for_task, connection, receiver).await;
+            run_telnet_session(manager, app, id_for_task, connection, receiver, login).await;
         });
 
-        Ok(TelnetConnectResponse { terminal_id, host })
+        Ok(TelnetConnectResponse {
+            terminal_id,
+            host,
+            credential_id,
+        })
     }
 
     pub async fn write(&self, terminal_id: &str, data: String) -> Result<(), TelnetManagerError> {
@@ -268,6 +331,7 @@ async fn run_telnet_session(
     terminal_id: String,
     mut connection: TelnetConnection,
     mut commands: mpsc::Receiver<TelnetCommand>,
+    mut login: TelnetLogin,
 ) {
     manager.emit_state(&app, &terminal_id, TelnetSessionState::Connected, None);
     let mut output_decoder = Utf8OutputDecoder::default();
@@ -291,7 +355,14 @@ async fn run_telnet_session(
                             encoding => encoding.decode(&buffer[..bytes]),
                         };
                         if !text.is_empty() {
+                            let answer = login.observe(&text);
                             manager.publish_output(&app, &terminal_id, text);
+                            if let Some(answer) = answer {
+                                if connection.write_text(answer.as_str()).await.is_err() {
+                                    let _ = connection.mark_connection_lost();
+                                    manager.emit_state(&app, &terminal_id, TelnetSessionState::Reconnecting, Some("Telnet login write failed".into()));
+                                }
+                            }
                         }
                     }
                     Err(error) => {
@@ -346,6 +417,7 @@ async fn run_telnet_session(
                         manager.emit_state(&app, &terminal_id, TelnetSessionState::Reconnecting, None);
                         match connection.reconnect().await {
                             Ok(()) => {
+                                login.reset();
                                 let tail = output_decoder.finish();
                                 if !tail.is_empty() {
                                     manager.publish_output(&app, &terminal_id, tail);
@@ -394,26 +466,94 @@ fn default_rows() -> u16 {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn telnet_login_handles_fragmented_prompts_without_retrying_secrets() {
+        let mut login = super::TelnetLogin::new(
+            "fixture-user".into(),
+            Some(super::SecretMaterial::new("fixture-password")),
+        );
+        assert!(login.observe("Welcome\r\n\x1b[32mUser").is_none());
+        assert_eq!(
+            login
+                .observe("name:\x1b[0m ")
+                .as_deref()
+                .map(String::as_str),
+            Some("fixture-user\r\n")
+        );
+        assert!(login.observe("\r\nPass").is_none());
+        assert_eq!(
+            login.observe("word: ").as_deref().map(String::as_str),
+            Some("fixture-password\r\n")
+        );
+        assert!(login.observe("\r\nLogin incorrect\r\nUsername:").is_none());
+        assert!(login.observe("\r\nPassword:").is_none());
+        login.reset();
+        assert_eq!(
+            login
+                .observe("fixture login:")
+                .as_deref()
+                .map(String::as_str),
+            Some("fixture-user\r\n")
+        );
+    }
+
+    #[test]
+    fn telnet_login_preserves_manual_login_and_ignores_otp_and_large_banners() {
+        let mut manual = super::TelnetLogin::new(String::new(), None);
+        assert!(manual.observe("Username:").is_none());
+        assert!(manual.observe("\r\nPassword:").is_none());
+        let mut login =
+            super::TelnetLogin::new("fixture".into(), Some(super::SecretMaterial::new("secret")));
+        for prompt in [
+            "One-time password:",
+            "Verification code:",
+            "Enable password:",
+        ] {
+            assert!(login.observe(&format!("\r\n{prompt}")).is_none());
+        }
+        login.observe(&"x".repeat(20_000));
+        assert!(login.line.len() <= 1024);
+        login.observe("\r\nrouter#");
+        assert!(login.observe("\r\nPassword:").is_none());
+        login.reset();
+        login.started = std::time::Instant::now() - std::time::Duration::from_secs(61);
+        assert!(login.observe("\r\nPassword:").is_none());
+    }
+
+    #[test]
     fn telnet_encoding_accepts_frontend_and_legacy_names() {
         for (canonical, legacy, expected) in [
             ("utf-8", "utf8", conxol_telnet::TelnetEncoding::Utf8),
-            ("windows-1252", "windows1252", conxol_telnet::TelnetEncoding::Windows1252),
+            (
+                "windows-1252",
+                "windows1252",
+                conxol_telnet::TelnetEncoding::Windows1252,
+            ),
         ] {
             for name in [canonical, legacy] {
-                let request: super::TelnetConnectRequest = serde_json::from_value(serde_json::json!({
-                    "host": "127.0.0.1", "port": 23, "encoding": name,
-                })).expect("frontend and legacy encodings must deserialize before any connection");
+                let request: super::TelnetConnectRequest =
+                    serde_json::from_value(serde_json::json!({
+                        "host": "127.0.0.1", "port": 23, "encoding": name,
+                    }))
+                    .expect("frontend and legacy encodings must deserialize before any connection");
                 assert_eq!(request.encoding, expected);
                 assert_eq!(serde_json::to_value(request.encoding).unwrap(), canonical);
             }
         }
-        let default_request: super::TelnetConnectRequest = serde_json::from_value(serde_json::json!({
-            "host": "127.0.0.1", "port": 23,
-        })).unwrap();
-        assert_eq!(default_request.encoding, conxol_telnet::TelnetEncoding::Utf8);
-        assert!(serde_json::from_value::<super::TelnetConnectRequest>(serde_json::json!({
-            "host": "127.0.0.1", "port": 23, "encoding": "unsupported",
-        })).is_err());
+        let default_request: super::TelnetConnectRequest =
+            serde_json::from_value(serde_json::json!({
+                "host": "127.0.0.1", "port": 23,
+            }))
+            .unwrap();
+        assert_eq!(
+            default_request.encoding,
+            conxol_telnet::TelnetEncoding::Utf8
+        );
+        assert!(
+            serde_json::from_value::<super::TelnetConnectRequest>(serde_json::json!({
+                "host": "127.0.0.1", "port": 23, "encoding": "unsupported",
+            }))
+            .is_err()
+        );
     }
 
     use super::{TelnetManager, TelnetManagerError};
@@ -472,5 +612,90 @@ mod tests {
             error,
             TelnetManagerError::Input(conxol_core::TerminalInputError::TooLarge)
         ));
+    }
+}
+
+// Only recognize initial, conventional login prompts. Never retry a rejected
+// password automatically, or respond to later enable/OTP/application prompts.
+struct TelnetLogin {
+    username: String,
+    password: Option<SecretMaterial>,
+    line: String,
+    escape: u8,
+    sent_username: bool,
+    sent_password: bool,
+    started: std::time::Instant,
+}
+impl TelnetLogin {
+    fn new(username: String, password: Option<SecretMaterial>) -> Self {
+        Self {
+            username,
+            password,
+            line: String::new(),
+            escape: 0,
+            sent_username: false,
+            sent_password: false,
+            started: std::time::Instant::now(),
+        }
+    }
+    fn reset(&mut self) {
+        self.line.clear();
+        self.escape = 0;
+        self.sent_username = false;
+        self.sent_password = false;
+        self.started = std::time::Instant::now();
+    }
+    fn observe(&mut self, text: &str) -> Option<Zeroizing<String>> {
+        if self.username.is_empty() || self.sent_password || self.started.elapsed().as_secs() > 60 {
+            return None;
+        }
+        for ch in text.chars() {
+            match self.escape {
+                1 => {
+                    self.escape = if ch == '[' { 2 } else { 0 };
+                    continue;
+                }
+                2 => {
+                    if ('@'..='~').contains(&ch) {
+                        self.escape = 0;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+            if ch == '\x1b' {
+                self.escape = 1;
+            } else if ch == '\r' || ch == '\n' {
+                self.line.clear();
+            } else if !ch.is_control() {
+                self.line.push(ch);
+                if self.line.len() > 1024 {
+                    self.line.clear();
+                }
+            }
+        }
+        let prompt = self.line.trim().to_ascii_lowercase();
+        if prompt.ends_with(['>', '#', '$']) {
+            self.sent_password = true;
+            return None;
+        }
+        let username_prompt = matches!(
+            prompt.as_str(),
+            "login:" | "username:" | "user name:" | "user:"
+        ) || prompt.ends_with(" login:");
+        if username_prompt && !self.sent_username {
+            self.sent_username = true;
+            self.line.clear();
+            return Some(Zeroizing::new(format!("{}\r\n", self.username)));
+        }
+        if matches!(prompt.as_str(), "password:" | "enter password:") {
+            self.sent_password = true;
+            self.line.clear();
+            return self
+                .password
+                .as_ref()
+                .map(|secret| Zeroizing::new(format!("{}\r\n", secret.as_str())));
+        }
+        None
     }
 }

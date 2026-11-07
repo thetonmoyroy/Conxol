@@ -157,3 +157,21 @@ same close flag. Focused checks: TypeScript, component lint and the existing
 remote-close status regression. The latter verifies close-to-status mapping,
 not IPC/event ordering. Native reproduction of that race and new installers
 remain pending.
+
+
+## Serial output during keyboard input
+
+Serial reads use blocking driver workers. Cancelling a read future in the native
+manager's `select!` does not cancel its driver worker. Previously, a keystroke
+could abandon that worker's result and silently discard device output.
+
+`SerialConnection` now retains one pending read worker across cancelled futures.
+The next read resumes that worker and delivers its bytes before another read
+starts. Read timeout also retains the worker; completed results/errors release
+it. Reconnect observes the previous reader before replacing the port handle.
+
+Run `cargo xtask test-serial` for isolated serial library and desktop manager
+checks. Synthetic workers exercise 64 read cancellations, exact ordered output,
+timeout recovery, and error/retry behavior without opening any real serial port.
+Hardware acceptance at 9600 baud remains a manual check. Device `--More--`
+pagination and asynchronous console log messages remain device-controlled.

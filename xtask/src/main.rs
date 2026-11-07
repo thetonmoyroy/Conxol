@@ -18,6 +18,11 @@ fn main() {
         "check" => check(),
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
+        "test-serial" => {
+            run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-serial", "--", "--nocapture"], None)
+                .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "serial::tests", "--", "--nocapture"], None))
+        },
+        "test-telnet" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "telnet::tests", "--", "--nocapture"], None),
         "test-ssh-branch" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "-p", "conxol-ssh", "branch", "--", "--nocapture"], None),
         "test-settings" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "settings::tests", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),

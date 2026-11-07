@@ -11,6 +11,15 @@ export function WorkspaceSecurity({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<WorkspaceLockStatus | null>(null);
   const [opened, setOpened] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    // Reveal the committed workspace or PIN/retry screen after it can paint.
+    if (!status && !error) return;
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => document.getElementById("startup-screen")?.remove());
+    });
+    return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
+  }, [status, error]);
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
     const ticket = ++sequence.current;
