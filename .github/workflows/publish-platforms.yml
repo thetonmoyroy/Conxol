@@ -1,0 +1,71 @@
+name: Publish verified macOS and Linux packages
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Successful macOS and Linux packages run ID
+        required: true
+        type: string
+      release_tag:
+        description: Existing release tag
+        required: true
+        default: v0.1.55
+        type: string
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: ${{ inputs.run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
+    steps:
+      - name: Verify source run
+        run: |
+          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.name')" = 'macOS and Linux packages'
+          test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.conclusion')" = success
+          gh release view "$RELEASE_TAG" --json tagName
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.run_id }}
+          pattern: installers-*
+          merge-multiple: true
+          path: release-assets
+      - name: Verify expected files and checksums
+        working-directory: release-assets
+        run: |
+          version="${RELEASE_TAG#v}"
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 7
+          test -f "Conxol-$version-macos-arm64.dmg"
+          test -f "Conxol-$version-macos-x64.dmg"
+          test -f "Conxol-$version-linux-x64.deb"
+          test -f "Conxol-$version-linux-x64.AppImage"
+          for platform in linux-x64 macos-arm64 macos-x64; do
+            sha256sum -c "SHA256SUMS-$platform.txt"
+          done
+      - name: Attach verified assets to existing release
+        working-directory: release-assets
+        run: gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt
+      - name: Verify uploaded asset hashes
+        working-directory: release-assets
+        run: |
+          gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > release.json
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          release = json.loads(Path('release.json').read_text())
+          assets = {asset['name']: asset for asset in release['assets']}
+          for path in Path('.').iterdir():
+              if path.name == 'release.json':
+                  continue
+              digest = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+              assert assets[path.name]['digest'] == digest, path.name
+              print('Verified uploaded bytes:', path.name)
+          PY
