@@ -4,29 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b100f" />
-    <style>
-      /* Paint before the JavaScript bundle and app stylesheet load. */
-      html, body, #root { background: var(--bg, #0b100f); }
-      body { margin: 0; }
-      #startup-screen {
-        position: fixed; inset: 0; z-index: 10000;
-        display: grid; place-items: center;
-        background: #0b100f; color: #dce8dc;
-        font-family: "Segoe UI", sans-serif;
-      }
-      .startup-console { width: 240px; text-align: center; }
-      .startup-brand { display: flex; align-items: center; justify-content: center; gap: 16px; font-size: 36px; font-weight: 300; }
-      .startup-brand svg { width: 52px; height: 52px; fill: none; stroke: #9bc48a; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
-      .startup-cursor { animation: startup-blink 1s steps(1, end) infinite; }
-      .startup-track { height: 2px; margin-top: 28px; overflow: hidden; background: #23312b; }
-      .startup-track::after { content: ""; display: block; width: 35%; height: 100%; background: #9bc48a; animation: startup-scan 1.6s ease-in-out infinite; }
-      .startup-console p { margin: 14px 0 0; color: #82938a; font-size: 12px; letter-spacing: .04em; }
-      @keyframes startup-blink { 50% { opacity: 0; } }
-      @keyframes startup-scan { from { transform: translateX(-100%); } to { transform: translateX(390%); } }
-      @media (prefers-reduced-motion: reduce) {
-        .startup-cursor, .startup-track::after { animation: none; }
-      }
-    </style>
+    <link rel="stylesheet" href="/startup.css" />
     <title>Conxol — Your network, in command</title>
   </head>
   <body>
