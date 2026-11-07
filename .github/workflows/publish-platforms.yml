@@ -28,7 +28,7 @@ jobs:
         run: |
           [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
           [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.name')" = 'macOS and Linux packages'
+          test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.path')" = '.github/workflows/platform-packages.yml'
           test "$(gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" --jq '.conclusion')" = success
           gh release view "$RELEASE_TAG" --json tagName
       - uses: actions/download-artifact@v4
