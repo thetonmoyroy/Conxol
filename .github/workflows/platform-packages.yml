@@ -1,0 +1,107 @@
+name: macOS and Linux packages
+run-name: Desktop packages for ${{ inputs.source_ref }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_ref:
+        description: Existing release tag to build
+        required: true
+        default: v0.1.55
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            platform: linux-x64
+            bundles: deb,appimage
+            arch: x86_64
+          - runner: macos-15
+            platform: macos-arm64
+            bundles: dmg
+            arch: arm64
+          - runner: macos-15-intel
+            platform: macos-x64
+            bundles: dmg
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    env:
+      CI: 'true'
+      TAURI_BUNDLER_DMG_IGNORE_CI: 'false'
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.source_ref }}
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: '10.33.0'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+          workspaces: |
+            . -> target
+            tools/vnc-helper -> target
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+      - name: Install frontend dependencies
+        run: pnpm install --dir apps/desktop --frozen-lockfile
+      - name: Check source version and frontend
+        env:
+          GITHUB_REF_NAME: ${{ inputs.source_ref }}
+        run: |
+          node tools/release-assets.mjs check-version
+          pnpm --dir apps/desktop check
+          pnpm --dir apps/desktop lint
+          pnpm --dir apps/desktop test:unit
+          node --test tools/release-assets.test.mjs
+      - name: Generate bundle icons
+        run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
+      - name: Build installers
+        working-directory: apps/desktop
+        run: node node_modules/@tauri-apps/cli/tauri.js build --bundles ${{ matrix.bundles }} --config src-tauri/tauri.release.conf.json -- --locked
+      - name: Verify macOS app and helper
+        if: runner.os == 'macOS'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          mount=$(mktemp -d)
+          dmg=$(find target/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print)
+          printf 'Y\n' | hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount"; rmdir "$mount"' EXIT
+          app="$mount/Conxol.app"
+          test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$EXPECTED_ARCH"
+          test "$(lipo -archs "$app/Contents/Resources/helpers/conxol-vnc-helper")" = "$EXPECTED_ARCH"
+          codesign --verify --deep --strict "$app"
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          test "$("$app/Contents/MacOS/conxol" --version)" = "Conxol $version"
+          test ! -e "$app/Contents/Resources/helpers/conxol-rdp-helper"
+      - name: Verify Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          version=$(node -p "require('./apps/desktop/package.json').version")
+          test "$(target/release/conxol --version)" = "Conxol $version"
+          test "$(dpkg-deb -f target/release/bundle/deb/*.deb Version)" = "$version"
+          test "$(dpkg-deb -f target/release/bundle/deb/*.deb Architecture)" = amd64
+          file target/release/conxol apps/desktop/src-tauri/helpers/conxol-vnc-helper
+          test ! -e apps/desktop/src-tauri/helpers/conxol-rdp-helper
+      - name: Collect installers and checksums
+        run: node tools/release-assets.mjs collect ${{ matrix.platform }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ matrix.platform }}
+          path: target/release-assets/*
+          if-no-files-found: error
