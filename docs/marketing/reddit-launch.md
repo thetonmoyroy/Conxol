@@ -40,7 +40,7 @@ Project website: https://othmaneblial.github.io/MobaRust/
 
 Source and roadmap: https://github.com/OthmaneBlial/MobaRust
 
-Conxol is independent and is not affiliated with Mobatek or MobaXterm. Contributions, issue reports, and honest interoperability feedback are welcome.
+Conxol is independent and is not affiliated with Mobatek or MobaXterm. Bug reports, feature requests, suggestions, and interoperability feedback are welcome through GitHub Issues. External code contributions and pull requests are not accepted.
 
 ## Posting notes
 
