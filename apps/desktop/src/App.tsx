@@ -6263,6 +6263,8 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
   );
 }
 
+const CONSOLE_BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
+
 function QuickConnectDialog({ connecting = false, initialSession, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onConnectRemoteDesktop, onShell, onWsl }: { connecting?: boolean; initialSession?: SavedSession; onSave?: (session: SavedSession) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: { name: string; folder: string }) => void; onConnectTelnet: (request: TelnetConnectRequest) => void; onConnectSerial: (request: SerialConnectRequest) => void; onConnectRemoteDesktop: (request: RemoteDesktopConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
   const [sshTab, setSshTab] = useState<"advanced" | "terminal" | "network">("advanced");
   const [bookmarkOpen, setBookmarkOpen] = useState(() => {
@@ -6316,7 +6318,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [serialDevices, setSerialDevices] = useState<SerialDeviceInfo[]>([]);
   const [serialDevicesLoading, setSerialDevicesLoading] = useState(false);
   const [serialDevicesError, setSerialDevicesError] = useState<string | null>(null);
-  const [baudRate, setBaudRate] = useState(String(initialSession?.serial_profile?.baud_rate ?? 115200));
+  const [baudRate, setBaudRate] = useState(String(initialSession?.serial_profile?.baud_rate ?? 9600));
   const [dataBits, setDataBits] = useState<SerialConnectRequest["dataBits"]>(initialSession?.serial_profile?.data_bits ?? "eight");
   const [stopBits, setStopBits] = useState<SerialConnectRequest["stopBits"]>(initialSession?.serial_profile?.stop_bits ?? "one");
   const [parity, setParity] = useState<SerialConnectRequest["parity"]>(initialSession?.serial_profile?.parity ?? "none");
@@ -6608,12 +6610,14 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
               </label>
               <label>
                 Baud rate
-                <input required list="console-baud-rates" inputMode="numeric" pattern="[0-9]+" value={baudRate} onChange={(event) => setBaudRate(event.target.value)} />
-                <datalist id="console-baud-rates">{[9600, 19200, 38400, 57600, 115200].map(rate => <option key={rate} value={rate} />)}</datalist>
+                <select value={baudRate} onChange={event => setBaudRate(event.target.value)}>
+                  {!CONSOLE_BAUD_RATES.includes(Number(baudRate)) && <option value={baudRate}>{baudRate}</option>}
+                  {CONSOLE_BAUD_RATES.map(rate => <option key={rate} value={rate}>{rate}</option>)}
+                </select>
               </label>
-              <details className="quick-connect-wide">
-                <summary>Advanced console settings</summary>
-                <div className="quick-connect-grid">
+              <details className="session-bookmark quick-connect-wide">
+                <summary className="session-basic-heading">Advanced console settings</summary>
+                <div className="quick-connect-grid session-bookmark-grid">
               <label>
                 Data bits
                 <select value={dataBits} onChange={(event) => setDataBits(event.target.value as SerialConnectRequest["dataBits"])}>

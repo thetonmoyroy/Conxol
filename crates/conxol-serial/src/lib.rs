@@ -196,12 +196,15 @@ impl SerialOptions {
         bytes
     }
 
-    /// Applies the configured line ending only to an isolated terminal Enter.
+    /// Frames isolated Enter and Backspace keys for device consoles.
     /// Other input remains byte-for-byte unchanged so pasted text and control
     /// sequences are not unexpectedly rewritten.
     pub fn frame_terminal_input(&self, input: &[u8]) -> Vec<u8> {
         if matches!(input, b"\r" | b"\n") {
             self.line_ending.suffix().to_vec()
+        } else if input == b"\x7f" {
+            // xterm emits DEL for Backspace; network-device consoles use BS.
+            b"\x08".to_vec()
         } else {
             input.to_vec()
         }
@@ -576,6 +579,14 @@ impl From<SerialFlowControl> for serialport::FlowControl {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn serial_backspace_uses_bs_without_rewriting_delete_or_pasted_text() {
+        let options = super::SerialOptions::new("fixture", 9600);
+        assert_eq!(options.frame_terminal_input(b"\x7f"), b"\x08");
+        for bytes in [b"\x08".as_slice(), b"\x1b[3~", b"command\x7ftext", b"\x03"] {
+            assert_eq!(options.frame_terminal_input(bytes), bytes);
+        }
+    }
     #[tokio::test]
     async fn serial_read_survives_repeated_keyboard_select_cancellation() {
         let pending = super::PendingRead::default();
