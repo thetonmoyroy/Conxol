@@ -9,10 +9,15 @@ on:
       release_tag:
         description: Existing release tag
         required: true
-        default: v0.1.55
+        default: v0.1.56
         type: string
       verify_only:
         description: Verify assets already uploaded without uploading them again
+        required: false
+        default: false
+        type: boolean
+      replace_assets:
+        description: Replace existing installer and checksum assets after validation
         required: false
         default: false
         type: boolean
@@ -58,7 +63,14 @@ jobs:
       - name: Attach verified assets to existing release
         if: ${{ !inputs.verify_only }}
         working-directory: release-assets
-        run: gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt
+        env:
+          REPLACE_ASSETS: ${{ inputs.replace_assets }}
+        run: |
+          if [[ "$REPLACE_ASSETS" == true ]]; then
+            gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt --clobber
+          else
+            gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt
+          fi
       - name: Verify uploaded asset hashes
         working-directory: release-assets
         run: |
