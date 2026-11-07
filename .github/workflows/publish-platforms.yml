@@ -11,6 +11,11 @@ on:
         required: true
         default: v0.1.55
         type: string
+      verify_only:
+        description: Verify assets already uploaded without uploading them again
+        required: false
+        default: false
+        type: boolean
 permissions:
   actions: read
   contents: write
@@ -51,12 +56,15 @@ jobs:
             sha256sum -c "SHA256SUMS-$platform.txt"
           done
       - name: Attach verified assets to existing release
+        if: ${{ !inputs.verify_only }}
         working-directory: release-assets
         run: gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt
       - name: Verify uploaded asset hashes
         working-directory: release-assets
         run: |
-          gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > release.json
+          # The tag endpoint returns 404 for drafts. Listing releases with this
+          # write-scoped token includes both draft and published releases.
+          gh api --paginate "repos/$GH_REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$RELEASE_TAG\")" > release.json
           python3 - <<'PY'
           import hashlib, json
           from pathlib import Path
