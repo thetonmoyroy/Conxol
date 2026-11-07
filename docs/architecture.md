@@ -290,3 +290,21 @@ Rejected credentials fall back to manual login; reconnect resets the prompt trac
 Automatic login expires after 60 seconds and stops at a conventional shell prompt.
 Telnet remains unencrypted. Nonstandard device prompts need manual login.
 Run `cargo xtask test-telnet` for isolated synthetic prompt/attachment regressions.
+
+
+## Verbose TCP connection diagnostic
+
+Diagnostics > TCP check defaults to port 80; SSH host-key inspection retains its
+independent port 22 field. `network_check_tcp` returns `TcpConnectReport` from
+`crates/conxol-network/src/tcp_report.rs`. Its text includes resolution details,
+up to 16 distinct IPv4/IPv6 endpoints, sequential connection attempts and timing,
+local/remote socket endpoints, OS failure details, and a final summary. It also
+reports separate millisecond timings, remaining deadline, address-family counts,
+local socket buffer sizes, keepalive, TCP_NODELAY, SO_LINGER, and outgoing TTL/hop
+limit where the OS exposes them. Socket buffer sizes are not negotiated TCP
+windows, and connect latency is not a packet-capture RTT. One shared
+deadline bounds DNS and all attempts. The connection closes after the handshake;
+no application data is sent and open TCP is not treated as proof of HTTP/TLS health.
+Port scans retain their compact result format. Copy/export use the displayed
+report. `cargo xtask test-network` covers disposable loopback success/refusal,
+expired deadlines, and invalid requests without querying external targets.

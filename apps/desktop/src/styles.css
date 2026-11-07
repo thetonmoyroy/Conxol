@@ -47,6 +47,11 @@
 .palette-backdrop :is(input, select, textarea) { min-width: 0; max-width: 100%; }
 body { margin: 0; min-width: 1100px; min-height: 680px; background: var(--bg); }
 button, input { font: inherit; }
+.app-shell select { color-scheme: dark; }
+.app-shell.theme-light select { color-scheme: light; }
+.app-shell select option,
+.app-shell select optgroup { background: var(--panel-raised); color: var(--text); }
+.app-shell select option:checked { background: var(--amber); color: #0b100f; }
 button { color: inherit; }
 button:not(:disabled) { cursor: pointer; }
 

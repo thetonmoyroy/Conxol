@@ -14,6 +14,7 @@ serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+socket2 = "0.6"
 
 hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
 rand = "0.9"

@@ -43,7 +43,7 @@ use conxol_core::{
     RdpGatewayProfile, RemoteDesktopProfile, SerialProfile, SessionId, SessionRecord,
     TelnetProfile,
 };
-use conxol_network::{TcpCheckOptions, check_tcp, resolve_host};
+use conxol_network::{TcpCheckOptions, check_tcp_report, resolve_host};
 use conxol_remote_desktop::HelperCommand;
 use conxol_ssh::{SshFingerprintOptions, inspect_host_key};
 use conxol_store::{
@@ -1315,9 +1315,9 @@ async fn network_resolve_host(request: NetworkResolveRequest) -> Result<Vec<Stri
 #[tauri::command]
 async fn network_check_tcp(
     request: NetworkTcpCheckRequest,
-) -> Result<conxol_network::TcpCheckResult, String> {
+) -> Result<conxol_network::TcpConnectReport, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
-    check_tcp(TcpCheckOptions {
+    check_tcp_report(TcpCheckOptions {
         host: request.host,
         port: request.port,
         timeout,

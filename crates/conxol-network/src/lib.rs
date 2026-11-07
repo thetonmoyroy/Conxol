@@ -5,6 +5,8 @@
 //! cancellation receiver. Tests use loopback listeners only.
 
 mod dns;
+mod tcp_report;
+pub use tcp_report::{TcpConnectReport, check_tcp_report};
 mod mtr;
 mod ping;
 pub use dns::{DnsLookupResult, DnsRecordType, lookup_dns};

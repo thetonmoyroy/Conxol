@@ -580,6 +580,14 @@ impl From<SerialFlowControl> for serialport::FlowControl {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn serial_tab_reaches_device_unchanged_for_cli_completion() {
+        let options = super::SerialOptions::new("fixture", 9600);
+        assert_eq!(options.frame_terminal_input(b"\t"), b"\x09");
+        assert_eq!(options.frame_terminal_input(b"\x1b[Z"), b"\x1b[Z");
+        assert_eq!(options.frame_terminal_input(b"show\t"), b"show\t");
+    }
+
+    #[test]
     fn serial_backspace_uses_bs_without_rewriting_delete_or_pasted_text() {
         let options = super::SerialOptions::new("fixture", 9600);
         assert_eq!(options.frame_terminal_input(b"\x7f"), b"\x08");

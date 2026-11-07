@@ -340,7 +340,6 @@ type TerminalViewportProps = {
   onTerminalDisposed: (workspaceId: string) => void;
   onSearchResults: (workspaceId: string, resultIndex: number, resultCount: number) => void;
   onTitleChange: (workspaceId: string, title: string) => void;
-  onBell: (workspaceId: string) => void;
 };
 
 type WorkspaceTerminal = {
@@ -706,6 +705,8 @@ type TcpCheckResult = {
   status: "open" | "closed" | "timed-out" | "open-or-filtered" | "failed";
 };
 
+type TcpConnectReport = TcpCheckResult & { elapsedMs: number; output: string };
+
 type SshHostKeyInspection = {
   host: string;
   port: number;
@@ -789,7 +790,7 @@ function auditProtocol(protocol: string | null | undefined): AuditProtocol | nul
     : null;
 }
 
-function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange, onBell }: TerminalViewportProps) {
+function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange }: TerminalViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -895,7 +896,6 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       const selection = terminal.getSelection();
       if (selection) void writeClipboardText(selection).catch(() => console.warn("Terminal selection could not be copied."));
     });
-    const bell = terminal.onBell(() => onBell(workspaceId));
     const searchResults = searchAddon.onDidChangeResults((event) => onSearchResults(workspaceId, event.resultIndex, event.resultCount));
     const terminalLinks = terminal.registerLinkProvider(createTerminalHttpLinkProvider(
       (bufferLineNumber) => terminal.buffer.active.getLine(bufferLineNumber),
@@ -1101,7 +1101,6 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       input.dispose();
       title.dispose();
       selectionCopy.dispose();
-      bell.dispose();
       searchResults.dispose();
       networkHighlighting.dispose();
       networkHighlightingRef.current = null;
@@ -1124,7 +1123,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       onTerminalDisposed(workspaceId);
       terminal.dispose();
     };
-  }, [instanceKey, localTarget, onBell, onTerminalPaste, onInput, onNativeTerminalId, onSearchResults, onStatusChange, onTerminalDisposed, onTerminalReady, onTitleChange, remoteProtocol, remoteSessionId, workspaceId]);
+  }, [instanceKey, localTarget, onTerminalPaste, onInput, onNativeTerminalId, onSearchResults, onStatusChange, onTerminalDisposed, onTerminalReady, onTitleChange, remoteProtocol, remoteSessionId, workspaceId]);
 
   useEffect(() => {
     // Renaming a pane updates its input name without restarting its session.
@@ -1748,12 +1747,13 @@ function App() {
   const remoteSessionIdRef = useRef<string | null>(null);
   const [networkHost, setNetworkHost] = useState("");
   const [networkPort, setNetworkPort] = useState("22");
+  const [networkTcpPort, setNetworkTcpPort] = useState("80");
   const [networkTimeout, setNetworkTimeout] = useState(() => String(settings.network.diagnosticTimeoutMs));
   const [networkStatus, setNetworkStatus] = useState<"idle" | "running" | "ready" | "error">("idle");
   const [dnsReport, setDnsReport] = useState<{ tool: string; output: string; elapsedMs: number } | null>(null);
   const [dnsRecordType, setDnsRecordType] = useState("A");
   const [dnsServer, setDnsServer] = useState("");
-  const [networkResult, setNetworkResult] = useState<TcpCheckResult | null>(null);
+  const [networkResult, setNetworkResult] = useState<TcpConnectReport | null>(null);
   const [networkFingerprint, setNetworkFingerprint] = useState<SshHostKeyInspection | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
   const [networkDiagnosticKind, setNetworkDiagnosticKind] = useState<"ping" | "mtr" | null>(null);
@@ -1790,7 +1790,6 @@ function App() {
   const macroRunRef = useRef<{ title: string; step: number; total: number; targets: string[] } | null>(null);
   const terminalAuditStateRef = useRef(new Map<string, TerminalStatus>());
   const terminalGenerationsRef = useRef(new Map<string, number>());
-  const terminalBellAtRef = useRef(new Map<string, number>());
   const transferAuditStateRef = useRef(new Map<string, TransferState>());
   const splitResizeRef = useRef<{ direction: Exclude<SplitDirection, "none">; frame: HTMLElement; path: SplitPath } | null>(null);
   terminalTabsRef.current = terminalTabs;
@@ -2010,15 +2009,6 @@ function App() {
     setTerminalTabs((current) => current.map((terminal) => terminal.id === workspaceId && !terminal.customName ? { ...terminal, label: safeTitle } : terminal));
   }, []);
 
-  const handleTerminalBell = useCallback((workspaceId: string) => {
-    const now = Date.now();
-    const previous = terminalBellAtRef.current.get(workspaceId) ?? 0;
-    if (now - previous < 1000) return;
-    terminalBellAtRef.current.set(workspaceId, now);
-    const terminal = terminalTabsRef.current.find((item) => item.id === workspaceId);
-    setSessionNotice(`Terminal bell · ${terminal?.label ?? "terminal"}`);
-  }, []);
-
   const handleNativeTerminalId = useCallback((workspaceId: string, terminalId: string | null) => {
     if (nativeTerminalIdsRef.current.get(workspaceId) !== (terminalId ?? undefined)) terminalGenerationsRef.current.set(workspaceId, (terminalGenerationsRef.current.get(workspaceId) ?? 0) + 1);
     if (terminalId) nativeTerminalIdsRef.current.set(workspaceId, terminalId);
@@ -2032,7 +2022,6 @@ function App() {
   const handleTerminalDisposed = useCallback((workspaceId: string) => {
     terminalGenerationsRef.current.set(workspaceId, (terminalGenerationsRef.current.get(workspaceId) ?? 0) + 1);
     terminalInstancesRef.current.delete(workspaceId);
-    terminalBellAtRef.current.delete(workspaceId);
   }, []);
 
   const handleSearchResults = useCallback((workspaceId: string, resultIndex: number, resultCount: number) => {
@@ -3974,8 +3963,9 @@ function App() {
   }, [networkHost, networkTimeout, dnsRecordType, dnsServer]);
 
   const checkNetworkTcp = useCallback(async () => {
+    setNetworkResult(null);
     const host = networkHost.trim();
-    const port = Number(networkPort);
+    const port = Number(networkTcpPort);
     const timeoutMs = Number(networkTimeout);
     if (!host) {
       setNetworkError("Enter an explicit hostname or IP address.");
@@ -4000,7 +3990,7 @@ function App() {
     setNetworkStatus("running");
     setNetworkError(null);
     try {
-      const result = await invoke<TcpCheckResult>("network_check_tcp", { request: { host, port, timeoutMs } });
+      const result = await invoke<TcpConnectReport>("network_check_tcp", { request: { host, port, timeoutMs } });
       setNetworkResult(result);
       setNetworkStatus("ready");
     } catch (error) {
@@ -4008,7 +3998,7 @@ function App() {
       setNetworkError(String(error));
       setNetworkStatus("error");
     }
-  }, [networkHost, networkPort, networkTimeout]);
+  }, [networkHost, networkTcpPort, networkTimeout]);
 
   const inspectNetworkHostKey = useCallback(async () => {
     const host = networkHost.trim();
@@ -4555,9 +4545,9 @@ function App() {
 
   const renderTerminalPane = useCallback((terminal: WorkspaceTerminal) => {
     const isDesktop = (terminal.remoteProtocol === "rdp" || terminal.remoteProtocol === "vnc") && terminal.remoteDesktopRequest;
-    const viewport = terminal.connecting ? null : isDesktop ? <RemoteDesktopViewport workspaceId={terminal.id} instanceKey={terminal.instanceKey} request={terminal.remoteDesktopRequest!} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} /> : <TerminalViewport label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} onBell={handleTerminalBell} />;
+    const viewport = terminal.connecting ? null : isDesktop ? <RemoteDesktopViewport workspaceId={terminal.id} instanceKey={terminal.instanceKey} request={terminal.remoteDesktopRequest!} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} /> : <TerminalViewport label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
     return <div className="terminal-login-container">{viewport}{terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}</div>;
-  }, [colorTheme, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalBell, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
+  }, [colorTheme, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
 
   if (closing) return <main className={`app-shell shutdown-state theme-${colorTheme}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
@@ -4865,7 +4855,7 @@ function App() {
         setDiagnosticsOpen(false);
         requestTerminalFocus(selectedTerminalId);
       }}>
-        <NetworkDiagnosticsView pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
+        <NetworkDiagnosticsView pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
       </FloatingDiagnostics>
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
       {helpOpen && <HelpModal onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
@@ -5357,7 +5347,7 @@ function MonitorMetric({ label, value, detail }: { label: string; value: string;
   return <article className="remote-monitor-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+function NetworkDiagnosticsView({ tcpPort, onTcpPortChange, pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
   pingInterval: string;
   pingPacketSize: string;
   onPingIntervalChange: (value: string) => void;
@@ -5368,6 +5358,8 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
   onScanProtocolChange: (value: "tcp" | "udp") => void;
   host: string;
   port: string;
+  tcpPort: string;
+  onTcpPortChange: (value: string) => void;
   timeout: string;
   status: "idle" | "running" | "ready" | "error";
   dnsReport: { tool: string; output: string; elapsedMs: number } | null;
@@ -5375,7 +5367,7 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
   onDnsRecordTypeChange: (value: string) => void;
   dnsServer: string;
   onDnsServerChange: (value: string) => void;
-  result: TcpCheckResult | null;
+  result: TcpConnectReport | null;
   fingerprint: SshHostKeyInspection | null;
   error: string | null;
   scanId: string | null;
@@ -5449,7 +5441,8 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
     if (dnsReport) lines.push(`;; ${dnsReport.tool} · ${dnsReport.elapsedMs} ms`, "", dnsReport.output);
     else lines.push("DNS LOOKUP", "", status === "running" ? "Querying DNS…" : "Ready. Enter a hostname or IP, choose a record type, then press Run.");
   } else if (tool === "tcp") {
-    lines.push("TCP CONNECT", "", ...(result ? [`Target: ${result.host}:${result.port}`, `State: ${result.status.replaceAll("-", " ")}`] : [status === "running" ? "Connecting…" : "Ready. Enter a target and port, then press Run."]));
+    if (result) lines.push(result.output);
+    else lines.push("TCP CONNECT DIAGNOSTIC", "", `Target: ${host.trim() || "Not entered"}`, `Port: ${tcpPort} / TCP`, `Timeout: ${timeout} ms`, "", status === "running" ? "Resolving addresses and attempting TCP connections…" : "Ready. Enter a target and port, then press Run.", "", "Reports resolved addresses, connection attempts, timing, socket endpoints and errors.", "Tests TCP connectivity without sending application data.");
   } else {
     lines.push("SSH HOST KEY", "", ...(fingerprint ? [`Target: ${fingerprint.host}:${fingerprint.port}`, fingerprint.fingerprint, "", "Observed only; host trust has not been changed."] : [status === "running" ? "Inspecting host key…" : "Ready. Enter an SSH target and port, then press Run."]));
   }
@@ -5496,7 +5489,7 @@ function NetworkDiagnosticsView({ pingInterval, pingPacketSize, onPingIntervalCh
         <label>Record<select value={dnsRecordType} disabled={busy} onChange={event => onDnsRecordTypeChange(event.target.value)}>{["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "PTR", "SRV", "CAA"].map(type => <option key={type}>{type}</option>)}</select></label>
         <label className="diagnostics-dns-server">DNS server<input value={dnsServer} disabled={busy} onChange={event => onDnsServerChange(event.target.value)} placeholder="System default" title="Optional IPv4 or IPv6 resolver address" /></label>
       </>}
-      {(tool === "tcp" || tool === "ssh") && <label>Port<input type="number" min="1" max="65535" required value={port} disabled={busy} onChange={event => onPortChange(event.target.value)} /></label>}
+      {(tool === "tcp" || tool === "ssh") && <label>Port<input type="number" min="1" max="65535" required value={tool === "tcp" ? tcpPort : port} disabled={busy} onChange={event => (tool === "tcp" ? onTcpPortChange : onPortChange)(event.target.value)} /></label>}
       {tool === "ping" && <>
         <label>Interval (ms)<input type="number" min="200" max="60000" required value={pingInterval} disabled={busy} onChange={event => onPingIntervalChange(event.target.value)} /></label>
         <label>Packet (bytes)<input type="number" min="0" max="65500" required value={pingPacketSize} disabled={busy} onChange={event => onPingPacketSizeChange(event.target.value)} title="ICMP payload size, excluding headers" /></label>
@@ -6314,6 +6307,8 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [saveTelnetPassword, setSaveTelnetPassword] = useState(false);
   const [terminal, setTerminal] = useState(initialSession?.telnet_profile?.terminal ?? "xterm-256color");
   const [encoding, setEncoding] = useState<"utf-8" | "windows-1252">(initialSession?.telnet_profile?.encoding ?? "utf-8");
+  const serialPortExample = navigator.platform.includes("Win") ? "COM3"
+    : navigator.platform.includes("Mac") ? "/dev/cu.usbserial-…" : "/dev/ttyUSB0";
   const [serialDevice, setSerialDevice] = useState(initialSession?.serial_profile?.device ?? "");
   const [serialDevices, setSerialDevices] = useState<SerialDeviceInfo[]>([]);
   const [serialDevicesLoading, setSerialDevicesLoading] = useState(false);
@@ -6603,9 +6598,9 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
             <>
               <label className="quick-connect-wide">
                 Serial port
-                <div className="serial-device-input"><input autoFocus required list="serial-device-options" value={serialDevice} onChange={(event) => setSerialDevice(event.target.value)} placeholder="/dev/tty.usbserial-… or COM3" /><button type="button" className="outline-button" onClick={() => void refreshSerialDevices()} disabled={serialDevicesLoading}>{serialDevicesLoading ? "Refreshing" : "Refresh"}</button></div>
-                <datalist id="serial-device-options">{serialDevices.map((item) => <option key={item.device} value={item.device}>{item.kind}</option>)}</datalist>
-                <small>Select a port or type one, such as COM3.</small>
+                <div className="serial-device-input"><input autoFocus required list="serial-device-options" value={serialDevice} onChange={(event) => setSerialDevice(event.target.value)} placeholder={serialPortExample} /><button type="button" className="outline-button" onClick={() => void refreshSerialDevices()} disabled={serialDevicesLoading}>{serialDevicesLoading ? "Refreshing" : "Refresh"}</button></div>
+                <datalist id="serial-device-options">{serialDevices.map((item) => <option key={item.device} value={item.device}>{item.kind === "Unknown" ? "" : item.kind}</option>)}</datalist>
+                <small>Select a port or type one, such as {serialPortExample}.</small>
                 {serialDevicesError && <small className="connect-error-inline" role="alert">{serialDevicesError}</small>}
               </label>
               <label>
