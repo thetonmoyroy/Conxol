@@ -10,7 +10,7 @@ Connect to your devices. Work with remote files. Generate configurations. Find t
 
 [![Latest release](https://img.shields.io/github/v/release/thetonmoyroy/Conxol?style=flat-square&label=release&color=c9f464&labelColor=14231d)](https://github.com/thetonmoyroy/Conxol/releases/latest) [![Platforms](docs/assets/badge-platforms.svg)](#download) [![License](docs/assets/badge-license.svg)](LICENSE)
 
-**[Download](#download)** &nbsp; / &nbsp; **[Features](#features)** &nbsp; / &nbsp; **[Config generator](#config-generator)** &nbsp; / &nbsp; **[Documentation](#documentation)**
+**[Website](https://thetonmoyroy.github.io/Conxol/)** &nbsp; / &nbsp; **[Download](#download)** &nbsp; / &nbsp; **[Features](#features)** &nbsp; / &nbsp; **[Config generator](#config-generator)** &nbsp; / &nbsp; **[Documentation](#documentation)**
 
 </div>
 
