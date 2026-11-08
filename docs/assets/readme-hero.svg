@@ -1,35 +1,50 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="520" viewBox="0 0 1600 520" role="img" aria-labelledby="title desc">
-  <title id="title">Conxol — Open-source terminal and network workspace built with Rust</title>
-  <desc id="desc">A dark green and copper banner for the open-source Rust desktop application. Connect servers, work in terminals, move files, and manage tunnels.</desc>
-  <defs>
-    <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" fill="none" stroke="#27382e" stroke-width="1"/></pattern>
-    <linearGradient id="fade" x2="1" y2="1"><stop stop-color="#1c2c23"/><stop offset="1" stop-color="#0e1813"/></linearGradient>
-  </defs>
-  <rect width="1600" height="520" rx="24" fill="url(#fade)"/>
-  <rect x="940" width="660" height="520" fill="url(#grid)" opacity=".65"/>
-  <path d="M0 498H1600" stroke="#eaa570" stroke-width="4"/>
-  <g font-family="'Avenir Next', 'Trebuchet MS', sans-serif">
-    <circle cx="77" cy="75" r="6" fill="#d2e2aa"/>
-    <text x="99" y="82" fill="#d2e2aa" font-size="23" letter-spacing="4">OPEN SOURCE / REMOTE WORKSTATION</text>
-    <text x="64" y="223" fill="#f7f2e8" font-size="134" font-weight="700" letter-spacing="-6">Conxol<tspan fill="#eaa570">.</tspan></text>
-    <text x="70" y="296" fill="#e3dccb" font-family="Georgia, serif" font-size="43">Free, open-source</text>
-    <text x="70" y="346" fill="#e3dccb" font-family="Georgia, serif" font-size="38">Terminal and network workspace</text>
-    <text x="72" y="436" fill="#a7baaa" font-size="24" letter-spacing="2">RUST + TAURI</text>
-    <text x="318" y="436" fill="#6f8374" font-size="24">/</text>
-    <text x="350" y="436" fill="#a7baaa" font-size="24">Free. Local. Yours.</text>
-  </g>
-  <g stroke="#d2e2aa" fill="none" stroke-width="2">
-    <path d="M1090 272H1236V146H1390M1236 272H1390M1236 272V398H1390" opacity=".6"/>
-    <circle cx="1090" cy="272" r="68" fill="#16261d"/>
-    <path d="m1061 252 21 20-21 20m33 0h27" stroke="#eaa570" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
-    <circle cx="1236" cy="272" r="5" fill="#d2e2aa" stroke="none"/>
-  </g>
-  <g font-family="'Avenir Next', 'Trebuchet MS', sans-serif" font-size="23" font-weight="600">
-    <rect x="1290" y="110" width="230" height="72" rx="12" fill="#213327" stroke="#506547"/>
-    <text x="1320" y="155" fill="#d2e2aa">01 / SSH</text>
-    <rect x="1290" y="236" width="230" height="72" rx="12" fill="#263024" stroke="#677151"/>
-    <text x="1320" y="281" fill="#e5e8c7">02 / FILES</text>
-    <rect x="1290" y="362" width="230" height="72" rx="12" fill="#33291f" stroke="#82623f"/>
-    <text x="1320" y="407" fill="#eaa570">03 / TUNNELS</text>
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="560" viewBox="0 0 1600 560" role="img" aria-labelledby="title desc">
+<title id="title">Conxol — Your network. One workspace.</title>
+<desc id="desc">Illustrated network operations workspace with an SSH terminal, saved devices and configuration preview. Sample addresses are reserved for documentation. Not a product screenshot.</desc>
+<defs>
+<linearGradient id="bg" x2="1" y2="1"><stop stop-color="#14271e"/><stop offset="1" stop-color="#070e0b"/></linearGradient>
+<linearGradient id="panel" x2="0" y2="1"><stop stop-color="#192b22"/><stop offset="1" stop-color="#0c1711"/></linearGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#a9d8a8" stroke-opacity=".05"/></pattern>
+</defs>
+<rect width="1600" height="560" rx="22" fill="url(#bg)"/><rect width="1600" height="560" rx="22" fill="url(#grid)"/>
+<path d="M35 36H1565" stroke="#c9f464" stroke-width="2" stroke-opacity=".55"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<rect x="52" y="66" width="34" height="34" rx="8" fill="#c9f464"/><path d="m61 76 7 7-7 7m12 0h6" fill="none" stroke="#14231d" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="99" y="92" fill="#edf2e8" font-size="29" font-weight="700">conxol</text>
+<text x="54" y="151" fill="#c9f464" font-size="14" letter-spacing="3">THE NETWORK OPERATOR'S WORKSPACE</text>
+<text x="49" y="239" fill="#f3f5ee" font-size="80" font-weight="700" letter-spacing="-3">Your network.</text>
+<text x="49" y="327" fill="#c9f464" font-size="80" font-weight="700" letter-spacing="-3">One workspace.</text>
+<text x="54" y="382" fill="#b2c4b6" font-size="23">Connect. Configure. Troubleshoot.</text>
+<g font-size="14" letter-spacing="1">
+<rect x="54" y="431" width="114" height="32" rx="16" fill="#213626" stroke="#506b46"/><text x="69" y="452" fill="#d9ebcf">SSH / SFTP</text>
+<rect x="180" y="431" width="160" height="32" rx="16" fill="#213626" stroke="#506b46"/><text x="193" y="452" fill="#d9ebcf">NETWORK TOOLS</text>
+<rect x="352" y="431" width="184" height="32" rx="16" fill="#2d2a1c" stroke="#74603b"/><text x="366" y="452" fill="#f2bd76">CONFIG TEMPLATES</text>
+</g>
+<text x="54" y="510" fill="#91aa97" font-size="14" letter-spacing="2">OPEN SOURCE</text><text x="204" y="510" fill="#48624f" font-size="14">/</text><text x="229" y="510" fill="#91aa97" font-size="14" letter-spacing="2">RUST + TAURI</text>
+</g>
+<g transform="translate(728 76)">
+<rect x="10" y="12" width="808" height="399" rx="14" fill="#000" opacity=".3"/><rect width="808" height="399" rx="14" fill="url(#panel)" stroke="#4b604e"/>
+<path d="M0 43H808M170 43V399" stroke="#344a3a"/>
+<g font-family="Arial, Helvetica, sans-serif">
+<circle cx="22" cy="22" r="4" fill="#f2bd76"/><circle cx="38" cy="22" r="4" fill="#809b6c"/><circle cx="54" cy="22" r="4" fill="#c9f464"/>
+<text x="352" y="27" fill="#a4baa8" font-size="12" letter-spacing="2">CONXOL / WORKSPACE</text>
+<text x="20" y="77" fill="#779780" font-size="11" letter-spacing="1.5">SAVED DEVICES</text>
+<rect x="10" y="92" width="150" height="32" rx="5" fill="#2a412b"/><circle cx="25" cy="108" r="3" fill="#c9f464"/><text x="38" y="113" fill="#e8eddf" font-size="13">Edge router</text>
+<circle cx="25" cy="146" r="3" fill="#809b6c"/><text x="38" y="151" fill="#a9bfac" font-size="13">Core switch</text>
+<circle cx="25" cy="184" r="3" fill="#809b6c"/><text x="38" y="189" fill="#a9bfac" font-size="13">Lab server</text>
+<path d="M20 217H150" stroke="#344a3a"/><text x="20" y="245" fill="#779780" font-size="11" letter-spacing="1.5">TOOLS</text>
+<text x="22" y="276" fill="#b9cbb9" font-size="13">DNS lookup</text><text x="22" y="306" fill="#b9cbb9" font-size="13">Port scan</text><text x="22" y="336" fill="#f2bd76" font-size="13">Config generator</text>
+<rect x="186" y="54" width="124" height="28" rx="5" fill="#2a412b"/><text x="202" y="73" fill="#e2eddb" font-size="12">SSH / edge-router</text><text x="333" y="73" fill="#8da592" font-size="12">Files</text><text x="392" y="73" fill="#8da592" font-size="12">Tunnels</text>
+</g>
+<g font-family="Consolas, 'Liberation Mono', monospace" font-size="14">
+<text x="193" y="115" fill="#9caf9f">$ ssh operator@192.0.2.10</text>
+<text x="193" y="147" fill="#c9f464">operator@edge-router&gt;</text><text x="397" y="147" fill="#edf2e8">show interfaces</text>
+<text x="193" y="184" fill="#6d8a74">INTERFACE</text><text x="425" y="184" fill="#6d8a74">STATE</text><text x="550" y="184" fill="#6d8a74">ADDRESS</text><path d="M193 195H781" stroke="#2b4232"/>
+<text x="193" y="220" fill="#dce6d7">uplink.200</text><text x="425" y="220" fill="#c9f464">UP</text><text x="550" y="220" fill="#c6d7c4">192.0.2.1/30</text>
+<text x="193" y="248" fill="#dce6d7">uplink.201</text><text x="425" y="248" fill="#c9f464">UP</text><text x="550" y="248" fill="#c6d7c4">192.0.2.5/30</text>
+<rect x="187" y="280" width="603" height="100" rx="8" fill="#0a140e" stroke="#304735"/><text x="205" y="306" fill="#f2bd76" font-size="11" letter-spacing="1">CONFIG PREVIEW</text>
+<text x="205" y="334" fill="#b8cdb7">interface Eth-Trunk1.200</text><text x="205" y="358" fill="#c9f464"> ip address 192.0.2.1 255.255.255.252</text>
+</g>
+<text x="808" y="438" text-anchor="end" fill="#718c79" font-family="Arial, Helvetica, sans-serif" font-size="12" letter-spacing="1">TERMINALS + FILES + DIAGNOSTICS + CONFIGURATION</text>
+</g>
 </svg>
