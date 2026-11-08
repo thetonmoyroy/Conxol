@@ -1,211 +1,72 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="theme-color" content="#f3f0e7">
-    <meta name="description" content="Free, open-source MobaXterm alternative built with Rust. SSH, SFTP, local terminals and tunnels in one desktop app.">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://othmaneblial.github.io/MobaRust/">
-    <meta property="og:title" content="Conxol — Free, open-source MobaXterm alternative">
-    <meta property="og:description" content="Free, open-source MobaXterm alternative built with Rust. SSH, files, local terminals and tunnels in one app.">
-    <meta property="og:image" content="https://othmaneblial.github.io/MobaRust/media/mobarust-demo-poster.jpg">
-    <meta property="og:image:alt" content="Conxol running a real local terminal in its desktop workspace">
-    <meta name="twitter:card" content="summary_large_image">
-    <title>Conxol — Free, open-source MobaXterm alternative</title>
-    <link rel="canonical" href="https://othmaneblial.github.io/MobaRust/">
-    <link rel="icon" href="favicon.svg" type="image/svg+xml">
-    <link rel="stylesheet" href="styles.css?v=0.1.12">
-    <script src="app.js?v=0.1.12" defer></script>
-  </head>
-  <body>
-    <a class="skip-link" href="#main">Skip to content</a>
-    <div class="announcement">
-      <span class="announcement-dot" aria-hidden="true"></span>
-      <span>Conxol <strong>v0.1.60</strong> is available</span>
-      <a href="https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60">Get the installers <span aria-hidden="true">↗</span></a>
-    </div>
-
-    <header class="site-header">
-      <div class="header-inner">
-        <a class="brand" href="index.html" aria-label="Conxol home">
-          <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5.5 7.5H26.5V12.5H18.5V27H13.5V12.5H5.5Z"/></svg></span>
-          <span>Conxol</span>
-        </a>
-        <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">Menu</button>
-        <nav class="site-nav" id="site-nav" aria-label="Main navigation">
-          <a href="#workflows">Workflows</a>
-          <a href="#demo">Demo</a>
-          <a href="#trust">Trust</a>
-          <a href="docs.html">Docs</a>
-          <a class="nav-source" href="https://github.com/OthmaneBlial/MobaRust">GitHub <span aria-hidden="true">↗</span></a>
-          <a class="nav-download" href="#download">Download preview</a>
-        </nav>
-      </div>
-    </header>
-
-    <main id="main">
-      <section class="hero page-wrap">
-        <div class="hero-copy">
-          <p class="eyebrow"><span class="eyebrow-line"></span> Free &amp; open source · Built with Rust</p>
-          <h1>A free alternative<br>to <em>MobaXterm.</em></h1>
-          <p class="hero-lede">Free, open-source MobaXterm alternative built with Rust. SSH, files, local terminals and tunnels—side by side.</p>
-          <div class="hero-actions">
-            <a class="button button-dark" href="#download">Choose your download <span aria-hidden="true">↗</span></a>
-            <a class="button button-outline" href="#demo"><span class="play-icon" aria-hidden="true">▶</span> Watch the 94-second demo</a>
-          </div>
-          <ul class="hero-facts" aria-label="Project facts">
-            <li><span class="fact-mark">01</span> Free and open source</li>
-            <li><span class="fact-mark">02</span> Rust-owned native core</li>
-            <li><span class="fact-mark">03</span> No cloud account required</li>
-          </ul>
-        </div>
-        <figure class="hero-capture">
-          <div class="capture-topline"><span>REAL APPLICATION CAPTURE</span><span>LOCAL TERMINAL · macOS</span></div>
-          <a href="#demo" aria-label="Watch the Conxol desktop demo">
-            <img src="media/conxol-demo-poster.jpg" alt="Conxol desktop running a local shell, with session navigation, terminal tabs, files, tunnels, and diagnostics visible" width="1920" height="1080" fetchpriority="high">
-            <span class="capture-play" aria-hidden="true">▶</span>
-          </a>
-          <figcaption><span>Captured in Conxol 0.1.17</span><span>Real desktop · isolated demo profile</span></figcaption>
-        </figure>
-      </section>
-
-      <section class="capability-rail" aria-label="Core workflows">
-        <div class="rail-inner"><span>SSH</span><i aria-hidden="true">/</i><span>SFTP + SCP</span><i aria-hidden="true">/</i><span>Local shells</span><i aria-hidden="true">/</i><span>Tunnels</span><i aria-hidden="true">/</i><span>Operator tools</span><i aria-hidden="true">/</i><span>Open source</span></div>
-      </section>
-
-      <section class="workflows page-wrap section-pad" id="workflows">
-        <div class="section-intro">
-          <p class="eyebrow"><span class="eyebrow-line"></span> 01 / The working loop</p>
-          <h2>One session.<br><em>More of the picture.</em></h2>
-          <p>A remote tool should keep the surrounding work close: the host, its files, the tunnel you opened, and the command you are about to run.</p>
-        </div>
-        <div class="workflow-list">
-          <article class="workflow">
-            <span class="workflow-number">01</span>
-            <div><h3>Connect with context.</h3><p>Save SSH profiles, organize them with folders and tags, and verify the host key before the first session.</p></div>
-            <span class="workflow-glyph" aria-hidden="true">↗</span>
-          </article>
-          <article class="workflow">
-            <span class="workflow-number">02</span>
-            <div><h3>Work beside the shell.</h3><p>Browse and move files over SFTP, run a local terminal, open a tunnel, or inspect a host without losing your place.</p></div>
-            <span class="workflow-glyph" aria-hidden="true">↔</span>
-          </article>
-          <article class="workflow">
-            <span class="workflow-number">03</span>
-            <div><h3>Keep actions deliberate.</h3><p>Preview snippets, confirm multiline pastes, select broadcast targets explicitly, and stop cancellable work when you need to.</p></div>
-            <span class="workflow-glyph" aria-hidden="true">◎</span>
-          </article>
-        </div>
-      </section>
-
-      <section class="demo-section" id="demo">
-        <div class="page-wrap demo-wrap">
-          <div class="demo-heading">
-            <div><p class="eyebrow eyebrow-light"><span class="eyebrow-line"></span> 02 / See the application</p><h2>Not a mockup.<br><em>A real work session.</em></h2></div>
-            <p>Follow the 94-second walkthrough: native terminals, real SSH, SFTP editing and download, a working tunnel, snippets, and themes. The capture uses local fixtures, not a production host.</p>
-          </div>
-          <div class="video-frame">
-            <video id="desktop-demo" controls playsinline preload="metadata" poster="media/conxol-demo-poster.jpg" aria-label="Conxol desktop demonstration. Silent screen capture with on-screen chapter titles." aria-describedby="demo-note">
-              <source src="media/conxol-desktop-demo.mp4" type="video/mp4">
-              <track kind="captions" src="media/conxol-demo.en.vtt" srclang="en" label="English">
-              Your browser cannot play this video. <a href="media/conxol-desktop-demo.mp4">Download the MP4 demo.</a>
-            </video>
-          </div>
-          <div class="demo-chapters" aria-label="Demo chapters">
-            <button type="button" data-demo-time="3"><span>00:03</span> Local terminal</button>
-            <button type="button" data-demo-time="13"><span>00:13</span> Split panes</button>
-            <button type="button" data-demo-time="23"><span>00:23</span> Real SSH</button>
-            <button type="button" data-demo-time="33"><span>00:33</span> SFTP files</button>
-            <button type="button" data-demo-time="52"><span>00:52</span> SSH tunnel</button>
-            <button type="button" data-demo-time="72"><span>01:12</span> Snippets</button>
-            <button type="button" data-demo-time="82"><span>01:22</span> Themes</button>
-          </div>
-          <p class="demo-note" id="demo-note">Recorded in Conxol 0.1.17 on macOS. Silent video with chapter titles. Actual SSH, files and HTTP traffic use disposable loopback fixtures; local account labels and paths are obscured.</p>
-        </div>
-      </section>
-
-      <section class="features page-wrap section-pad">
-        <div class="section-intro">
-          <p class="eyebrow"><span class="eyebrow-line"></span> 03 / Made for the workday</p>
-          <h2>The useful things,<br><em>close at hand.</em></h2>
-        </div>
-        <div class="feature-grid">
-          <article class="feature-card feature-card-accent"><span class="feature-index">A / CONNECT</span><div class="feature-icon" aria-hidden="true">⌁</div><h3>SSH, kept legible.</h3><p>Host-key checks, multiple auth paths, saved profiles, jump hosts, reconnect state, and a native terminal that stays with the session.</p></article>
-          <article class="feature-card"><span class="feature-index">B / TRANSFER</span><div class="feature-icon" aria-hidden="true">⇵</div><h3>Files beside the prompt.</h3><p>SFTP and SCP with streaming progress, cancellation, overwrite decisions, recursive transfers, and remote text editing with conflict checks.</p></article>
-          <article class="feature-card"><span class="feature-index">C / OPERATE</span><div class="feature-icon" aria-hidden="true">▱</div><h3>Context for the next move.</h3><p>Tunnels, SOCKS5, snippets, cancellable macros, network diagnostics, and visible multi-exec targets.</p></article>
-          <article class="feature-card"><span class="feature-index">D / LOCAL</span><div class="feature-icon" aria-hidden="true">⌘</div><h3>Your machine is a session too.</h3><p>Native local shells, split panes, persistent tabs, typed shell targets, and WSL foundations.</p></article>
-          <article class="feature-card"><span class="feature-index">E / LEGACY</span><div class="feature-icon" aria-hidden="true">⌗</div><h3>Telnet and serial.</h3><p>Legacy Telnet is clearly labeled unencrypted. Serial adds explicit device settings, refresh, and recoverable disconnect handling.</p></article>
-          <article class="feature-card feature-card-outline"><span class="feature-index">F / EXPERIMENTS</span><div class="feature-icon" aria-hidden="true">◇</div><h3>Frontier, honestly marked.</h3><p>RDP and VNC are experimental. RDP is excluded from installers; VNC remote TCP is unencrypted and opt-in.</p></article>
-        </div>
-      </section>
-
-      <section class="trust-section" id="trust">
-        <div class="page-wrap trust-grid">
-          <div class="trust-copy">
-            <p class="eyebrow eyebrow-light"><span class="eyebrow-line"></span> 04 / Trust is part of the interface</p>
-            <h2>Your hosts.<br><em>Your machine.</em></h2>
-            <p>Conxol is local-first. Rust owns the sensitive work; the interface gets typed capabilities instead of an unrestricted system bridge.</p>
-            <a class="text-link-light" href="https://github.com/OthmaneBlial/MobaRust/blob/main/docs/security/threat-model.md">Read the threat model <span aria-hidden="true">↗</span></a>
-          </div>
-          <div class="trust-points">
-            <div><span>01</span><p><strong>Host keys stay explicit.</strong> Unknown SSH hosts are not silently trusted.</p></div>
-            <div><span>02</span><p><strong>Saved secrets stay in the vault.</strong> Profiles keep credential references. Interactive SSH answers belong to one challenge.</p></div>
-            <div><span>03</span><p><strong>Actions stay visible.</strong> Multiline paste, snippets, and multi-exec have deliberate controls.</p></div>
-            <div><span>04</span><p><strong>Checks stay local.</strong> Tests use isolated state and loopback fixtures, not personal keys or real hosts.</p></div>
-          </div>
-        </div>
-      </section>
-
-      <section class="download-section page-wrap section-pad" id="download">
-        <div class="download-heading">
-          <p class="eyebrow"><span class="eyebrow-line"></span> 05 / Try the preview</p>
-          <h2>Your next session<br><em>starts here.</em></h2>
-          <p>Free, open source, and ready to install. Preview builds lack publisher signing and still need full clean-install and interoperability evidence.</p>
-          <div class="release-update" aria-labelledby="release-update-title">
-            <p class="release-update-kicker">DESKTOP RELEASE · V0.1.60</p>
-            <h3 id="release-update-title">Build your network configuration.</h3>
-            <ul>
-              <li>Reusable Huawei, Cisco IOS XE and Juniper Junos templates, including logical systems.</li>
-              <li>Automatic CIDR conversion and peer addressing, with shared BGP ASNs and service overrides.</li>
-              <li>Compact interface and BGP inputs, editable policies and prefixes, and copy or text export.</li>
-            </ul>
-            <a class="text-link" href="https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60">Read v0.1.60 release notes <span aria-hidden="true">↗</span></a>
-          </div>
-          <a class="text-link" href="docs.html#limits">Read the known limits <span aria-hidden="true">↗</span></a>
-        </div>
-        <div class="download-grid">
-          <a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-windows-x64.exe"><span class="download-os">WINDOWS · X64</span><strong>Windows</strong><span>Installer · EXE · v0.1.60 <i aria-hidden="true">↗</i></span></a>
-          <a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-arm64.dmg"><span class="download-os">MACOS · APPLE SILICON</span><strong>Mac ARM</strong><span>Disk image · v0.1.60 <i aria-hidden="true">↗</i></span></a>
-          <a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg"><span class="download-os">MACOS · INTEL</span><strong>Mac Intel</strong><span>Disk image · v0.1.60 <i aria-hidden="true">↗</i></span></a>
-          <a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb"><span class="download-os">LINUX · DEBIAN</span><strong>Linux Debian</strong><span>Package · DEB · v0.1.60 <i aria-hidden="true">↗</i></span></a>
-          <a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage"><span class="download-os">LINUX · PORTABLE</span><strong>Linux AppImage</strong><span>Package · v0.1.60 <i aria-hidden="true">↗</i></span></a>
-          <a class="download-card download-card-release" href="https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60"><span class="download-os">ALL PLATFORMS · SHA-256 · NOTES</span><strong>Release files</strong><span>Checksums and install help <i aria-hidden="true">↗</i></span></a>
-          <p class="download-footnote">Windows, macOS and Linux downloads are v0.1.60. These previews lack publisher signing. Checksums confirm integrity, not identity. macOS may require per-app first-launch approval.</p>
-        </div>
-      </section>
-
-      <section class="closing-band">
-        <div class="page-wrap closing-inner">
-          <p class="eyebrow eyebrow-light"><span class="eyebrow-line"></span> Built in the open</p>
-          <h2>Make the remote<br><em>workday yours.</em></h2>
-          <div class="closing-actions"><a class="button button-lime" href="https://github.com/OthmaneBlial/MobaRust">Explore the source <span aria-hidden="true">↗</span></a><a class="text-link-light" href="https://github.com/OthmaneBlial/MobaRust/issues">Share a workflow you need <span aria-hidden="true">↗</span></a></div>
-        </div>
-      </section>
-    </main>
-
-    <footer class="site-footer">
-      <div class="page-wrap footer-main">
-        <a class="brand brand-footer" href="index.html"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5.5 7.5H26.5V12.5H18.5V27H13.5V12.5H5.5Z"/></svg></span><span>Conxol</span></a>
-        <p>Free and open source.<br>Built for people who operate systems.</p>
-        <nav aria-label="Footer">
-          <a href="docs.html">Documentation</a>
-          <a href="https://github.com/OthmaneBlial/MobaRust/blob/main/ROADMAP.md">Roadmap</a>
-          <a href="https://github.com/OthmaneBlial/MobaRust/blob/main/LICENSE">Apache 2.0</a>
-          <a href="https://github.com/OthmaneBlial/MobaRust/issues">Issues</a>
-        </nav>
-      </div>
-      <div class="page-wrap footer-bottom"><span>© <span data-year>2026</span> Conxol</span><span>Independent project · Not affiliated with Mobatek</span></div>
-    </footer>
-  </body>
-</html>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conxol | SSH Client, Network Tools &amp; Router Config Generator</title>
+  <meta name="description" content="Free, open-source SSH client for Windows, macOS and Linux. SFTP, serial consoles, network diagnostics and Huawei, Cisco and Juniper configuration templates.">
+  <meta name="theme-color" content="#0a120e"><link rel="canonical" href="https://thetonmoyroy.github.io/Conxol/">
+  <meta property="og:type" content="website"><meta property="og:site_name" content="Conxol"><meta property="og:url" content="https://thetonmoyroy.github.io/Conxol/">
+  <meta property="og:title" content="Conxol — Your network. One workspace."><meta property="og:description" content="An open-source SSH client, network toolkit and router configuration generator for Windows, macOS and Linux.">
+  <meta property="og:image" content="https://thetonmoyroy.github.io/Conxol/media/conxol-social.png"><meta property="og:image:width" content="1200"><meta property="og:image:height" content="630"><meta property="og:image:alt" content="Conxol: SSH terminals, network tools and router configuration templates.">
+  <meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="Conxol — Your network. One workspace."><meta name="twitter:description" content="SSH, SFTP, diagnostics and router configuration templates. Free and open source."><meta name="twitter:image" content="https://thetonmoyroy.github.io/Conxol/media/conxol-social.png">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="landing.css"><script src="landing.js" defer></script>
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Conxol","url":"https://thetonmoyroy.github.io/Conxol/","description":"Open-source SSH client, network terminal and router configuration generator.","applicationCategory":"DeveloperApplication","operatingSystem":"Windows, macOS, Linux","softwareVersion":"0.1.60","license":"https://www.apache.org/licenses/LICENSE-2.0","downloadUrl":"https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site-header"><div class="wrap header-inner">
+  <a class="brand" href="./" aria-label="Conxol home"><span class="brand-mark" aria-hidden="true">›_</span>conxol<span class="brand-dot">.</span></a>
+  <button class="menu-toggle" aria-expanded="false" aria-controls="site-nav">Menu <span aria-hidden="true">＋</span></button>
+  <nav id="site-nav" aria-label="Main navigation"><a href="#features">Workspace</a><a href="#generator">Config generator</a><a href="docs.html">Docs</a><a class="nav-download" href="#download">Get Conxol <span aria-hidden="true">↗</span></a></nav>
+</div></header>
+<main id="main">
+<section class="hero wrap" aria-labelledby="hero-title">
+  <div class="hero-copy"><a class="release-pill" href="https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60"><span class="status-dot"></span> NEW RELEASE <strong>0.1.60</strong><span aria-hidden="true">↗</span></a>
+  <p class="eyebrow">FOR PEOPLE WHO RUN NETWORKS</p>
+  <h1 id="hero-title">Your network.<br><span>One workspace.</span></h1>
+  <p class="hero-lead">SSH terminals, remote files, network diagnostics and router configurations. All together, without the tab hopping.</p>
+  <div class="hero-actions"><a class="button button-primary" href="#download">Download Conxol <span aria-hidden="true">↓</span></a><a class="button button-secondary" href="https://github.com/thetonmoyroy/Conxol">Explore on GitHub <span aria-hidden="true">↗</span></a></div>
+  <p class="hero-proof">Free &amp; open source <span>·</span> Windows, macOS &amp; Linux <span>·</span> No cloud account</p></div>
+  <div class="hero-visual"><div class="window"><div class="window-bar"><div class="window-dots" aria-hidden="true"><i></i><i></i><i></i></div><span>CONXOL / WORKSPACE</span><span class="window-state">SSH</span></div>
+  <div class="workspace"><aside class="device-list" aria-label="Illustrated saved devices"><span class="tiny-label">SAVED DEVICES</span><span class="device active"><b>◇</b> Edge router</span><span class="device"><b>◇</b> Core switch</span><span class="device"><b>◇</b> Lab server</span><span class="tiny-label tools-label">TOOLS</span><span class="tool">DNS lookup</span><span class="tool">Port scan</span><span class="tool accent">Config generator</span></aside>
+  <div class="terminal"><div class="terminal-tabs"><span class="selected">SSH / edge-router</span><span>Files</span><span>Tunnels</span></div><div class="terminal-output"><p class="muted">$ ssh operator@192.0.2.10</p><p><span class="accent">operator@edge-router&gt;</span> show interfaces</p><div class="interface-table"><span>INTERFACE</span><span>STATE</span><span>ADDRESS</span><b>uplink.200</b><b class="accent">UP</b><b>192.0.2.1/30</b><b>uplink.201</b><b class="accent">UP</b><b>192.0.2.5/30</b></div><div class="mini-preview"><span class="tiny-label">CONFIG PREVIEW</span><pre>interface Eth-Trunk1.200
+ <span class="accent">ip address 192.0.2.1 255.255.255.252</span></pre></div><span class="cursor" aria-hidden="true"></span></div></div></div></div>
+  <div class="visual-caption"><span class="status-dot"></span> CONNECT → CONFIGURE → TROUBLESHOOT <small>Illustrated workspace</small></div></div>
+</section>
+<div class="platform-strip"><div class="wrap"><span>ONE DESKTOP. YOUR DAILY TOOLKIT.</span><p>SSH <i>/</i> SFTP &amp; SCP <i>/</i> SERIAL <i>/</i> TUNNELS <i>/</i> DNS <i>/</i> CONFIG TEMPLATES</p></div></div>
+<section class="section wrap" id="features"><div class="section-top"><div><p class="eyebrow">01 / THE WORKSPACE</p><h2>Less switching.<br>More work done.</h2></div><p>Built with Rust and Tauri for network engineers, system administrators and homelab users. Keep the tools you reach for beside the terminal you already have open.</p></div>
+<div class="feature-grid">
+<article class="feature-card"><span class="feature-number">01</span><span class="feature-glyph" aria-hidden="true">&gt;_</span><h3>Every session in view.</h3><p>SSH terminals, tabs and split panes. Branch a connected session into another shell without another login.</p><span class="card-tag">SSH · LOCAL SHELLS · WSL</span></article>
+<article class="feature-card"><span class="feature-number">02</span><span class="feature-glyph" aria-hidden="true">⇄</span><h3>Files, without the detour.</h3><p>Browse SFTP directories, transfer with SCP/SFTP, and edit remote text with progress, cancellation and conflict checks.</p><span class="card-tag">SFTP · SCP · REMOTE EDITING</span></article>
+<article class="feature-card"><span class="feature-number">03</span><span class="feature-glyph" aria-hidden="true">⌁</span><h3>Find the fault faster.</h3><p>Keep DNS reports, TCP checks and bounded CIDR port scans beside your terminal. Export the report when you need it.</p><span class="card-tag">DNS · TCP · PORT SCANNING</span></article>
+<article class="feature-card"><span class="feature-number">04</span><span class="feature-glyph" aria-hidden="true">◇</span><h3>Reach the next network.</h3><p>Use jump hosts, local and remote SSH forwarding, and SOCKS5 proxies with explicit bind addresses and traffic counters.</p><span class="card-tag">JUMP HOSTS · SSH TUNNELS</span></article>
+<article class="feature-card"><span class="feature-number">05</span><span class="feature-glyph" aria-hidden="true">⊞</span><h3>A place for every device.</h3><p>Organize sessions in nested folders with favorites, recents, search, and custom device icons and colors.</p><span class="card-tag">SESSIONS · SHORTCUTS · NOTES</span></article>
+<article class="feature-card feature-card-warm"><span class="feature-number">06</span><span class="feature-glyph" aria-hidden="true">{ }</span><h3>Configure, then review.</h3><p>Turn shared service rows into vendor-specific commands. Save a template, fill the values, and copy or export the result.</p><a class="text-link" href="#generator">Meet the generator <span aria-hidden="true">↗</span></a></article>
+</div></section>
+<section class="generator-section" id="generator"><div class="wrap generator-layout"><div><p class="eyebrow">02 / FROM ROWS TO ROUTERS</p><h2>Write less.<br><span class="accent">Configure more.</span></h2><p class="section-lead">The repetitive part of onboarding a service shouldn't be your whole afternoon.</p><p>Fill in interfaces, VLANs, VPN names, addresses and BGP peers once. Preview the configuration for Huawei, Cisco IOS XE or Juniper Junos—including logical systems.</p><ul class="check-list"><li>CIDR → subnet mask and automatic peer IP</li><li>One remote BGP ASN, with per-service overrides</li><li>Editable prefixes, policies and default routes</li><li>Reusable templates and text export</li></ul><p class="quiet">Generated text stays yours to review. Conxol does not apply it to your devices.</p></div>
+<div class="generator-demo"><div class="demo-heading"><span class="tiny-label">SAME SERVICE. DIFFERENT SYNTAX.</span><span class="demo-example">Example / VLAN 200</span></div><div class="vendor-tabs" role="group" aria-label="Configuration example vendor"><button data-vendor="huawei" aria-pressed="true">Huawei</button><button data-vendor="cisco" aria-pressed="false">Cisco IOS XE</button><button data-vendor="juniper" aria-pressed="false">Juniper Junos</button></div><div class="service-example"><span>VLAN <b>200</b></span><span>VPN <b>IPBW</b></span><span>ADDRESS <b>192.0.2.1/30</b></span></div><pre class="code-preview" tabindex="0" aria-label="Configuration example"><code id="vendor-code">interface Eth-Trunk1.200
+ description MGMT_RTR-IPBW
+ ip binding vpn-instance IPBW
+ ip address 192.0.2.1 255.255.255.252
+ dot1q termination vid 200
+ statistics enable
+#</code></pre><p class="demo-footer" id="vendor-status" role="status">Huawei subinterface · documentation-only addresses</p></div></div></section>
+<section class="section wrap" id="download"><div class="section-top"><div><p class="eyebrow">03 / READY WHEN YOU ARE</p><h2>Make room for<br>your next connection.</h2></div><div><p>Conxol 0.1.60 is available for Windows, macOS and Linux. Free to use, inspect and fork under Apache-2.0.</p><a class="text-link" href="https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60">Release notes &amp; SHA-256 checksums ↗</a></div></div>
+<div class="download-grid">
+<a class="download-card store-card" href="https://apps.microsoft.com/store/detail/9NZVQ7W665BH?cid=DevShareMCLPCS"><span class="tiny-label">WINDOWS / MICROSOFT STORE</span><strong>Get it from the Store.</strong><span>Store-managed installation <b>↗</b></span></a>
+<a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-windows-x64.exe"><span class="tiny-label">WINDOWS / X64</span><strong>Windows installer</strong><span>EXE · v0.1.60 <b>↓</b></span></a>
+<a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-arm64.dmg"><span class="tiny-label">MACOS / APPLE SILICON</span><strong>Mac ARM</strong><span>DMG · M1 and newer <b>↓</b></span></a>
+<a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg"><span class="tiny-label">MACOS / INTEL</span><strong>Mac Intel</strong><span>DMG · x64 <b>↓</b></span></a>
+<a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb"><span class="tiny-label">LINUX / DEBIAN &amp; UBUNTU</span><strong>Linux DEB</strong><span>Debian package · x64 <b>↓</b></span></a>
+<a class="download-card" href="https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage"><span class="tiny-label">LINUX / PORTABLE</span><strong>Linux AppImage</strong><span>AppImage · x64 <b>↓</b></span></a></div>
+<p class="download-note">Mac packages are ad hoc signed and not notarized. The standalone Windows installer is unsigned. The Microsoft Store listing has its own release schedule. <a href="docs.html#installation">Installation notes ↗</a></p></section>
+<section class="trust-section"><div class="wrap trust-layout"><div><p class="eyebrow">04 / YOUR WORKSPACE, YOUR CONTROL</p><h2>Local by design.<br>Explicit about trust.</h2><p>Settings and saved connections stay local. Unknown SSH host keys require approval, changed keys are rejected, and remote execution has review boundaries.</p><a class="text-link" href="https://github.com/thetonmoyroy/Conxol/blob/main/SECURITY.md">Read the security policy ↗</a></div><div class="trust-points"><article><span>01</span><div><h3>No cloud account required</h3><p>Start with your devices and your desktop.</p></div></article><article><span>02</span><div><h3>A protected workspace</h3><p>Use a 4–12 digit PIN and password-encrypted backups with a restore preview.</p></div></article><article><span>03</span><div><h3>Open source, with credit</h3><p>Built with Rust and Tauri, on the foundation of MobaRust. Licensed under Apache-2.0.</p></div></article></div></div></section>
+<section class="section wrap faq-section" id="documentation"><div><p class="eyebrow">05 / A FEW GOOD ANSWERS</p><h2>Before you connect.</h2><p><a class="text-link" href="docs.html">Read the getting-started guide ↗</a></p></div><div class="faq-list">
+<details><summary>Is Conxol a MobaXterm alternative?</summary><p>Conxol is a free, open-source desktop option for SSH, file transfers, tunnels, serial access and network tools on Windows, macOS and Linux. Its feature set and platform support differ from MobaXterm; it is not a drop-in replacement for every workflow.</p></details>
+<details><summary>Does it send configurations to my routers?</summary><p>No. The generator produces editable configuration text. Review it, then copy or export it for your own deployment process. Built-in examples use documentation-only IP addresses and ASNs.</p></details>
+<details><summary>Which platforms and protocols have limits?</summary><p>Native Ping/MTR currently support IPv4 on Windows and macOS; Linux and IPv6 probing are not implemented. RDP is experimental and excluded from release bundles. Telnet and VNC TCP are unencrypted. See the documentation for authentication and installation limits.</p></details>
+<details><summary>Can I build it or report an issue?</summary><p>Yes. The <a href="https://github.com/thetonmoyroy/Conxol/blob/main/docs/development.md">development guide</a> covers local builds. Report bugs and request features through <a href="https://github.com/thetonmoyroy/Conxol/issues/new/choose">GitHub Issues</a>. External code contributions and pull requests are not accepted.</p></details></div></section>
+<section class="wrap final-cta"><div><p class="eyebrow">YOUR TERMINAL. YOUR DEVICES.</p><h2>Get back to the network.</h2></div><a class="button button-primary" href="#download">Get Conxol <span aria-hidden="true">↗</span></a></section>
+</main>
+<footer class="wrap footer"><a class="brand" href="./"><span class="brand-mark" aria-hidden="true">›_</span>conxol.</a><p>© <span data-year>2026</span> Conxol contributors. Based on <a href="https://github.com/OthmaneBlial/MobaRust">MobaRust</a>.</p><div><a href="https://github.com/thetonmoyroy/Conxol">GitHub</a><a href="https://github.com/thetonmoyroy/Conxol/blob/main/LICENSE">Apache-2.0</a><a href="docs.html">Documentation</a></div></footer>
+</body></html>
