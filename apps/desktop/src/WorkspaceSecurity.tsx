@@ -1,3 +1,4 @@
+import { literalInputProps } from "./literal-input";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -10,6 +11,15 @@ export function WorkspaceSecurity({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<WorkspaceLockStatus | null>(null);
   const [opened, setOpened] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    // Reveal the committed workspace or PIN/retry screen after it can paint.
+    if (!status && !error) return;
+    let secondFrame = 0;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => document.getElementById("startup-screen")?.remove());
+    });
+    return () => { cancelAnimationFrame(firstFrame); cancelAnimationFrame(secondFrame); };
+  }, [status, error]);
   const sequence = useRef(0);
   const refresh = useCallback(async () => {
     const ticket = ++sequence.current;
@@ -79,7 +89,7 @@ function UnlockWorkspace({ retry, onUnlocked }: { retry: number; onUnlocked: () 
     pin = "";
   }}>
     <label htmlFor="workspace-unlock-pin" className="workspace-pin-label">PIN</label>
-    <input ref={pinRef} id="workspace-unlock-pin" type="password" inputMode="numeric" pattern="[0-9]{4,12}" minLength={4} maxLength={12} autoComplete="off" autoFocus required disabled={busy} aria-describedby="workspace-pin-feedback" placeholder="••••" />
+    <input {...literalInputProps} ref={pinRef} id="workspace-unlock-pin" type="password" inputMode="numeric" pattern="[0-9]{4,12}" minLength={4} maxLength={12} autoComplete="off" autoFocus required disabled={busy} aria-describedby="workspace-pin-feedback" placeholder="••••" />
     <div id="workspace-pin-feedback" aria-live="polite">{retry > 0 ? <span>Try again in {retry} seconds.</span> : error ? <span role="alert">{error}</span> : null}</div>
     <button type="submit" className="primary-button" disabled={busy || retry > 0}>{busy ? <LoaderCircle size={14} className="spin" /> : <LockKeyhole size={14} />}{busy ? "Unlocking…" : "Unlock workspace"}</button>
     <small>Your sessions stay open while the workspace is locked.</small>
@@ -122,11 +132,11 @@ export function WorkspaceLockSettings() {
       <h3>{operation === "disable" ? "Turn off PIN lock" : operation === "change" ? "Change PIN" : operation === "idle" ? "Change idle timeout" : "Set up PIN lock"}</h3>
       {status?.enabled && <div className="workspace-pin-current">
         <label htmlFor="settings-current-pin">Current PIN <span>{operation === "disable" ? "Enter your PIN to turn off workspace protection." : "Enter your PIN to authorize this change."}</span></label>
-        <input key={operation} id="settings-current-pin" ref={currentRef} type="password" inputMode="numeric" maxLength={12} autoComplete="off" disabled={busy} placeholder="Enter your existing workspace PIN" autoFocus />
+        <input {...literalInputProps} key={operation} id="settings-current-pin" ref={currentRef} type="password" inputMode="numeric" maxLength={12} autoComplete="off" disabled={busy} placeholder="Enter your existing workspace PIN" autoFocus />
       </div>}
       {(operation === "change" || operation === "enable") && <div className="settings-grid">
-        <label>New PIN<input ref={newRef} type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" disabled={busy} placeholder="4–12 digits" /></label>
-        <label>Confirm new PIN<input ref={confirmRef} type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" disabled={busy} placeholder="Re-enter the new PIN" /></label>
+        <label>New PIN<input {...literalInputProps} ref={newRef} type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" disabled={busy} placeholder="4–12 digits" /></label>
+        <label>Confirm new PIN<input {...literalInputProps} ref={confirmRef} type="password" inputMode="numeric" maxLength={12} autoComplete="new-password" disabled={busy} placeholder="Re-enter the new PIN" /></label>
       </div>}
       {(operation === "idle" || operation === "enable") && <>
     <div className="settings-grid workspace-pin-idle">

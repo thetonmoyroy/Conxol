@@ -33,7 +33,9 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-ssh` | russh transport, per-hop trust/authentication, PTY channels, SFTP/SCP, forwarding, bounded remote editing/monitoring, X11 channels |
 | `crates/conxol-store` | Versioned atomic persistence; OpenSSH and profile import/export; validation and corruption refusal |
 | `crates/conxol-vault` | Native OS credential store and separate Argon2id/AES-GCM portable vault; zeroizing secret material |
-| `crates/conxol-network` | Bounded DNS/TCP/scan/ping/traceroute primitives |
+| `crates/conxol-network` | Bounded DNS/TCP/scan and async native Ping/MTR adapters |
+| `crates/conxol-ping` | Shared native IPv4 ICMP transport, Ping statistics/scheduler and CLI |
+| `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
 | `crates/conxol-telnet` | Plaintext Telnet negotiation, transport, and lifecycle |
 | `crates/conxol-serial` | Serial configuration, transport, and recoverable device loss |
 | `crates/conxol-remote-desktop` | Versioned bounded helper frames, capability validation, credentials/control separation, process supervision |
@@ -273,3 +275,36 @@ of the currently displayed report through a native Save dialog. Export works
 while a live test runs without stopping it. The native export accepts only known
 tool names and bounds content at 16 MiB; it is distinct from the sanitized
 support-diagnostics JSON export. Browser previews use a text download.
+
+
+## Telnet form login
+
+New Telnet sessions accept optional username/password fields and an explicit
+Save password checkbox. The password field is uncontrolled and cleared on submit;
+secrets are sent only to the native manager, outside terminal input recording and
+broadcast. Saved profiles contain username and an opaque system credential-store
+reference, never password text. Blank fields preserve manual terminal login.
+The native manager recognizes conventional initial username/login/password prompts,
+including fragmented ANSI-colored prompts, and sends each field once per connection.
+Rejected credentials fall back to manual login; reconnect resets the prompt tracker.
+Automatic login expires after 60 seconds and stops at a conventional shell prompt.
+Telnet remains unencrypted. Nonstandard device prompts need manual login.
+Run `cargo xtask test-telnet` for isolated synthetic prompt/attachment regressions.
+
+
+## Verbose TCP connection diagnostic
+
+Diagnostics > TCP check defaults to port 80; SSH host-key inspection retains its
+independent port 22 field. `network_check_tcp` returns `TcpConnectReport` from
+`crates/conxol-network/src/tcp_report.rs`. Its text includes resolution details,
+up to 16 distinct IPv4/IPv6 endpoints, sequential connection attempts and timing,
+local/remote socket endpoints, OS failure details, and a final summary. It also
+reports separate millisecond timings, remaining deadline, address-family counts,
+local socket buffer sizes, keepalive, TCP_NODELAY, SO_LINGER, and outgoing TTL/hop
+limit where the OS exposes them. Socket buffer sizes are not negotiated TCP
+windows, and connect latency is not a packet-capture RTT. One shared
+deadline bounds DNS and all attempts. The connection closes after the handshake;
+no application data is sent and open TCP is not treated as proof of HTTP/TLS health.
+Port scans retain their compact result format. Copy/export use the displayed
+report. `cargo xtask test-network` covers disposable loopback success/refusal,
+expired deadlines, and invalid requests without querying external targets.

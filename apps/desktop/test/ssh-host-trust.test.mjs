@@ -65,8 +65,19 @@ assert.equal(sidebarWidth(1000, 1100), 710);
 {
   const request = { host: 'fixture.test', port: 22, auth: { method: 'password', credentialId: 'fixture' } };
   const { services } = fixture({ inspect: async endpoint => {
-    assert.deepEqual(Object.keys(endpoint).sort(), ['host', 'port']);
+    assert.deepEqual(Object.keys(endpoint).sort(), ['host', 'legacyRsa', 'port']);
     return { ...endpoint, fingerprint };
   }});
   assert.equal(await approveUnknownHost(request, services), true);
+}
+
+{
+  const target = { host: 'fixture.test', port: 22, legacyRsa: true };
+  const { calls, services } = fixture({ inspect: async endpoint => {
+    assert.equal(endpoint.legacyRsa, true);
+    return { host: endpoint.host, port: endpoint.port, fingerprint };
+  }});
+  assert.equal(await approveUnknownHost(target, services), true);
+  assert.equal(target.pinnedFingerprint, fingerprint);
+  assert.deepEqual(calls, ['lookup', 'confirm', 'save']);
 }

@@ -3,6 +3,17 @@
 .config-generator p { color: var(--muted); line-height: 1.6; font-size: 12px; }
 .generator-columns { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 20px; margin-top: 22px; align-items: start; }
 .generator-builder { display: grid; gap: 16px; }
+.generator-mode { padding: 0 24px; }
+.generator-mode [aria-pressed="true"] { border-color: var(--mint); color: var(--mint); }
+.config-generator[hidden] { display: none; }
+.generator-table-scroll { overflow: auto; max-height: 55vh; margin-bottom: 12px; }
+.generator-data-table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.generator-data-table th, .generator-data-table td { padding: 6px; text-align: left; border-bottom: 1px solid var(--line); }
+.generator-data-table input { min-width: 140px; }
+.generator-data-table input[type="checkbox"] { min-width: 0; width: 18px; height: 18px; }
+.generator-section-editor { display: grid; gap: 8px; margin-top: 16px; font-size: 12px; }
+.generator-data-table .generator-actions { flex-wrap: nowrap; }
+.config-generator select { background: var(--panel-soft); color: var(--text); padding: 8px; border: 1px solid var(--line); border-radius: 6px; max-width: 300px; }
 .generator-card { border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--panel); }
 .generator-card h3 { margin: 0 0 14px; font-size: 15px; }
 .generator-range { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
@@ -54,3 +65,50 @@
 .generator-simple-branch h4 { font-size: 12px; margin: 0 0 12px; }
 .generator-simple-section textarea { resize: vertical; line-height: 1.8; }
 .generator-simple-section .generator-number-buttons { margin-bottom: 0; }
+
+/* Template workflow: enter values first, review output last. */
+.config-generator:has(.template-workspace) { padding: 12px; box-sizing: border-box; }
+.config-generator:has(.template-workspace) h2 { font-size: 18px; margin: 0; }
+.config-generator:has(.template-workspace) .generator-heading p { margin: 3px 0 8px; }
+.template-workspace { min-width: 0; max-width: 100%; }
+.template-workspace .generator-columns { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 10px; }
+.template-workspace .generator-builder { min-width: 0; gap: 10px; }
+.template-workspace .generator-card { min-width: 0; padding: 12px; border-radius: 7px; }
+.template-workspace .generator-card h3 { font-size: 13px; margin: 0 0 8px; }
+.template-workspace p { margin: 5px 0 8px; line-height: 1.4; font-size: 11px; }
+.template-workspace .generator-actions { gap: 6px; margin: 6px 0; }
+.template-workspace .generator-actions button { padding: 5px 9px; font-size: 11px; }
+.template-workspace input, .template-workspace textarea, .template-workspace select { padding: 5px 7px; font-size: 12px; }
+.template-workspace select { max-width: min(480px, 65vw); }
+.template-workspace .generator-range { max-width: 620px; gap: 10px; }
+.template-workspace .generator-range label { gap: 4px; }
+.template-workspace .generator-data-table { font-size: 11px; }
+.template-workspace .generator-data-table th, .template-workspace .generator-data-table td { padding: 4px; }
+.template-workspace .generator-data-table input:not([type="checkbox"]) { min-width: 100px; }
+.template-workspace .generator-table-scroll { max-width: 100%; margin-bottom: 6px; }
+.template-workspace .generator-preview { position: static; }
+.template-workspace .generator-preview textarea { height: 320px; min-height: 220px; line-height: 1.4; }
+.template-workspace .generator-simple-editor { min-height: 90px; height: 120px; line-height: 1.4; }
+.template-workspace .generator-section-editor { margin-top: 10px; gap: 4px; }
+.template-workspace .generator-number-buttons { margin: 6px 0 0; gap: 4px; }
+.template-workspace summary { cursor: pointer; font-size: 12px; }
+.template-workspace .template-editors > summary { font-weight: 600; }
+.template-workspace .template-editors[open] > summary { margin-bottom: 10px; }
+.template-workspace .template-notes { color: var(--muted); margin: 5px 0; }
+.template-workspace .generator-peer-auto { display: flex; align-items: center; gap: 4px; color: var(--muted); font-size: 10px; margin: 0; white-space: nowrap; flex: none; }
+.template-workspace .generator-peer-auto input[type="checkbox"] { width: 12px; height: 12px; margin: 0; }
+.template-workspace .generator-services h4 { font-size: 12px; margin: 12px 0 6px; }
+.template-workspace .generator-service-table th { white-space: nowrap; }
+.template-workspace .generator-service-table td { vertical-align: middle; }
+.template-workspace .generator-service-table .generator-cell-input { display: flex; align-items: center; gap: 6px; }
+.template-workspace .generator-service-table input:not([type="checkbox"]) { min-width: 120px; height: 28px; }
+.template-workspace .generator-service-table [data-field="vlan"] input,
+.template-workspace .generator-service-table [data-field="peer_as"] input { min-width: 70px; }
+.template-workspace .generator-service-table [data-field="mask"] input,
+.template-workspace .generator-service-table [data-field="ip"] input { min-width: 140px; }
+.template-workspace .generator-service-table [data-field="import_policy"] input,
+.template-workspace .generator-service-table [data-field="export_policy"] input { min-width: 150px; }
+.template-workspace .generator-service-table [data-field="peer_ip"] .generator-cell-input { min-width: 190px; }
+.template-workspace .generator-row-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.template-workspace .generator-row-actions button,
+.template-workspace .generator-services > button { min-height: 26px; padding: 4px 7px; font-size: 11px; line-height: 1.2; }

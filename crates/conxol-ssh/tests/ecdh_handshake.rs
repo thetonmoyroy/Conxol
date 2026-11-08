@@ -44,6 +44,7 @@ async fn ecdh_only_servers_complete_verified_handshakes() {
             }
         });
         let inspection = inspect_host_key(SshFingerprintOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port,
             timeout: Duration::from_secs(5),

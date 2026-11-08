@@ -934,6 +934,7 @@ fn distinct_jump_hosts_verify_every_key_and_reach_the_target() {
             wait_for_port(fixture.port).await;
             fingerprints.push(
                 inspect_host_key(SshFingerprintOptions {
+                    legacy_rsa: false,
                     host: "127.0.0.1".into(),
                     port: fixture.port,
                     timeout: Duration::from_secs(5),
@@ -1976,6 +1977,7 @@ fn connects_to_a_reproducible_local_sshd_fixture_with_a_real_pty_shell() {
         let unknown_hosts = fixture.directory.path().join("unknown_hosts");
         fs::write(&unknown_hosts, "").expect("create empty known_hosts file");
         let rejection = SshConnection::connect(SshConnectOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: fixture.port,
             host_key_policy: HostKeyPolicy::KnownHosts(unknown_hosts),
@@ -2002,6 +2004,7 @@ fn connects_to_a_reproducible_local_sshd_fixture_with_a_real_pty_shell() {
         };
 
         let inspection = inspect_host_key(SshFingerprintOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: fixture.port,
             timeout: Duration::from_secs(5),
@@ -2013,6 +2016,7 @@ fn connects_to_a_reproducible_local_sshd_fixture_with_a_real_pty_shell() {
         assert_eq!(inspection.port, fixture.port);
 
         let connection = SshConnection::connect(SshConnectOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: fixture.port,
             host_key_policy: HostKeyPolicy::KnownHosts(fixture.known_hosts.clone()),
@@ -2655,6 +2659,7 @@ fn forwards_an_explicit_x11_channel_to_a_loopback_display_fixture() {
         });
 
         let connection = SshConnection::connect(SshConnectOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: fixture.port,
             host_key_policy: HostKeyPolicy::KnownHosts(fixture.known_hosts.clone()),
@@ -2735,6 +2740,7 @@ fn forwards_x11_setup_to_a_disposable_xvfb_server_when_available() {
         wait_for_port(fixture.port).await;
 
         let connection = SshConnection::connect(SshConnectOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: fixture.port,
             host_key_policy: HostKeyPolicy::KnownHosts(fixture.known_hosts.clone()),
@@ -2988,6 +2994,7 @@ impl LocalSshd {
 
     fn options(&self) -> SshConnectOptions {
         SshConnectOptions {
+            legacy_rsa: false,
             host: "127.0.0.1".into(),
             port: self.port,
             host_key_policy: HostKeyPolicy::KnownHosts(self.known_hosts.clone()),

@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Conxol",
-  "version": "0.1.53",
+  "version": "0.1.60",
   "identifier": "com.othmane.conxol",
   "build": {
     "beforeDevCommand": "pnpm dev",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://127.0.0.1:15420",
     "beforeBuildCommand": "node ../../tools/prepare-desktop.mjs",
     "frontendDist": "../dist"
   },
@@ -18,18 +18,18 @@
         "minWidth": 1100,
         "minHeight": 680,
         "decorations": true,
+        "backgroundColor": "#0b100f",
         "resizable": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; connect-src ipc: http://ipc.localhost http://localhost:1420; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; connect-src ipc: http://ipc.localhost http://127.0.0.1:15420; img-src 'self' asset: https://asset.localhost data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
     }
   },
   "bundle": {
     "active": true,
     "resources": {
       "helpers/*": "helpers/",
-      "../../../tools/mtr/windows-x86_64/*": "helpers/mtr/",
       "../src/assets/fonts/JetBrainsMono-OFL.txt": "licenses/JetBrainsMono-OFL.txt",
       "../../../LICENSE": "LICENSE",
       "../../../NOTICE": "NOTICE"

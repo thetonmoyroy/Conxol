@@ -615,6 +615,7 @@ impl Fixture {
             Zeroizing::new(Uuid::new_v4().to_string())
         });
         SshConnectOptions {
+            legacy_rsa: false,
             host: self.address.ip().to_string(),
             port: self.address.port(),
             host_key_policy: HostKeyPolicy::PinnedFingerprint(self.fingerprint.clone()),
@@ -999,6 +1000,7 @@ fn native_fixture_options(metadata: &serde_json::Value) -> SshConnectOptions {
     let password = Zeroizing::new(metadata["password"].as_str().unwrap().to_owned());
     let otp = Zeroizing::new(metadata["otp"].as_str().unwrap().to_owned());
     SshConnectOptions {
+        legacy_rsa: false,
         host: metadata["host"].as_str().unwrap().to_owned(),
         port: u16::try_from(metadata["port"].as_u64().unwrap()).unwrap(),
         host_key_policy: HostKeyPolicy::PinnedFingerprint(

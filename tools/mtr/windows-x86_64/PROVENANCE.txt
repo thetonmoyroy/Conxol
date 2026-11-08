@@ -1,6 +1,0 @@
-windows-mtr v1.2.9 (Windows x86_64), unmodified upstream mtr.exe.
-Source: https://github.com/benjisho/windows-mtr/tree/v1.2.9
-Archive: https://github.com/benjisho/windows-mtr/releases/download/v1.2.9/windows-mtr-x86_64.zip
-Archive SHA-256: 7fb36cd09f912cb9064047a6b16eda915be8a450f5317d04ef5aff27c34481be
-License: Apache-2.0 (LICENSE.txt). Upstream README.txt and SHA256SUM retained.
-Conxol runs only report mode against the explicitly supplied target.

@@ -22,14 +22,12 @@ try {
         & pnpm --dir apps/desktop tauri build --no-bundle
         if ($LASTEXITCODE -ne 0) { throw 'Tauri release build failed.' }
     }
-    & node tools/mtr/verify.mjs
-    if ($LASTEXITCODE -ne 0) { throw 'MTR provenance verification failed.' }
 
     # Fresh allowlisted staging prevents local state and obsolete helpers entering the upload.
     $output = Join-Path $repoRoot 'target/release/bundle/msix'
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $stage = Join-Path $output ("staging-" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path "$stage/Assets", "$stage/helpers/mtr", "$stage/licenses" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$stage/Assets", "$stage/helpers", "$stage/licenses" -Force | Out-Null
     $payload = @{
         'target/release/conxol.exe' = 'conxol.exe'
         'apps/desktop/src-tauri/helpers/conxol-vnc-helper.exe' = 'helpers/conxol-vnc-helper.exe'
@@ -39,9 +37,6 @@ try {
         'apps/desktop/src-tauri/icons/Square44x44Logo.png' = 'Assets/Square44x44Logo.png'
         'apps/desktop/src-tauri/icons/Square150x150Logo.png' = 'Assets/Square150x150Logo.png'
         'apps/desktop/src-tauri/icons/StoreLogo.png' = 'Assets/StoreLogo.png'
-    }
-    foreach ($name in @('mtr.exe', 'LICENSE.txt', 'PROVENANCE.txt', 'README.txt', 'SHA256SUM')) {
-        $payload["tools/mtr/windows-x86_64/$name"] = "helpers/mtr/$name"
     }
     foreach ($source in $payload.Keys) {
         $sourcePath = Join-Path $repoRoot $source

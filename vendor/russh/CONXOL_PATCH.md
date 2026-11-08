@@ -66,18 +66,23 @@ and enables only `aws-lc-rs` and `flate2`; RSA remains disabled.
 `keys::key::verify_server_signature` verifies RSA-SHA2 server exchange
 signatures with the already enabled AWS-LC backend's public-key-only
 `RsaPublicKeyComponents` verifier (2048–8192 bits). The client KEX path calls
-it with the negotiated algorithm; SHA-1 and mismatched signature algorithms
-are rejected. Other host key types retain the existing verifier.
+it with the negotiated algorithm; mismatched signature algorithms are rejected.
+Explicitly negotiated ssh-rsa uses AWS-LC
+`RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY` public verification with the
+same 2048–8192-bit bound. Other host key types retain the existing verifier.
 
 This does not enable the `rsa` feature, RSA private-key loading/signing, or
 the RustCrypto RSA dependency gated by RUSTSEC-2023-0071. Conxol excludes
-legacy ssh-rsa/SHA-1 from its advertised host algorithms. Host-key approval
+legacy ssh-rsa/SHA-1 from its default advertised host algorithms. An explicit
+per-host legacy_rsa option appends it last for inspection and connection;
+other algorithms and trust enforcement are unchanged. Host-key approval
 and exact fingerprint matching remain required for authenticated sessions.
 
 Regression: `cargo test --locked -p conxol-ssh --lib --test rsa_host_signature`.
 Synthetic OpenSSL-generated public-key/signature vectors cover RSA-SHA256,
 RSA-SHA512, modified messages/signatures, algorithm mismatches, and SHA-1
-refusal. No fixture private key is retained. No upstream result is claimed.
+tampering refusal. A separate synthetic SHA-1 signature/public-key fixture
+covers valid legacy verification and mismatches. No fixture private key is retained. No upstream result is claimed.
 
 ## PKCS#5 feature-gated local variable
 

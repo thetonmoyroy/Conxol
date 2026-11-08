@@ -9,8 +9,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use serde::{Deserialize, Serialize};
 use conxol_core::{ConnectionEvent, ConnectionLifecycle, ConnectionState};
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const MAX_READ_BYTES: usize = 64 * 1024;
@@ -196,12 +196,15 @@ impl SerialOptions {
         bytes
     }
 
-    /// Applies the configured line ending only to an isolated terminal Enter.
+    /// Frames isolated Enter and Backspace keys for device consoles.
     /// Other input remains byte-for-byte unchanged so pasted text and control
     /// sequences are not unexpectedly rewritten.
     pub fn frame_terminal_input(&self, input: &[u8]) -> Vec<u8> {
         if matches!(input, b"\r" | b"\n") {
             self.line_ending.suffix().to_vec()
+        } else if input == b"\x7f" {
+            // xterm emits DEL for Backspace; network-device consoles use BS.
+            b"\x08".to_vec()
         } else {
             input.to_vec()
         }
@@ -224,11 +227,35 @@ fn default_open_timeout() -> Duration {
 
 type PortHandle = Arc<Mutex<Option<Box<dyn serialport::SerialPort>>>>;
 
+type PendingRead =
+    tokio::sync::Mutex<Option<tokio::task::JoinHandle<Result<Vec<u8>, SerialError>>>>;
+
+// select! may drop the caller when keyboard input wins. Keep the blocking
+// worker owned by the connection so the next read receives its bytes, rather
+// than starting another worker and silently discarding the previous result.
+async fn read_from_worker(
+    pending: &PendingRead,
+    timeout: Duration,
+    read: impl FnOnce() -> Result<Vec<u8>, SerialError> + Send + 'static,
+) -> Result<Vec<u8>, SerialError> {
+    let mut pending = pending.lock().await;
+    let worker = pending.get_or_insert_with(|| tokio::task::spawn_blocking(read));
+    let result = tokio::time::timeout(timeout, worker).await;
+    match result {
+        Ok(result) => {
+            pending.take();
+            result.map_err(|_| SerialError::Worker)?
+        }
+        Err(_) => Err(SerialError::Timeout),
+    }
+}
+
 /// A native serial connection. All blocking driver calls run outside the
 /// async executor and are bounded by the driver's configured I/O timeout.
 pub struct SerialConnection {
     options: SerialOptions,
     port: PortHandle,
+    pending_read: PendingRead,
     lifecycle: Mutex<ConnectionLifecycle>,
 }
 
@@ -287,6 +314,7 @@ impl SerialConnection {
         Ok(Self {
             options,
             port: Arc::new(Mutex::new(Some(port))),
+            pending_read: PendingRead::default(),
             lifecycle: Mutex::new(lifecycle),
         })
     }
@@ -305,24 +333,25 @@ impl SerialConnection {
         }
         let maximum = maximum.clamp(1, MAX_READ_BYTES);
         let port = Arc::clone(&self.port);
-        let operation = tokio::task::spawn_blocking(move || {
-            let mut guard = port.lock().map_err(|_| SerialError::Worker)?;
-            let Some(port) = guard.as_mut() else {
-                return Err(SerialError::Closed);
-            };
-            let mut buffer = vec![0_u8; maximum];
-            match std::io::Read::read(&mut **port, &mut buffer) {
-                Ok(read) => {
-                    buffer.truncate(read);
-                    Ok(buffer)
+        let result = read_from_worker(
+            &self.pending_read,
+            self.options.io_timeout.saturating_mul(2),
+            move || {
+                let mut guard = port.lock().map_err(|_| SerialError::Worker)?;
+                let Some(port) = guard.as_mut() else {
+                    return Err(SerialError::Closed);
+                };
+                let mut buffer = vec![0_u8; maximum];
+                match std::io::Read::read(&mut **port, &mut buffer) {
+                    Ok(read) => {
+                        buffer.truncate(read);
+                        Ok(buffer)
+                    }
+                    Err(error) => classify_read_error(error),
                 }
-                Err(error) => classify_read_error(error),
-            }
-        });
-        let result = tokio::time::timeout(self.options.io_timeout.saturating_mul(2), operation)
-            .await
-            .map_err(|_| SerialError::Timeout)?
-            .map_err(|_| SerialError::Worker)?;
+            },
+        )
+        .await;
         if let Err(error) = &result
             && error.is_device_loss()
         {
@@ -367,6 +396,11 @@ impl SerialConnection {
         self.lock_lifecycle()
             .apply(ConnectionEvent::BeginReconnect)
             .map_err(|_| SerialError::Lifecycle)?;
+        // Finish the old port's reader before replacing its handle. Never let
+        // an outstanding worker consume bytes from the reconnected device.
+        if let Some(worker) = self.pending_read.lock().await.take() {
+            let _ = worker.await;
+        }
         self.take_port()?;
         let options = self.options.clone();
         let open_options = options.clone();
@@ -545,6 +579,96 @@ impl From<SerialFlowControl> for serialport::FlowControl {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn serial_tab_reaches_device_unchanged_for_cli_completion() {
+        let options = super::SerialOptions::new("fixture", 9600);
+        assert_eq!(options.frame_terminal_input(b"\t"), b"\x09");
+        assert_eq!(options.frame_terminal_input(b"\x1b[Z"), b"\x1b[Z");
+        assert_eq!(options.frame_terminal_input(b"show\t"), b"show\t");
+    }
+
+    #[test]
+    fn serial_backspace_uses_bs_without_rewriting_delete_or_pasted_text() {
+        let options = super::SerialOptions::new("fixture", 9600);
+        assert_eq!(options.frame_terminal_input(b"\x7f"), b"\x08");
+        for bytes in [b"\x08".as_slice(), b"\x1b[3~", b"command\x7ftext", b"\x03"] {
+            assert_eq!(options.frame_terminal_input(bytes), bytes);
+        }
+    }
+    #[tokio::test]
+    async fn serial_read_survives_repeated_keyboard_select_cancellation() {
+        let pending = super::PendingRead::default();
+        let mut received = Vec::new();
+        let mut expected = Vec::new();
+        for index in 0..64 {
+            let bytes =
+                format!("interface Ethernet{index}\r\n description fixture ☃\r\n").into_bytes();
+            expected.extend_from_slice(&bytes);
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            {
+                let read = super::read_from_worker(&pending, Duration::from_secs(3), move || {
+                    started_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+                    Ok(bytes)
+                });
+                tokio::pin!(read);
+                tokio::select! {
+                    result = &mut read => panic!("read completed before keyboard interrupt: {result:?}"),
+                    started = tokio::time::timeout(Duration::from_secs(3), started_rx) => { started.unwrap().unwrap(); }
+                }
+                // The manager drops this future when a keyboard command wins.
+            }
+            assert!(pending.lock().await.is_some());
+            release_tx.send(()).unwrap();
+            received.extend(
+                super::read_from_worker(&pending, Duration::from_secs(3), || {
+                    panic!("a replacement read must not consume another chunk")
+                })
+                .await
+                .unwrap(),
+            );
+            assert!(pending.lock().await.is_none());
+        }
+        assert_eq!(
+            received, expected,
+            "every configuration byte must arrive once and in order"
+        );
+    }
+
+    #[tokio::test]
+    async fn serial_read_timeout_preserves_worker_and_completed_errors_allow_retry() {
+        let pending = super::PendingRead::default();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let result = super::read_from_worker(&pending, Duration::from_millis(20), move || {
+            release_rx.recv_timeout(Duration::from_secs(3)).unwrap();
+            Ok(b"Configuration written\r\nOLT#".to_vec())
+        })
+        .await;
+        assert!(matches!(result, Err(super::SerialError::Timeout)));
+        release_tx.send(()).unwrap();
+        let bytes = super::read_from_worker(&pending, Duration::from_secs(3), || {
+            panic!("worker already exists")
+        })
+        .await
+        .unwrap();
+        assert_eq!(bytes, b"Configuration written\r\nOLT#");
+        assert!(matches!(
+            super::read_from_worker(&pending, Duration::from_secs(3), || Err(
+                super::SerialError::Io { operation: "read" }
+            ))
+            .await,
+            Err(super::SerialError::Io { .. })
+        ));
+        assert!(pending.lock().await.is_none());
+        assert_eq!(
+            super::read_from_worker(&pending, Duration::from_secs(3), || Ok(b"retry".to_vec()))
+                .await
+                .unwrap(),
+            b"retry"
+        );
+    }
+
     use super::*;
 
     #[test]

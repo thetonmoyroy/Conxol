@@ -1,4 +1,203 @@
 import assert from 'node:assert/strict';
+import { ciscoTemplate, juniperTemplate, juniperLogicalTemplate, builtinRows } from '../src/vendor-config-templates.ts';
+import { effectiveRemoteAs, remoteAsOverridden, automaticPeerIp, editServiceValue, normalizeInterfaceAddress, prefixToMask, combinedTemplate, combinedRows, prefixRows, renderCombined } from '../src/config-templates.ts';
+import { huaweiTemplate, huaweiRows, templateFields, renderTemplate, encodeTemplates, decodeTemplates } from '../src/config-templates.ts';
+
+const expectedHuawei = ['IPBW', 'GGC', 'FNA', 'CDN', 'BDIX'].map((vpn, index) => `interface Eth-Trunk1.${200 + index}\ndescription MGMT_RTR-${vpn}\nip binding vpn-instance ${vpn}\nip address 192.0.2.${1 + index * 4} 255.255.255.252\ndot1q termination vid ${200 + index}\nstatistics enable\n#`).join('\n');
+for (let length = 0; length <= 32; length++) {
+  const bits = prefixToMask(String(length)).split('.').map(part => Number(part).toString(2).padStart(8, '0')).join('');
+  assert.equal(bits, '1'.repeat(length) + '0'.repeat(32 - length));
+  assert.equal(prefixToMask(`/${length}`), prefixToMask(String(length)));
+}
+assert.deepEqual(normalizeInterfaceAddress({ip: '192.0.2.3/31', mask: '255.255.255.0'}), {ip: '192.0.2.3', mask: '255.255.255.254'});
+assert.deepEqual(normalizeInterfaceAddress({ip: '192.0.2.1', mask: '/30'}), {ip: '192.0.2.1', mask: '255.255.255.252'});
+const typingCidr = editServiceValue({ip: '192.0.2.1', mask: '255.255.255.0'}, 'ip', '192.0.2.1/30');
+assert.equal(typingCidr.ip, '192.0.2.1/30');
+assert.equal(typingCidr.mask, '255.255.255.252');
+assert.deepEqual(editServiceValue(typingCidr, 'mask', '/29'), {ip: '192.0.2.1', mask: '/29', peer_ip: '192.0.2.2'});
+for (const [ip, mask, peer] of [
+  ['192.0.2.1', '/30', '192.0.2.2'], ['192.0.2.2', '255.255.255.252', '192.0.2.1'],
+  ['192.0.2.0', '/31', '192.0.2.1'], ['192.0.2.1', '/31', '192.0.2.0'],
+  ['192.0.2.254', '/24', '192.0.2.253'], ['192.0.2.10', '/24', '192.0.2.11'],
+  ['192.0.2.0', '/30', ''], ['192.0.2.3', '/30', ''], ['192.0.2.1', '/32', ''],
+  ['192.0.2.1', '255.0.255.0', ''], ['192.0.2.', '/30', ''],
+  ['192.0.2.1/30', '', '192.0.2.2'], ['255.255.255.254', '/31', '255.255.255.255'],
+]) assert.equal(automaticPeerIp({ip, mask}), peer);
+const autoPeer = editServiceValue(combinedRows()[0], 'ip', '198.51.100.1/30');
+assert.equal(autoPeer.peer_ip, '198.51.100.2');
+assert.equal(editServiceValue(autoPeer, 'ip', '198.51.100.2').peer_ip, '198.51.100.1');
+assert.equal(editServiceValue(autoPeer, 'ip', '198.51.100.').peer_ip, '');
+const manualPeer = editServiceValue(autoPeer, 'peer_ip', '203.0.113.1');
+assert.equal(manualPeer.peer_ip_mode, 'manual');
+assert.equal(editServiceValue(manualPeer, 'ip', '198.51.100.5/30').peer_ip, '203.0.113.1');
+assert.equal(editServiceValue(manualPeer, 'mask', '/31').peer_ip, '203.0.113.1');
+assert.equal(editServiceValue(manualPeer, 'peer_ip_mode', 'auto').peer_ip, '198.51.100.2');
+for (const vendor of [combinedTemplate, ciscoTemplate, juniperTemplate, juniperLogicalTemplate]) {
+  const data = builtinRows(vendor.id);
+  data[0] = editServiceValue(data[0], 'ip', '198.51.100.1/30');
+  const result = renderCombined(vendor, data, prefixRows());
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.text.includes(vendor === combinedTemplate ? 'peer 198.51.100.2 as-number' : vendor === ciscoTemplate ? 'neighbor 198.51.100.2 remote-as' : 'neighbor 198.51.100.2 peer-as'));
+}
+assert.equal(editServiceValue(typingCidr, 'ip', '192.0.2.1/').ip, '192.0.2.1/');
+for (const template of [huaweiTemplate, combinedTemplate, ciscoTemplate, juniperTemplate, juniperLogicalTemplate]) {
+  const standard = builtinRows(template.id);
+  const expected = renderCombined(template, standard, prefixRows()).text;
+  for (const kind of ['cidr', 'numeric', 'slash']) {
+    const entered = standard.map(row => kind === 'cidr' ? {...row, ip: `${row.ip}/30`, mask: ''} : {...row, mask: kind === 'numeric' ? '30' : '/30'});
+    const result = renderCombined(template, entered, prefixRows());
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.text, expected);
+  }
+}
+for (const ip of ['192.0.2.1/33', '192.0.2.1/-1', '192.0.2.1/3.5', '192.0.2.1/', '256.0.2.1/30', '192.0.2/30', '2001:db8::1/64', '192.0.2.1//30', '192.0.2.1/30/1']) {
+  const result = renderCombined(combinedTemplate, [{...combinedRows()[0], ip}], prefixRows());
+  assert.equal(result.text, '');
+  assert.match(result.errors.join(' '), /Row 1/);
+}
+for (const mask of ['/33', '33', '-1', '/-1', '/']) assert.throws(() => normalizeInterfaceAddress({ip: '192.0.2.1', mask}));
+assert.equal(renderTemplate(huaweiTemplate.text, huaweiRows()).text, expectedHuawei);
+const combined = renderCombined(combinedTemplate, combinedRows(), prefixRows());
+assert.deepEqual(combined.errors, []);
+const expectedPrefixes = `ip ip-prefix MGMT_RTR index 10 permit 192.0.2.0 28 greater-equal 28 less-equal 28
+ip ip-prefix MGMT_RTR index 11 permit 192.0.2.16 28 greater-equal 28 less-equal 29
+ip ip-prefix MGMT_RTR index 12 permit 198.51.100.0 24
+ip ip-prefix MGMT_RTR index 13 permit 203.0.113.240 28
+ip ip-prefix MGMT_RTR index 14 permit 203.0.113.32 29
+ip ip-prefix MGMT_RTR index 255 deny 0.0.0.0 0 less-equal 32
+route-policy MGMT_RTR permit node 10
+ if-match ip-prefix MGMT_RTR
+#`;
+const expectedBgp = `bgp 64496\n undo check-first-as\n #\n ipv4-family unicast\n #\n` + ['IPBW', 'GGC', 'FNA', 'CDN', 'BDIX'].map((vpn, index) => ` ipv4-family vpn-instance ${vpn}\n  peer 192.0.2.${2 + index * 4} as-number 64497\n  peer 192.0.2.${2 + index * 4} route-policy MGMT_RTR import\n  peer 192.0.2.${2 + index * 4} route-policy ${index === 0 ? 'deny-all' : `CLIENT-${vpn}-OUT`} export\n${index === 0 ? '  peer 192.0.2.2 default-route-advertise\n' : ''} #`).join('\n');
+assert.equal(combined.text, [expectedHuawei, expectedPrefixes, expectedBgp].join('\n'));
+assert.equal(combined.text.match(/^bgp /gm).length, 1);
+const changedRows = combinedRows();
+changedRows[0].advertise_default = '';
+changedRows[1].advertise_default = 'true';
+changedRows[1].vpn = 'OTHER';
+changedRows[1].peer_ip = '192.0.2.1';
+const changed = renderCombined(combinedTemplate, changedRows, prefixRows()).text;
+assert.ok(!changed.includes('192.0.2.2 default-route-advertise'));
+assert.ok(changed.includes('192.0.2.1 default-route-advertise'));
+assert.ok(changed.includes('ip binding vpn-instance OTHER'));
+assert.ok(changed.includes('ipv4-family vpn-instance OTHER'));
+changedRows[2].peer_as = '';
+changedRows[2].peer_as_override = 'true';
+assert.match(renderCombined(combinedTemplate, changedRows, prefixRows()).errors.join(' '), /Row 3: peer_as/);
+for (const template of [combinedTemplate, ciscoTemplate, juniperTemplate, juniperLogicalTemplate]) {
+  const shared = {...template, combined: {...template.combined, remoteAs: '64498'}};
+  const data = builtinRows(template.id);
+  const inherited = renderCombined(shared, data, prefixRows());
+  assert.deepEqual(inherited.errors, []);
+  assert.equal(inherited.text.match(/(?:as-number|remote-as|peer-as) 64498/g).length, 5);
+  // Existing mounted rows may still contain values from before the shared field existed.
+  const oldRows = data.map(row => ({...row, peer_as: '64497'}));
+  assert.equal(remoteAsOverridden(oldRows[0], shared.combined), false);
+  assert.equal(effectiveRemoteAs(oldRows[0], shared.combined), '64498');
+  assert.equal(renderCombined(shared, oldRows, prefixRows()).text.match(/(?:as-number|remote-as|peer-as) 64498/g).length, 5);
+  const updatedShared = {...shared, combined: {...shared.combined, remoteAs: '64500'}};
+  assert.equal(effectiveRemoteAs(oldRows[0], updatedShared.combined), '64500');
+  assert.equal(renderCombined(updatedShared, oldRows, prefixRows()).text.match(/(?:as-number|remote-as|peer-as) 64500/g).length, 5);
+  data[1] = editServiceValue(data[1], 'peer_as', '64499');
+  const overridden = renderCombined(shared, data, prefixRows());
+  assert.equal(overridden.text.match(/(?:as-number|remote-as|peer-as) 64498/g).length, 4);
+  assert.equal(overridden.text.match(/(?:as-number|remote-as|peer-as) 64499/g).length, 1);
+  data[1].peer_as_override = 'false';
+  assert.equal(renderCombined(shared, data, prefixRows()).text.match(/(?:as-number|remote-as|peer-as) 64498/g).length, 5);
+  assert.deepEqual(decodeTemplates(encodeTemplates([shared])), [shared]);
+  data[1] = editServiceValue(data[1], 'peer_as', '');
+  assert.match(renderCombined(shared, data, prefixRows()).errors.join(' '), /Row 2: peer_as/);
+  assert.ok(renderCombined({...shared, combined: {...shared.combined, remoteAs: '4294967296'}}, builtinRows(template.id), prefixRows()).errors.length);
+  const legacy = {...template, combined: {...template.combined}};
+  delete legacy.combined.remoteAs;
+  const legacyData = builtinRows(template.id).map(row => ({...row, peer_as: '64497'}));
+  assert.deepEqual(renderCombined(legacy, legacyData, prefixRows()).errors, []);
+  assert.deepEqual(decodeTemplates(encodeTemplates([legacy])), [legacy]);
+}
+for (const peer of ['{{#advertise_default}}x', '{{/advertise_default}}', '{{#a}}x{{/b}}', '{{#a}}{{#b}}x{{/b}}{{/a}}', '{{#bad-name}}x{{/bad-name}}']) {
+  assert.ok(renderCombined({...combinedTemplate, combined: {...combinedTemplate.combined, peer}}, combinedRows(), prefixRows()).errors.length);
+}
+const combinedSaved = encodeTemplates([{...combinedTemplate, rows: combinedRows(), prefixRows: prefixRows()}]);
+assert.deepEqual(decodeTemplates(combinedSaved), [combinedTemplate]);
+assert.ok(!combinedSaved.includes('192.0.2.0'));
+assert.ok(!combinedSaved.includes('192.0.2.2'));
+assert.equal(renderCombined(decodeTemplates(combinedSaved)[0], [{}], [{}]).text, '');
+assert.equal(renderCombined(huaweiTemplate, huaweiRows(), []).text, expectedHuawei);
+assert.ok(renderCombined(combinedTemplate, combinedRows(), [{index: '1'}]).errors.length);
+assert.ok(renderCombined({...combinedTemplate, combined: {...combinedTemplate.combined, localAs: ''}}, combinedRows(), prefixRows()).errors.length);
+for (const vendor of [ciscoTemplate, juniperTemplate, juniperLogicalTemplate]) {
+  const data = builtinRows(vendor.id);
+  const generated = renderCombined(vendor, data, prefixRows());
+  assert.deepEqual(generated.errors, []);
+  assert.equal(generated.count, 5);
+  assert.ok(!generated.text.includes('{{'));
+  assert.deepEqual(decodeTemplates(encodeTemplates([vendor])), [vendor]);
+  assert.equal(renderCombined(decodeTemplates(encodeTemplates([vendor]))[0], [{}], [{}]).text, '');
+  const changed = data.map(row => ({...row, advertise_default: ''}));
+  const noDefault = renderCombined(vendor, changed, prefixRows()).text;
+  assert.ok(!noDefault.includes('default-originate'));
+  assert.ok(!noDefault.includes('static route 0.0.0.0/0'));
+  changed[2].advertise_default = 'true';
+  changed[2].peer_ip = '192.0.2.2';
+  const newDefault = renderCombined(vendor, changed, prefixRows()).text;
+  assert.ok(vendor === ciscoTemplate ? newDefault.includes('neighbor 192.0.2.2 default-originate') : newDefault.includes('routing-instances FNA routing-options static route 0.0.0.0/0 no-install'));
+}
+const cisco = renderCombined(ciscoTemplate, builtinRows(ciscoTemplate.id), prefixRows()).text;
+assert.ok(cisco.includes('interface Port-channel1.200\n description MGMT_RTR-IPBW\n encapsulation dot1Q 200\n vrf forwarding IPBW\n ip address 192.0.2.1 255.255.255.252'));
+assert.ok(cisco.includes('rd 64496:200'));
+assert.ok(cisco.includes('ip prefix-list MGMT_RTR seq 10 permit 192.0.2.0/28\n'));
+assert.ok(cisco.includes('ip prefix-list MGMT_RTR seq 11 permit 192.0.2.16/28 le 29'));
+assert.ok(cisco.includes('ip prefix-list MGMT_RTR seq 255 deny 0.0.0.0/0 le 32'));
+assert.equal(cisco.match(/^router bgp 64496$/gm).length, 1);
+assert.equal(cisco.match(/default-originate/g).length, 1);
+assert.ok(cisco.includes('neighbor 192.0.2.2 route-map deny-all out'));
+const junos = renderCombined(juniperTemplate, builtinRows(juniperTemplate.id), prefixRows()).text;
+assert.ok(junos.includes('set interfaces ae1 unit 200 family inet address 192.0.2.1/30'));
+assert.ok(junos.includes('set routing-instances IPBW instance-type virtual-router'));
+assert.ok(junos.includes('term prefix-11 from route-filter 192.0.2.16/28 prefix-length-range /28-/29'));
+assert.ok(junos.includes('term prefix-12 from route-filter 198.51.100.0/24 exact'));
+assert.ok(junos.includes('term prefix-255 then reject'));
+assert.ok(junos.includes('neighbor 192.0.2.2 export [ DEFAULT-IPBW deny-all ]'));
+assert.ok(junos.includes('neighbor 192.0.2.6 export [ CLIENT-GGC-OUT ]'));
+assert.equal(junos.match(/^set routing-options autonomous-system /gm).length, 1);
+assert.equal(junos.match(/static route 0.0.0.0\/0 no-install/g).length, 1);
+assert.ok(renderCombined(juniperTemplate, [{...builtinRows(juniperTemplate.id)[0], mask: '255.0.255.0'}], prefixRows()).errors.length);
+assert.ok(renderCombined(ciscoTemplate, builtinRows(ciscoTemplate.id), [{...prefixRows()[0], ge: '33'}]).errors.length);
+const logicalRows = builtinRows(juniperLogicalTemplate.id);
+const logical = renderCombined(juniperLogicalTemplate, logicalRows, prefixRows());
+assert.deepEqual(logical.errors, []);
+for (const row of logicalRows) {
+  const scope = `set logical-systems ${row.logical_system}`;
+  assert.ok(logical.text.includes(`${scope} interfaces ae1 unit ${row.vlan} family inet address ${row.ip}/30`));
+  assert.ok(logical.text.includes(`${scope} routing-instances ${row.vpn} interface ae1.${row.vlan}`));
+  assert.ok(logical.text.includes(`${scope} policy-options policy-statement MGMT_RTR term prefix-11 from route-filter 192.0.2.16/28 prefix-length-range /28-/29`));
+  assert.ok(logical.text.includes(`${scope} routing-options autonomous-system 64496`));
+}
+assert.ok(logical.text.includes('set logical-systems LS-IPBW routing-instances IPBW routing-options static route 0.0.0.0/0 discard'));
+assert.ok(logical.text.includes('set logical-systems LS-IPBW policy-options policy-statement DEFAULT-IPBW term default then accept'));
+assert.ok(!/^set (policy-options|routing-options|routing-instances) /m.test(logical.text));
+assert.ok(!/^set interfaces ae1 unit /m.test(logical.text));
+assert.ok(logical.text.includes('set interfaces ae1 vlan-tagging'));
+logicalRows[1].logical_system = 'LS-IPBW';
+const sharedLogical = renderCombined(juniperLogicalTemplate, logicalRows, prefixRows()).text;
+assert.equal(sharedLogical.match(/set logical-systems LS-IPBW policy-options policy-statement MGMT_RTR term prefix-11 then accept/g).length, 1);
+logicalRows[1].logical_system = '';
+assert.match(renderCombined(juniperLogicalTemplate, logicalRows, prefixRows()).errors.join(' '), /Row 2: logical_system/);
+assert.deepEqual(templateFields('{{vlan}} {{vpn}} {{vlan}}'), ['vlan', 'vpn']);
+assert.equal(renderTemplate('  {{x}} {{x}}\n#', [{x: '$&{{vpn}}'}, {}, {x: 'two'}]).text, '  $&{{vpn}} $&{{vpn}}\n#\n  two two\n#');
+assert.match(renderTemplate('{{x}} {{y}}', [{x: 'one'}]).errors[0], /Row 1: y/);
+assert.match(renderTemplate('{{x}}', [{x: 'one\ntwo'}]).errors[0], /single line/);
+assert.equal(renderTemplate('{{x}}', [{}]).text, '');
+assert.equal(renderTemplate('{{__proto__}} {{constructor}}', [{}]).text, '');
+assert.ok(renderTemplate('x'.repeat(10001), []).errors.length);
+assert.ok(renderTemplate('{{x}}', Array.from({length: 201}, () => ({x: 'a'.repeat(10000)}))).errors.length);
+const stored = {...huaweiTemplate, id: 'saved', rows: huaweiRows()};
+const encoded = encodeTemplates([stored]);
+assert.ok(!encoded.includes('192.0.2.1'));
+assert.ok(!encoded.includes('rows'));
+assert.deepEqual(decodeTemplates(encoded), [{...huaweiTemplate, id: 'saved'}]);
+assert.deepEqual(decodeTemplates(null), []);
+for (const raw of ['invalid', '{}', '{"version":2,"templates":[]}', JSON.stringify({version: 1, templates: [{...stored, fields: ['wrong']}]}), encodeTemplates([stored, stored])]) assert.throws(() => decodeTemplates(raw));
 import { generateConfig, simpleSections, replaceSimpleSection, moveBlock, findBlock, isLoop } from '../src/config-generator.ts';
 const commands = [{ id: '1', text: 'interface eth 0/{n}' }, { id: '2', text: ' no shutdown' }];
 assert.equal(generateConfig(commands, '1', '2', '1').text, 'interface eth 0/1\n no shutdown\ninterface eth 0/2\n no shutdown');

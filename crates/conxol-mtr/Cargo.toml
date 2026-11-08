@@ -1,0 +1,13 @@
+[package]
+name = "conxol-mtr"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+description = "Native Conxol MTR probe engine and standalone diagnostic CLI"
+
+[dependencies]
+conxol-ping = { path = "../conxol-ping" }
+serde.workspace = true
+serde_json.workspace = true

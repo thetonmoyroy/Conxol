@@ -125,7 +125,8 @@ pub const ALL_KEY_TYPES: &[Algorithm] = &[
 ];
 
 /// Verify a server's exchange signature. RSA verification uses AWS-LC public-key
-/// operations only; it does not enable RSA private-key parsing/signing or SHA-1.
+/// operations only; it does not enable RSA private-key parsing/signing.
+/// SHA-1 is available only when explicitly negotiated by the caller.
 #[doc(hidden)]
 pub fn verify_server_signature(
     key: &PublicKey,
@@ -135,9 +136,10 @@ pub fn verify_server_signature(
 ) -> bool {
     #[cfg(feature = "aws-lc-rs")]
     if let ssh_key::public::KeyData::Rsa(rsa) = key.key_data() {
-        use aws_lc_rs::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_2048_8192_SHA512};
+        use aws_lc_rs::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_2048_8192_SHA512};
         if signature.algorithm() != *negotiated { return false; }
         let parameters = match negotiated {
+            Algorithm::Rsa { hash: None } => &RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
             Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha256) } => &RSA_PKCS1_2048_8192_SHA256,
             Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha512) } => &RSA_PKCS1_2048_8192_SHA512,
             _ => return false,
