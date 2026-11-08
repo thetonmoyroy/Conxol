@@ -271,6 +271,8 @@ pub struct JumpHostRecord {
     #[serde(default)]
     pub known_hosts_path: Option<String>,
     #[serde(default)]
+    pub legacy_rsa: bool,
+    #[serde(default)]
     pub pinned_fingerprint: Option<String>,
     /// SSH keepalive interval in seconds for this hop. `None` or `Some(0)`
     /// disables it.
@@ -292,6 +294,8 @@ pub struct SessionRecord {
     pub last_used_at: Option<u64>,
     #[serde(default)]
     pub known_hosts_path: Option<String>,
+    #[serde(default)]
+    pub legacy_rsa: bool,
     #[serde(default)]
     pub pinned_fingerprint: Option<String>,
     /// Explicit local X11 display target. The native SSH layer validates and
@@ -413,6 +417,7 @@ impl SessionRecord {
             auth: AuthMethod::None,
             last_used_at: None,
             known_hosts_path: None,
+            legacy_rsa: false,
             pinned_fingerprint: None,
             x11_display: None,
             x11_single_connection: false,
@@ -598,6 +603,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_rsa_defaults_off_and_round_trips() {
+        let mut value = serde_json::to_value(SessionRecord::local_terminal("fixture")).unwrap();
+        value.as_object_mut().unwrap().remove("legacy_rsa");
+        let mut session: SessionRecord = serde_json::from_value(value).unwrap();
+        assert!(!session.legacy_rsa);
+        session.legacy_rsa = true;
+        let restored: SessionRecord = serde_json::from_value(serde_json::to_value(session).unwrap()).unwrap();
+        assert!(restored.legacy_rsa);
+        let jump: JumpHostRecord = serde_json::from_value(serde_json::json!({
+            "host": "fixture.test", "port": 22, "username": "test", "auth": {"kind": "agent"}
+        })).unwrap();
+        assert!(!jump.legacy_rsa);
+    }
+
+    #[test]
     fn local_terminal_has_no_secret_bearing_fields() {
         let session = SessionRecord::local_terminal("Mac shell");
         assert_eq!(session.protocol, Protocol::Local);
@@ -617,6 +637,7 @@ mod tests {
             auth: AuthMethod::Agent,
             last_used_at: None,
             known_hosts_path: None,
+            legacy_rsa: false,
             pinned_fingerprint: None,
             x11_display: None,
             x11_single_connection: false,
@@ -655,6 +676,7 @@ mod tests {
             username: "fixture".into(),
             auth: AuthMethod::Agent,
             known_hosts_path: None,
+            legacy_rsa: false,
             pinned_fingerprint: None,
             server_alive_interval: Some(MAX_SERVER_ALIVE_INTERVAL_SECONDS + 1),
         }];

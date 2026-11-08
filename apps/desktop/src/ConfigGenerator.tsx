@@ -3,12 +3,25 @@ import { ArrowDown, ArrowUp, Copy, Download, GripVertical, Plus, Trash2 } from "
 import { writeClipboardText } from "./clipboard-access";
 import { generateConfig, simpleSections, replaceSimpleSection, isLoop, findBlock, editBlocks, removeBlock, moveBlock, type GeneratorBlock } from "./config-generator";
 import "./config-generator.css";
+import { TemplateGenerator } from "./TemplateGenerator";
 
 const example = (): GeneratorBlock[] => [{ id: crypto.randomUUID(), text: "interface eth 0/{n}\n no shutdown" }];
 const dragType = "application/x-conxol-generator";
 const token = (depth: number) => depth === 1 ? "{n}" : `{n${depth}}`;
 
 export function ConfigGenerator() {
+  const [mode, setMode] = useState("templates");
+  return <div>
+    <div className="generator-mode generator-actions" role="group" aria-label="Generator mode">
+      <button className="outline-button" aria-pressed={mode === "templates"} onClick={() => setMode("templates")}>Template + rows</button>
+      <button className="outline-button" aria-pressed={mode === "numbers"} onClick={() => setMode("numbers")}>Numeric loops</button>
+    </div>
+    <section className="config-generator" aria-label="Template configuration generator" hidden={mode !== "templates"}><header className="generator-heading"><div><h2>Generator</h2><p>Write a template. Fill the rows. Copy the result.</p></div></header><TemplateGenerator /></section>
+    <div hidden={mode !== "numbers"}><NumericGenerator /></div>
+  </div>;
+}
+
+function NumericGenerator() {
   const [commands, setCommands] = useState<GeneratorBlock[]>(example);
   const [start, setStart] = useState("1"), [end, setEnd] = useState("24"), [step, setStep] = useState("1");
   const [advanced, setAdvanced] = useState(false);

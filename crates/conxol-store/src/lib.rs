@@ -979,6 +979,7 @@ impl SessionStore {
                 }),
                 last_used_at: None,
                 known_hosts_path: None,
+                legacy_rsa: false,
                 pinned_fingerprint: None,
                 x11_display: None,
                 x11_single_connection: false,
@@ -1525,6 +1526,7 @@ mod tests {
             },
             last_used_at: None,
             known_hosts_path: None,
+            legacy_rsa: false,
             pinned_fingerprint: None,
             x11_display: None,
             x11_single_connection: false,
@@ -1707,6 +1709,7 @@ mod tests {
                 credential_ref: "bastion-password".into(),
             },
             known_hosts_path: None,
+            legacy_rsa: false,
             pinned_fingerprint: Some("SHA256:test".into()),
             server_alive_interval: Some(15),
         }];

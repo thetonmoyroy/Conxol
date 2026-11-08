@@ -1,8 +1,10 @@
 import { defaultFolderStyle, type FolderStyle } from "./folder-appearance";
 import { useState } from "react";
-import { Folder, Server, Star, Network, Pencil, Router, Network as Switch, Monitor, Terminal, Database, Cloud, Globe, Shield, Lock, KeyRound, Wifi, Cable, Cpu, HardDrive, Building, House, Wrench, Code, Layers, Box } from "lucide-react";
+import { Folder, Server, Star, Network, Pencil, RadioTower, EthernetPort, Monitor, Terminal, Database, Cloud, Globe, Shield, Lock, KeyRound, Wifi, Cable, Cpu, HardDrive, Building, House, Wrench, Code, Layers, Box } from "lucide-react";
 
-const icons = { folder: Folder, server: Server, star: Star, network: Network, router: Router, switch: Switch, monitor: Monitor, terminal: Terminal, database: Database, cloud: Cloud, globe: Globe, shield: Shield, lock: Lock, key: KeyRound, wifi: Wifi, cable: Cable, cpu: Cpu, drive: HardDrive, building: Building, home: House, wrench: Wrench, code: Code, layers: Layers, box: Box };
+import { NetworkRouter, NetworkSwitch, AccessPoint, Firewall, LoadBalancer } from "./NetworkDeviceIcons";
+
+const icons = { folder: Folder, server: Server, star: Star, network: Network, router: NetworkRouter, switch: NetworkSwitch, firewall: Firewall, "access-point": AccessPoint, antenna: RadioTower, ethernet: EthernetPort, "load-balancer": LoadBalancer, monitor: Monitor, terminal: Terminal, database: Database, cloud: Cloud, globe: Globe, shield: Shield, lock: Lock, key: KeyRound, wifi: Wifi, cable: Cable, cpu: Cpu, drive: HardDrive, building: Building, home: House, wrench: Wrench, code: Code, layers: Layers, box: Box };
 export function SessionFolderIcon({ appearance = defaultFolderStyle }: { appearance?: FolderStyle }) {
   const Icon = icons[appearance.icon] ?? Folder;
   return <Icon size={16} style={appearance.color ? { color: appearance.color } : undefined} />;

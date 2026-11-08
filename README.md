@@ -1,177 +1,146 @@
 <div align="center">
 
-<img src="docs/assets/readme-hero.svg" alt="Conxol — Open-source terminal and network workspace built with Rust" width="100%" />
+<img src="docs/assets/readme-hero.svg" alt="Conxol network workspace: SSH terminals, remote files, diagnostics and router configuration. Illustrated interface using documentation-only addresses." width="100%" />
 
-**Open-source terminal and network workspace built with Rust**
+# Conxol
 
-SSH • SFTP/SCP • terminal tabs & splits • remote editing • tunnels • reviewed automation
+**Open-source SSH client and network terminal for Windows, macOS and Linux.**
 
-[![Latest release](https://img.shields.io/github/v/release/thetonmoyroy/Conxol?style=for-the-badge&label=release&color=c99870)](https://github.com/thetonmoyroy/Conxol/releases/latest)
-[![Rust + Tauri](https://img.shields.io/badge/built_with-Rust_%2B_Tauri-536f60?style=for-the-badge)](docs/architecture.md)
-[![Apache 2.0](https://img.shields.io/badge/license-Apache_2.0-536f60?style=for-the-badge)](LICENSE)
+Connect to your devices. Work with remote files. Generate configurations. Find the fault.
 
-**[⬇️ Download](#download)** · **[🧭 Roadmap](ROADMAP.md)** · **[📖 Docs](docs/architecture.md)** · **[Contribution policy](CONTRIBUTING.md)**
+[![Latest release](https://img.shields.io/github/v/release/thetonmoyroy/Conxol?style=flat-square&label=release&color=c9f464&labelColor=14231d)](https://github.com/thetonmoyroy/Conxol/releases/latest)
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-d9e5db?style=flat-square&labelColor=14231d)](#download)
+[![License](https://img.shields.io/badge/license-Apache--2.0-f2bd76?style=flat-square&labelColor=14231d)](LICENSE)
+
+**[Download](#download)** &nbsp; / &nbsp; **[Features](#features)** &nbsp; / &nbsp; **[Config generator](#config-generator)** &nbsp; / &nbsp; **[Documentation](#documentation)**
 
 </div>
 
-## What makes Conxol different
-
-Conxol's additions and refinements focus on a compact desktop workflow, device-oriented tools, and keeping diagnostics beside your terminal.
-
-| Conxol addition or refinement | What it gives you |
-| --- | --- |
-| **Reworked desktop and session sidebar** | A compact menu and activity strip, full-height terminals, a resizable sidebar, inline SSH file browsing, custom folder/host icons and colors, and compact session action menus. |
-| **SSH session branching** | Open another independent shell in a split using the existing authenticated connection. Branches have separate input/output and skip startup commands; split groups and sizes are remembered during the app run. |
-| **Floating network diagnostics** | Move diagnostics beside your terminal, minimize them while probes keep running, and export the displayed report as text. |
-| **CIDR scans and built-in DNS reports** | Scan bounded IPv4/IPv6 ranges with aggregate progress and confirmed open-port results. Inspect DNS records, TTLs, headers, resolver, timing and transport without an external `dig` executable. |
-| **Network configuration generator** | Turn command templates and nested numeric loops into repeatable configuration text, with previews and bounded output. |
-| **Device-scoped command shortcuts** | Search shared or device-specific commands with a double Shift tap, or save a selected command from the terminal. Shortcuts paste one line without automatically executing it. |
-| **Editable terminal highlighting** | Customize word groups and literal matches for network output, save your own rules, and apply them to live terminal scrollback. |
-| **FTP / FTPS and TFTP tools** | Transfer files outside the SSH browser, or explicitly start a read-only TFTP server for one selected file, with progress and cancellation controls. |
-| **Workspace PIN and encrypted backups** | Protect the workspace with a 4–12 digit numeric PIN and create password-encrypted `.cxb` backups covering sessions, settings, shortcuts, notes, trust data and required credentials. Restore includes a preview before activation. |
-| **SSH login and troubleshooting refinements** | In-terminal secret prompts, automatic authentication selection, Windows OpenSSH-agent/Pageant support, RSA-SHA2 host verification and sanitized support-diagnostic export. |
-
-[Workflow and implementation details](docs/architecture.md) · [Shortcut guide](docs/keyboard-shortcuts.md) · [Download the Windows release](#download)
-
-These highlights describe Conxol's development focus and implemented changes. They do not claim exclusive ownership of the underlying terminal, SSH, or file-transfer technology. Protocol and platform limitations are listed below.
-
-## ✨ One workspace, from connection to completion
-
-<img src="docs/assets/workstation-map.svg" alt="Connect with SSH, work in terminal tabs and splits, move files with SFTP/SCP, and reach services through tunnels." width="100%" />
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-### 🖥️ Keep your terminals together
-
-Local shells and SSH terminals share a workspace. Open tabs, split panes, search scrollback and keep independent tasks in view. Organize saved sessions with **folders, tags, favorites, recents and search**.
-
-
-</td>
-<td width="50%" valign="top">
-
-### 📂 Work directly with remote files
-
-Browse SFTP files, download or upload, and edit remote text without leaving the app. Transfers expose **progress and cancellation**; the editor checks for remote changes before saving.
-
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🔐 Make trust explicit
-
-Connect with passwords, keys, encrypted keys or an SSH agent. Verify unknown host fingerprints, import an OpenSSH config deliberately, and use **jump hosts** to reach another network. Saved profiles hold credential references.
-
-</td>
-<td width="50%" valign="top">
-
-### 🌐 Reach the services you need
-
-Create **local or remote forwards and SOCKS5 proxies** with explicit bind addresses. Inspect tunnel state and byte counts; stop a listener when you're done. Network diagnostics and SSH monitoring are available on demand.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-### 🧩 Review before you automate
-
-Save snippets with variables and a rendered preview. Review macros before running them. Broadcast input uses selected targets and an emergency disable, so remote execution stays deliberate.
-
-</td>
-<td width="50%" valign="top">
-
-### 🌗 Make it your workspace
-
-Switch light/dark themes, adjust terminal fonts and shortcuts, and keep settings locally. **No cloud account required.** Telnet and serial are also available, with their unencrypted transport boundaries made explicit.
-
-</td>
-</tr>
-</table>
+Conxol brings **SSH, SFTP/SCP, serial consoles, SSH tunnels and network diagnostics** into one desktop workspace built with Rust and Tauri. It is a free, open-source MobaXterm alternative for network engineers, system administrators, ISP operators and homelab users who want their daily tools together. No cloud account required.
 
 <a id="download"></a>
 
-## Download Conxol 0.1.56
+## Download Conxol 0.1.60
 
-**[Get Conxol from the Microsoft Store (Windows)](https://apps.microsoft.com/store/detail/9NZVQ7W665BH?cid=DevShareMCLPCS)**
+**Windows users: [Get Conxol from the Microsoft Store](https://apps.microsoft.com/store/detail/9NZVQ7W665BH?cid=DevShareMCLPCS)** or choose a standalone installer below.
 
-**[Download the Windows x64 installer](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.56/Conxol-0.1.56-windows-x64.exe)** · [All release files, notes and SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.56)
+| Your platform | Package | Download |
+| :--- | :--- | :--- |
+| **Windows x64** | Installer | [Download EXE](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-windows-x64.exe) |
+| **macOS · Apple Silicon** | M1 and newer | [Download ARM64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-arm64.dmg) |
+| **macOS · Intel** | x64 | [Download Intel DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg) |
+| **Linux · Debian / Ubuntu** | x64 | [Download DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb) |
+| **Linux · AppImage** | x64 portable | [Download AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage) |
 
-| Platform | Download |
-| --- | --- |
-| macOS Apple Silicon (M1 and newer) | [ARM64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.56/Conxol-0.1.56-macos-arm64.dmg) |
-| macOS Intel | [x64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.56/Conxol-0.1.56-macos-x64.dmg) |
-| Linux x64 Debian/Ubuntu | [DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.56/Conxol-0.1.56-linux-x64.deb) |
-| Linux x64 portable | [AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.56/Conxol-0.1.56-linux-x64.AppImage) |
-
-Open the DMG and move Conxol to Applications. Both Mac packages are ad hoc signed and not notarized; the standalone Windows installer is unsigned. The unsigned Microsoft Store submission package is prepared separately; use the Microsoft Store listing for installation. Native Ping/MTR currently support IPv4 on Windows and macOS, with IPv6 and Linux probing explicitly unsupported. RDP remains experimental and excluded from normal bundles.
-
-## Features in the current source
-
-- **Terminals:** local shells, Windows WSL, SSH, tabs and split panes, search, zoom, reconnect controls, custom syntax highlighting, themes and keyboard shortcuts.
-- **Saved connections:** folders, favorites, recent sessions, custom names, compact row actions, quick connect and advanced SSH settings.
-- **SSH security and access:** interactive password prompts, supported private keys, OpenSSH agent and Windows Pageant support, explicit host fingerprint approval, saved trust pins, jump hosts, and RSA-SHA2 server host verification. RSA private-key authentication remains unsupported.
-- **Remote files:** SFTP browsing, SCP/SFTP transfers, remote text editing, progress, cancellation and conflict checks.
-- **Tunnels:** local and remote forwarding, SOCKS5 proxies, bind controls and traffic counters.
-- **Network diagnostics:** ping, traceroute, MTR, CIDR-aware port scanning, native DNS reports, floating diagnostics and text report export. Scans show confirmed open ports and bounded aggregate progress.
-- **Transfer tools:** FTP/explicit FTPS, TFTP client and an explicitly started read-only TFTP server. System curl protocol support is required for the transfer client.
-- **Productivity:** command shortcuts, network configuration generator, notes, snippets, macros and reviewed broadcast input.
-- **Workspace protection:** numeric 4–12 digit PINs, workspace lock, local credential storage, encrypted portable vaults, and workspace backup/import.
-- **Additional protocols:** Telnet, serial, VNC helper integration and external X11 forwarding. RDP is a separate experimental helper with release restrictions.
-
-See [architecture](docs/architecture.md), [keyboard shortcuts](docs/keyboard-shortcuts.md), [roadmap](ROADMAP.md) and [release notes](docs/release/v0.1.53.md) for implementation details and limits. Real-device and cross-platform acceptance varies by feature; included source does not imply every protocol has production interoperability coverage.
-
-## 🛡️ Keep trust and data local
-
-Rust owns protocols, processes, saved credentials and persistence. Unknown SSH host keys are not silently accepted. Multiline paste and remote execution have explicit review boundaries. VNC TCP and Telnet are unencrypted; experimental support is documented separately.
-
-**Local test safety:** protocol fixtures listen only on `127.0.0.1` or `::1`, with disposable data and generated credentials. They do not enable Remote Login, change firewall/router rules or expose a home-network port. Native checks use an isolated app copy; owned test processes are stopped afterwards. [Testing boundaries](docs/security/safe-testing.md).
-
-[Threat model](docs/security/threat-model.md) · [Dependency audit](docs/security/dependency-audit.md) · [Private vulnerability reporting](SECURITY.md)
+[Release notes & SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60) · [What changed in 0.1.60](docs/release/v0.1.60.md)
 
 <details>
-<summary><strong>🛠️ Build from source</strong></summary>
+<summary>Installation notes</summary>
 
-Use Rust stable **1.90+**, Node.js **22**, pnpm **10**, and the [native Tauri prerequisites](docs/development.md).
-
-```bash
-git clone https://github.com/thetonmoyroy/Conxol.git Conxol
-cd Conxol
-pnpm install --dir apps/desktop --frozen-lockfile
-cargo xtask check
-pnpm --dir apps/desktop tauri dev
-```
-
-```bash
-cargo xtask test-ssh    # Disposable OpenSSH lab on Unix
-cargo xtask check-rust  # Native workspace tests and Clippy
-```
-
-The full check covers frontend, Rust, isolated protocol helpers, package layouts and fuzz compilation. Fixtures use disposable state and generated credentials.
-
-[Contribution policy](CONTRIBUTING.md) · [Architecture](docs/architecture.md) · [Safe testing](docs/security/safe-testing.md) · [Benchmarks](benchmarks/README.md)
+- **Windows:** run the installer, or use the Microsoft Store listing. The standalone installer is unsigned; the Store listing has its own release schedule.
+- **macOS:** open the DMG and move Conxol to Applications. Both Mac packages are ad hoc signed and not notarized.
+- **Debian / Ubuntu:** install the DEB with your package manager. Other Linux desktops can use the AppImage; WebKitGTK 4.1 and FUSE may be required.
+- **Verification:** compare your download with its platform's SHA-256 manifest on the release page.
 
 </details>
 
-## Contribution Guidelines
+<a id="features"></a>
 
-Conxol is independently developed and maintained. Bug reports, feature requests, and suggestions are welcome through [GitHub Issues](https://github.com/thetonmoyroy/Conxol/issues). External code contributions and pull requests are not accepted.
+## Less switching. More work done.
 
-You may use, modify, and fork Conxol under its open-source license. See the [contribution policy](CONTRIBUTING.md).
+| Connect & work | Diagnose & configure |
+| :--- | :--- |
+| **SSH terminals, tabs and splits.** Keep multiple devices in view. Branch a connected SSH session into another shell without another login. | **Network diagnostics beside your terminal.** Use DNS reports, TCP checks and bounded CIDR port scans. Float diagnostic panels and export their reports. |
+| **SFTP and SCP file transfers.** Browse remote directories, move files with progress and cancellation, and edit remote text with conflict checks. | **Huawei, Cisco and Juniper configuration templates.** Fill shared service rows, preview the commands, then copy or export the result. |
+| **Saved sessions that stay organized.** Use nested folders, favorites, recent sessions, search, and custom device icons and colors. | **Commands within reach.** Double-tap Shift to find shared or device-specific shortcuts. Keep notes, snippets and reviewed macros nearby. |
 
-## Acknowledgements
+### More than an SSH client
 
-Conxol builds on [MobaRust](https://github.com/OthmaneBlial/MobaRust), created by Othmane Blial and its contributors. Thank you for creating the original project and making its foundation available as open source.
+- **Console access:** local shells, Windows WSL, Telnet and serial terminals.
+- **SSH port forwarding:** local and remote tunnels, SOCKS5 proxies, bind controls and traffic counters.
+- **File-transfer tools:** FTP / explicit FTPS, a TFTP client, and an explicitly started read-only TFTP server for a selected file.
+- **Terminal customization:** light and dark themes, adjustable fonts, search, keyboard shortcuts and editable network-output highlighting.
+- **Controlled automation:** snippet previews, macro review and broadcast input for selected targets.
+- **Workspace protection:** 4–12 digit numeric PINs and password-encrypted workspace backups with a restore preview.
+
+<a id="config-generator"></a>
+
+## From service rows to router configuration
+
+**One set of variables. Vendor-specific commands.** Turn interface addresses, VLANs, VPN names, prefixes and BGP peers into a configuration you can review before applying.
+
+| Template | Includes |
+| :--- | :--- |
+| **Huawei** | Subinterfaces, VPN bindings, prefix lists, route policies and BGP peers |
+| **Cisco IOS XE** | VRF Lite, dot1Q subinterfaces, prefix lists, route maps and BGP address families |
+| **Juniper Junos** | Interface units, virtual-router instances, routing policies and BGP |
+| **Juniper logical systems** | Service-specific logical systems with scoped interfaces, policies and routing |
+
+- Enter `192.0.2.1/30`: the subnet mask and automatic peer address follow.
+- Set one remote BGP ASN, with an optional override for each service.
+- Edit prefix filters, import/export policies and default-route advertisement.
+- Save reusable templates, use numeric loops, and copy or export generated text.
+
+Built-in examples use documentation-only IP addresses and ASNs. Saved templates retain command setup and shared settings, not service or prefix rows. The generator produces text; it does not apply configuration to devices.
+
+## Local workspace. Explicit trust.
+
+Conxol keeps settings and saved connection data locally. Rust handles connections, processes, credentials and persistence; saved profiles use credential references. Unknown SSH host keys require fingerprint approval, and changed keys are rejected. Multiline paste and remote execution have review boundaries.
+
+[Security policy](SECURITY.md) · [Threat model](docs/security/threat-model.md) · [Dependency audit](docs/security/dependency-audit.md)
+
+<details>
+<summary>Platform and protocol limits</summary>
+
+- Native Ping/MTR currently support IPv4 on Windows and macOS. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
+- RDP is experimental and excluded from normal release bundles. VNC uses the packaged native helper; VNC TCP and Telnet are unencrypted.
+- RSA private-key authentication is unsupported. RSA-SHA2 server host-signature verification is supported.
+- FTP/FTPS client support depends on the system curl build. External X11 forwarding requires an X server.
+- Package verification does not establish clean-machine installation or interoperability with every network device.
+
+</details>
+
+<a id="documentation"></a>
+
+## Find your next step
+
+| I want to… | Go to |
+| :--- | :--- |
+| Learn the workspace and implementation | [Architecture guide](docs/architecture.md) |
+| Find keyboard controls | [Keyboard shortcuts](docs/keyboard-shortcuts.md) |
+| Run Conxol from source | [Development guide](docs/development.md) |
+| See recent changes | [0.1.60 release notes](docs/release/v0.1.60.md) |
+| See what's planned | [Roadmap](ROADMAP.md) |
+| Report a problem or suggest a feature | [GitHub Issues](https://github.com/thetonmoyroy/Conxol/issues/new/choose) |
+
+<details>
+<summary>Build from source</summary>
+
+Install Rust stable **1.90+**, Node.js **22**, pnpm **10**, and the [native Tauri prerequisites](docs/development.md).
+
+```bash
+git clone https://github.com/thetonmoyroy/Conxol.git
+cd Conxol
+pnpm install --dir apps/desktop --frozen-lockfile
+pnpm --dir apps/desktop tauri dev
+```
+
+For validation, use `pnpm --dir apps/desktop test:unit`, `cargo xtask check-rust`, or the broader `cargo xtask check`. Protocol fixtures use disposable local state; see [safe testing](docs/security/safe-testing.md).
+
+</details>
+
+## Open source, with credit
+
+Conxol is independently maintained and builds on [MobaRust](https://github.com/OthmaneBlial/MobaRust), created by Othmane Blial and its contributors. The project is licensed under [Apache-2.0](LICENSE); see [NOTICE](NOTICE) for copyright and third-party attribution.
+
+Bug reports, feature requests and suggestions are welcome. External code contributions and pull requests are not accepted; see the [contribution policy](CONTRIBUTING.md). You may use, modify and fork the project under its license.
+
+---
 
 <div align="center">
 
-**Build your next remote workspace with us.**
+**Your terminal. Your devices. Your workspace.**
 
-[Report a bug](https://github.com/thetonmoyroy/Conxol/issues/new/choose) · [Explore the roadmap](ROADMAP.md) · [Star Conxol ⭐](https://github.com/thetonmoyroy/Conxol/stargazers)
-
-Licensed under [Apache-2.0](LICENSE). See [copyright and third-party notices](NOTICE).
+[Download Conxol](#download) &nbsp; · &nbsp; [Report an issue](https://github.com/thetonmoyroy/Conxol/issues/new/choose) &nbsp; · &nbsp; [Star the project](https://github.com/thetonmoyroy/Conxol)
 
 </div>

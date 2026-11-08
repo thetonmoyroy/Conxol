@@ -24,6 +24,7 @@ fn ssh_session(
         auth: AuthMethod::None,
         last_used_at: None,
         known_hosts_path: None,
+        legacy_rsa: false,
         pinned_fingerprint: None,
         x11_display: None,
         x11_single_connection: false,

@@ -61,6 +61,8 @@ pub struct SshConnectRequest {
     #[serde(default)]
     pub known_hosts_path: Option<String>,
     #[serde(default)]
+    pub legacy_rsa: bool,
+    #[serde(default)]
     pub pinned_fingerprint: Option<String>,
     #[serde(default)]
     pub jump_hosts: Vec<SshJumpHostRequest>,
@@ -153,6 +155,8 @@ pub struct SshJumpHostRequest {
     pub auth: SshAuthRequest,
     #[serde(default)]
     pub known_hosts_path: Option<String>,
+    #[serde(default)]
+    pub legacy_rsa: bool,
     #[serde(default)]
     pub pinned_fingerprint: Option<String>,
     /// OpenSSH `ServerAliveInterval` value in seconds for this hop. Zero
@@ -1989,6 +1993,7 @@ async fn connect_transport(
     )?;
     let host_key_policy = host_key_policy(request)?;
     let options = SshConnectOptions {
+        legacy_rsa: request.legacy_rsa,
         host: request.host.clone(),
         port: request.port,
         host_key_policy,
@@ -2012,6 +2017,7 @@ async fn connect_transport(
             jump.pinned_fingerprint.clone(),
         )?;
         jump_options.push(SshConnectOptions {
+            legacy_rsa: jump.legacy_rsa,
             host: jump.host.clone(),
             port: jump.port,
             host_key_policy,

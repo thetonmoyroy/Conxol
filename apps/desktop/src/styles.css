@@ -1377,6 +1377,39 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 /* Indent each nested session folder while preserving fixed session row geometry. */
 .session-folder-group > .session-folder-group { margin-left: 12px; }
 
+/* Tree branches run through siblings, ending at the final child's midpoint. */
+.app-shell .session-folder-group {
+  --session-tree-line: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.app-shell .session-folder-group > .session-folder-group,
+.app-shell .session-folder-group > .session-row {
+  position: relative;
+  margin-top: 0;
+}
+.app-shell .session-folder-group > .session-folder-group::before,
+.app-shell .session-folder-group > .session-row::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 1px solid var(--session-tree-line);
+  pointer-events: none;
+}
+.app-shell .session-folder-group > .session-folder-group::before { left: -4px; }
+.app-shell .session-folder-group > .session-row::before { left: 8px; }
+.app-shell .session-folder-group > :last-child::before { bottom: auto; height: 14px; }
+.app-shell .session-folder-group > .session-folder-group > .session-folder-heading { position: relative; }
+.app-shell .session-folder-group > .session-folder-group > .session-folder-heading::before,
+.app-shell .session-folder-group > .session-row::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  border-top: 1px solid var(--session-tree-line);
+  pointer-events: none;
+}
+.app-shell .session-folder-group > .session-folder-group > .session-folder-heading::before { left: -4px; width: 7px; }
+.app-shell .session-folder-group > .session-row::after { left: 8px; width: 18px; }
+
 /* Saved sessions: search above a folder rail and a dense device list. */
 .saved-session-picker { box-sizing: border-box; width: min(1120px, calc(100vw - 64px)); height: min(660px, calc(100dvh - 96px)); max-width: none; max-height: none; padding: 0; border: 1px solid var(--line-strong); border-radius: 8px; color: var(--text); background: var(--panel); box-shadow: 0 20px 80px #0006; }
 .saved-session-picker[open] { display: flex; flex-direction: column; overflow: hidden; }

@@ -407,6 +407,7 @@ type SavedSession = {
   username?: string | null;
   last_used_at?: number | null;
   known_hosts_path?: string | null;
+  legacy_rsa?: boolean;
   pinned_fingerprint?: string | null;
   x11_display?: string | null;
   x11_single_connection?: boolean;
@@ -468,6 +469,7 @@ type SavedJumpHost = {
   port: number;
   username: string;
   known_hosts_path?: string | null;
+  legacy_rsa?: boolean;
   pinned_fingerprint?: string | null;
   server_alive_interval?: number | null;
   auth: SavedAuth;
@@ -543,6 +545,7 @@ type SshConnectRequest = {
   username: string;
   auth: SshAuthRequest;
   knownHostsPath?: string;
+  legacyRsa?: boolean;
   pinnedFingerprint?: string;
   jumpHosts?: SshJumpHostRequest[];
   x11?: {
@@ -565,6 +568,7 @@ type SshJumpHostRequest = {
   username: string;
   auth: SshAuthRequest;
   knownHostsPath?: string;
+  legacyRsa?: boolean;
   pinnedFingerprint?: string;
   serverAliveInterval?: number;
 };
@@ -2770,7 +2774,7 @@ function App() {
           if (!await confirmSessionStartup(request.startupCommand, `SSH ${request.username}@${request.host}:${request.port}`, sshSettings.reconnectEnabled && sshSettings.reconnectAttempts > 0, stillAllowed) || !stillAllowed()) return;
           const trustServices = {
             lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
-            inspect: (target: { host: string; port: number }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs } }),
+            inspect: (target: { host: string; port: number; legacyRsa?: boolean }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs, legacyRsa: target.legacyRsa ?? false } }),
             confirm: (target: { host: string; port: number }, fingerprint: string) => confirmAction(`Unknown SSH host key\n\nHost: ${target.host}:${target.port}\nSHA-256 fingerprint:\n${fingerprint}\n\nVerify this fingerprint with the server administrator. Accept and save this key for future connections?` , { title: "Unknown SSH host key", acceptLabel: "Accept and save" }),
             save: (target: { host: string; port: number }, fingerprint: string) => invoke<void>("ssh_trust_accept", { host: target.host, port: target.port, fingerprint }),
           };
@@ -2781,7 +2785,7 @@ function App() {
           if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
           const authentication = new TerminalAuthentication();
           const pendingTerminal = createWorkspaceTerminal({
-            label: `${displayName ?? request.username}@${request.host}`,
+            label: `${displayName ?? request.username}@${request.host}${request.legacyRsa || request.jumpHosts?.some(hop => hop.legacyRsa) ? " [legacy RSA]" : ""}`,
             customName: displayName,
             remoteProtocol: "ssh", remoteHost: request.host,
             authentication, connecting: true,
@@ -2818,7 +2822,7 @@ function App() {
           recordAudit("sessionOpened", "SSH");
           const terminal: WorkspaceTerminal = {
             ...pendingTerminal,
-            label: `${displayName ?? request.username}@${response.host}`,
+            label: `${displayName ?? request.username}@${response.host}${request.legacyRsa || request.jumpHosts?.some(hop => hop.legacyRsa) ? " [legacy RSA]" : ""}`,
             remoteSessionId: response.terminalId,
             remoteProtocol: "ssh",
             remoteHost: response.host,
@@ -4926,6 +4930,7 @@ function requestFromSavedSession(session: SavedSession, catalog: SavedSession[],
         port: jump.port,
         username: jump.username,
         auth: jumpAuth,
+        legacyRsa: jump.legacy_rsa ?? false,
         knownHostsPath: jump.known_hosts_path ?? undefined,
         pinnedFingerprint: jump.pinned_fingerprint ?? undefined,
         serverAliveInterval: jump.server_alive_interval ?? undefined,
@@ -4950,6 +4955,7 @@ function requestFromSavedSession(session: SavedSession, catalog: SavedSession[],
         port: resolved.port ?? jumpRequest.port,
         username: resolved.username ?? jumpRequest.username,
         auth: jumpRequest.auth,
+        legacyRsa: jumpRequest.legacyRsa,
         knownHostsPath: jumpRequest.knownHostsPath,
         pinnedFingerprint: jumpRequest.pinnedFingerprint,
         serverAliveInterval: jumpRequest.serverAliveInterval,
@@ -4961,6 +4967,7 @@ function requestFromSavedSession(session: SavedSession, catalog: SavedSession[],
     port: session.port,
     username,
     auth,
+    legacyRsa: session.legacy_rsa ?? false,
     knownHostsPath: session.known_hosts_path ?? undefined,
     pinnedFingerprint: session.pinned_fingerprint ?? undefined,
     x11: session.x11_display?.trim() ? { display: session.x11_display, singleConnection: session.x11_single_connection ?? false } : undefined,
@@ -6293,6 +6300,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [desktopClipboardEnabled, setDesktopClipboardEnabled] = useState(initialSession?.remote_desktop_profile?.clipboard_enabled ?? false);
   const [desktopReconnectEnabled, setDesktopReconnectEnabled] = useState(initialSession?.remote_desktop_profile?.reconnect_enabled ?? true);
   const [desktopReconnectAttempts, setDesktopReconnectAttempts] = useState(String(initialSession?.remote_desktop_profile?.reconnect_attempts ?? 3));
+  const [legacyRsa, setLegacyRsa] = useState(initialSession?.legacy_rsa ?? false);
   const [knownHostsPath, setKnownHostsPath] = useState(initialSession?.known_hosts_path ?? "");
   const [pinnedFingerprint, setPinnedFingerprint] = useState(initialSession?.pinned_fingerprint ?? "");
   const [x11Enabled, setX11Enabled] = useState(!!initialSession?.x11_display);
@@ -6300,6 +6308,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [x11SingleConnection, setX11SingleConnection] = useState(initialSession?.x11_single_connection ?? false);
   const [serverAliveInterval, setServerAliveInterval] = useState(String(initialSession?.server_alive_interval ?? 0));
   const [environmentText, setEnvironmentText] = useState(formatSessionEnvironment(initialSession?.environment ?? []));
+  const [jumpLegacyRsa, setJumpLegacyRsa] = useState(initialSession?.jump_host_profiles?.[0]?.legacy_rsa ?? false);
   const [jumpHost, setJumpHost] = useState(initialSession?.jump_host_profiles?.[0]?.host ?? "");
   const [jumpPort, setJumpPort] = useState(String(initialSession?.jump_host_profiles?.[0]?.port ?? 22));
   const [jumpUsername, setJumpUsername] = useState(initialSession?.jump_host_profiles?.[0]?.username ?? "");
@@ -6391,7 +6400,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           desktopProfile = { ...initialSession.remote_desktop_profile, ...parsed.profile, audio_enabled: initialSession.remote_desktop_profile?.audio_enabled ?? false };
         }
         const originalJump = initialSession.jump_host_profiles?.[0];
-        const jumps = jumpHost.trim() ? [{ ...originalJump, host: jumpHost.trim(), port: Number(jumpPort), username: jumpUsername.trim() || username.trim(), auth: originalJump?.auth ?? { kind: "keyboardInteractivePrompt" as const } }, ...(initialSession.jump_host_profiles?.slice(1) ?? [])] : [];
+        const jumps = jumpHost.trim() ? [{ ...originalJump, legacy_rsa: jumpLegacyRsa, host: jumpHost.trim(), port: Number(jumpPort), username: jumpUsername.trim() || username.trim(), auth: originalJump?.auth ?? { kind: "keyboardInteractivePrompt" as const } }, ...(initialSession.jump_host_profiles?.slice(1) ?? [])] : [];
         onSave({
           ...initialSession, name: sessionName.trim(), folder: sessionFolder.trim() || null,
           hostname: protocol === "local" ? initialSession.hostname : protocol === "serial" ? serialDevice.trim() : host.trim(),
@@ -6401,7 +6410,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           startup_directory: startupDirectory.trim() || null, startup_command: startupCommand.trim() || null,
           environment: protocol === "ssh" || protocol === "local" ? parseSessionEnvironment(environmentText) : initialSession.environment,
           ...(protocol === "ssh" ? {
-            known_hosts_path: knownHostsPath.trim() || null, pinned_fingerprint: pinnedFingerprint.trim() || null,
+            legacy_rsa: legacyRsa, known_hosts_path: knownHostsPath.trim() || null, pinned_fingerprint: pinnedFingerprint.trim() || null,
             x11_display: x11Enabled ? x11Display.trim() : null, x11_single_connection: x11SingleConnection,
             server_alive_interval: keepalive || null,
             // Preserve legacy host chains until explicitly edited in this form.
@@ -6499,13 +6508,14 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       return;
     }
     const jumpHosts = jumpHost.trim() && Number.isInteger(parsedJumpPort) && parsedJumpPort > 0 && parsedJumpPort <= 65535
-      ? [{ host: jumpHost.trim(), port: parsedJumpPort, username: jumpUsername.trim() || username.trim(), auth: { method: "keyboardInteractivePrompt" as const } }]
+      ? [{ legacyRsa: jumpLegacyRsa, host: jumpHost.trim(), port: parsedJumpPort, username: jumpUsername.trim() || username.trim(), auth: { method: "keyboardInteractivePrompt" as const } }]
       : undefined;
     onConnectSsh({
       host: host.trim(),
       port: Number(port),
       username: username.trim(),
       auth,
+      legacyRsa,
       knownHostsPath: knownHostsPath.trim() || undefined,
       pinnedFingerprint: pinnedFingerprint.trim() || undefined,
       x11: x11Enabled ? { display: x11Display.trim(), singleConnection: x11SingleConnection } : undefined,
@@ -6735,8 +6745,18 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                         Jump username
                         <input {...literalInputProps} required value={jumpUsername} onChange={(event) => setJumpUsername(event.target.value)} placeholder={username || "ops"} />
                       </label>
+                      <label className="quick-connect-wide">
+                        <input type="checkbox" checked={jumpLegacyRsa} onChange={event => setJumpLegacyRsa(event.target.checked)} />
+                        Legacy RSA host signatures for this jump host
+                        <small>Allows weaker SHA-1 signatures on this hop only; fingerprint verification remains required.</small>
+                      </label>
                     </>
                   )}
+                  <label className="quick-connect-wide">
+                    <input type="checkbox" checked={legacyRsa} onChange={event => setLegacyRsa(event.target.checked)} />
+                    Legacy RSA host signatures (ssh-rsa / SHA-1)
+                    <small>For this host only. SHA-1 is weaker; modern algorithms stay preferred. Fingerprint approval and changed-key rejection remain enforced.</small>
+                  </label>
                   <label className="quick-connect-wide">
                     Known hosts path <span className="optional">optional · explicit only</span>
                     <input value={knownHostsPath} onChange={(event) => setKnownHostsPath(event.target.value)} placeholder="/path/to/known_hosts" />

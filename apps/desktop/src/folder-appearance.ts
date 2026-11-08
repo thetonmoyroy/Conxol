@@ -1,4 +1,4 @@
-export const appearanceIcons = ["folder", "server", "star", "network", "router", "switch", "monitor", "terminal", "database", "cloud", "globe", "shield", "lock", "key", "wifi", "cable", "cpu", "drive", "building", "home", "wrench", "code", "layers", "box"] as const;
+export const appearanceIcons = ["folder", "server", "star", "network", "router", "switch", "firewall", "access-point", "antenna", "ethernet", "load-balancer", "monitor", "terminal", "database", "cloud", "globe", "shield", "lock", "key", "wifi", "cable", "cpu", "drive", "building", "home", "wrench", "code", "layers", "box"] as const;
 export type FolderStyle = { icon: typeof appearanceIcons[number]; color: string };
 export const defaultFolderStyle: FolderStyle = { icon: "folder", color: "" };
 export function readFolderStyles(raw: string | null): Record<string, FolderStyle> {

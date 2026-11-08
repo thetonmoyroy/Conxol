@@ -58,3 +58,18 @@ fn rsa_sha2_host_signatures_use_public_verification_and_reject_tampering() {
         &public, &sha1, MESSAGE, &signature
     ));
 }
+
+#[test]
+fn negotiated_legacy_rsa_verifies_sha1_and_rejects_tampering() {
+    let public = PublicKey::from_openssh(include_str!("fixtures/rsa-host/legacy-public.pub")).unwrap();
+    let algorithm = Algorithm::Rsa { hash: None };
+    let bytes = include_bytes!("fixtures/rsa-host/sha1.sig");
+    let signature = Signature::new(algorithm.clone(), bytes.to_vec()).unwrap();
+    assert!(verify_server_signature(&public, &algorithm, MESSAGE, &signature));
+    assert!(!verify_server_signature(&public, &algorithm, b"altered exchange", &signature));
+    assert!(!verify_server_signature(&public, &Algorithm::Rsa { hash: Some(HashAlg::Sha256) }, MESSAGE, &signature));
+    let mut altered = bytes.to_vec();
+    altered[0] ^= 1;
+    let altered = Signature::new(algorithm.clone(), altered).unwrap();
+    assert!(!verify_server_signature(&public, &algorithm, MESSAGE, &altered));
+}

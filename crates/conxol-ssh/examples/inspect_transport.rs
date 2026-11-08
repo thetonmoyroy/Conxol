@@ -11,6 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| "22".into())
         .parse()?;
     let inspection = conxol_ssh::inspect_host_key(conxol_ssh::SshFingerprintOptions {
+        legacy_rsa: false,
         host,
         port,
         timeout: Duration::from_secs(10),

@@ -140,6 +140,7 @@ async fn fixture(
         result
     });
     let connection = SshConnection::connect(SshConnectOptions {
+        legacy_rsa: false,
         host: "127.0.0.1".into(),
         port: address.port(),
         host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint),

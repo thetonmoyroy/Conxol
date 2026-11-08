@@ -219,6 +219,8 @@ struct NetworkMtrRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SshFingerprintRequest {
+    #[serde(default)]
+    legacy_rsa: bool,
     host: String,
     port: u16,
     timeout_ms: u64,
@@ -970,6 +972,7 @@ fn session_save_ssh(
         username,
         auth: request_auth,
         known_hosts_path,
+        legacy_rsa,
         pinned_fingerprint,
         jump_hosts,
         x11,
@@ -1013,6 +1016,7 @@ fn session_save_ssh(
         auth,
         last_used_at: None,
         known_hosts_path,
+        legacy_rsa,
         pinned_fingerprint,
         x11_display: x11.as_ref().map(|value| value.display.clone()),
         x11_single_connection: x11.as_ref().is_some_and(|value| value.single_connection),
@@ -1061,6 +1065,7 @@ fn session_save_ssh(
                     username: jump.username,
                     auth,
                     known_hosts_path: jump.known_hosts_path,
+                    legacy_rsa: jump.legacy_rsa,
                     pinned_fingerprint: jump.pinned_fingerprint,
                     server_alive_interval: jump.server_alive_interval,
                 })
@@ -1094,6 +1099,7 @@ fn session_save_serial(
         auth: AuthMethod::None,
         last_used_at: None,
         known_hosts_path: None,
+        legacy_rsa: false,
         pinned_fingerprint: None,
         x11_display: None,
         x11_single_connection: false,
@@ -1161,6 +1167,7 @@ fn session_save_telnet(
         auth: credential_id.map(|credential_ref| AuthMethod::Password { credential_ref }).unwrap_or(AuthMethod::None),
         last_used_at: None,
         known_hosts_path: None,
+        legacy_rsa: false,
         pinned_fingerprint: None,
         x11_display: None,
         x11_single_connection: false,
@@ -1225,6 +1232,7 @@ fn session_save_remote_desktop(
         auth,
         last_used_at: None,
         known_hosts_path: None,
+        legacy_rsa: false,
         pinned_fingerprint: None,
         x11_display: None,
         x11_single_connection: false,
@@ -1333,6 +1341,7 @@ async fn ssh_inspect_host_key(
     let timeout = diagnostic_timeout(request.timeout_ms)?;
     conxol_ssh::diagnostics::scope(conxol_ssh::diagnostics::Operation::HostKeyInspection, request.timeout_ms, 0, async {
         inspect_host_key(SshFingerprintOptions {
+            legacy_rsa: request.legacy_rsa,
             host: request.host,
             port: request.port,
             timeout,

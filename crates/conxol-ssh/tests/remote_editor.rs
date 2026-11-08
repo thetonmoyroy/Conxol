@@ -467,6 +467,7 @@ impl Fixture {
             server::run_stream(config, stream, handler).await?.await
         });
         let options = SshConnectOptions {
+            legacy_rsa: false,
             host: address.ip().to_string(),
             port: address.port(),
             host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint),

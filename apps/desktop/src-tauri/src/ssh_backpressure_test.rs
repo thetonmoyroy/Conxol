@@ -320,6 +320,7 @@ async fn blocked_shell_input_keeps_output_and_cancellation_live() {
                 server::run_stream(config, stream, peer).await.unwrap().await
             });
             let connection = SshConnection::connect(SshConnectOptions {
+                legacy_rsa: false,
                 host: "127.0.0.1".into(), port: address.port(),
                 host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint), timeout: Duration::from_secs(5),
                 credentials: SshCredentials::password_secret("fixture", conxol_ssh::Secret::from_zeroizing(password)),
@@ -572,6 +573,7 @@ async fn tunnel_workers_are_owned_and_joined_before_transport_cleanup() {
             });
             let connection = Arc::new(
                 SshConnection::connect(SshConnectOptions {
+                    legacy_rsa: false,
                     host: "127.0.0.1".into(),
                     port: address.port(),
                     host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint),
@@ -889,6 +891,7 @@ async fn finite_session_operations_settle_before_transport_cleanup() {
             });
             let connection = Arc::new(
                 SshConnection::connect(SshConnectOptions {
+                    legacy_rsa: false,
                     host: "127.0.0.1".into(),
                     port: address.port(),
                     host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint),
