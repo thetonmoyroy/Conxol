@@ -8,7 +8,7 @@
 
 Connect to your devices. Work with remote files. Generate configurations. Find the fault.
 
-[![Latest release](https://img.shields.io/github/v/release/thetonmoyroy/Conxol?style=flat-square&label=release&color=c9f464&labelColor=14231d)](https://github.com/thetonmoyroy/Conxol/releases/latest) [![Platforms](https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-d9e5db?style=flat-square&labelColor=14231d)](#download) [![License](https://img.shields.io/badge/license-Apache--2.0-f2bd76?style=flat-square&labelColor=14231d)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/thetonmoyroy/Conxol?style=flat-square&label=release&color=c9f464&labelColor=14231d)](https://github.com/thetonmoyroy/Conxol/releases/latest) [![Platforms](docs/assets/badge-platforms.svg)](#download) [![License](docs/assets/badge-license.svg)](LICENSE)
 
 **[Download](#download)** &nbsp; / &nbsp; **[Features](#features)** &nbsp; / &nbsp; **[Config generator](#config-generator)** &nbsp; / &nbsp; **[Documentation](#documentation)**
 
