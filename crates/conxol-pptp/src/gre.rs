@@ -1,4 +1,10 @@
-use std::{io, mem::size_of, net::Ipv4Addr};
+use std::{io, net::Ipv4Addr};
+#[cfg(windows)]
+use std::mem::size_of;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "gre_unix.rs"]
+mod unix;
+#[cfg(windows)]
 pub use windows_sys::Win32::Networking::WinSock::WSAPROTOCOL_INFOW as ProtocolInfo;
 
 #[repr(C)]
@@ -8,6 +14,7 @@ struct Address {
     ip: [u8; 4],
     padding: [u8; 8],
 }
+#[cfg(windows)]
 #[link(name = "ws2_32")]
 unsafe extern "system" {
     fn socket(af: i32, kind: i32, protocol: i32) -> usize;
@@ -25,17 +32,22 @@ unsafe extern "system" {
     fn recv(s: usize, bytes: *mut u8, len: i32, flags: i32) -> i32;
     fn WSAGetLastError() -> i32;
 }
+#[cfg(windows)]
 fn error() -> io::Error {
     unsafe { io::Error::from_raw_os_error(WSAGetLastError()) }
 }
 pub struct Gre {
+    #[cfg(windows)]
     socket: usize,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    socket: std::os::fd::OwnedFd,
     remote: Address,
     local: Ipv4Addr,
     call: u16,
     sequence: u32,
     received: Option<u32>,
 }
+#[cfg(windows)]
 impl Drop for Gre {
     fn drop(&mut self) {
         unsafe {
@@ -46,6 +58,7 @@ impl Drop for Gre {
 impl Gre {
     /// Duplicate only for the OS-verified requesting process. The source must
     /// remain alive until the receiving process acknowledges reconstruction.
+    #[cfg(windows)]
     pub fn duplicate_for_process(&self, pid: u32) -> io::Result<ProtocolInfo> {
         let mut info: ProtocolInfo = unsafe { std::mem::zeroed() };
         if unsafe {
@@ -60,6 +73,7 @@ impl Gre {
         }
         Ok(info)
     }
+    #[cfg(windows)]
     pub fn from_protocol_info(
         local: Ipv4Addr,
         remote: Ipv4Addr,
@@ -100,6 +114,7 @@ impl Gre {
             received: None,
         })
     }
+    #[cfg(windows)]
     pub fn open(local: Ipv4Addr, remote: Ipv4Addr, call: u16) -> io::Result<Self> {
         // Winsock is already initialized by the caller's TCP socket.
         let s = unsafe { socket(2, 3, 47) };
@@ -155,6 +170,7 @@ impl Gre {
         self.sequence = self.sequence.wrapping_add(1);
         self.write(&bytes)
     }
+    #[cfg(windows)]
     fn write(&self, bytes: &[u8]) -> io::Result<()> {
         // SAFETY: buffers have the exact lengths supplied and live through the call.
         let n = unsafe {
@@ -175,17 +191,20 @@ impl Gre {
         }
         Ok(())
     }
-    pub fn receive(&mut self, peer_call: u16) -> io::Result<Option<Vec<u8>>> {
-        let mut buffer = [0u8; 4096];
-        // SAFETY: recv cannot write beyond the allocated buffer.
+    #[cfg(windows)]
+    fn read(&self, buffer: &mut [u8]) -> io::Result<Option<usize>> {
+        // SAFETY: buffer is writable for the supplied length.
         let n = unsafe { recv(self.socket, buffer.as_mut_ptr(), buffer.len() as i32, 0) };
         if n == -1 {
             let e = error();
-            if e.raw_os_error() == Some(10060) {
-                return Ok(None);
-            }
+            if e.raw_os_error() == Some(10060) { return Ok(None); }
             return Err(e);
         }
+        Ok(Some(n as usize))
+    }
+    pub fn receive(&mut self, peer_call: u16) -> io::Result<Option<Vec<u8>>> {
+        let mut buffer = [0u8; 4096];
+        let Some(n) = self.read(&mut buffer)? else { return Ok(None); };
         let Some((sequence, payload)) = parse(
             &buffer[..n as usize],
             self.remote.ip,

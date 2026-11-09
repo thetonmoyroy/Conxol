@@ -1,17 +1,23 @@
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos", test))]
 mod auth;
 pub mod control;
 #[cfg(windows)]
 pub mod elevation;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod gre;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod link;
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos", test))]
 mod mppe;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod ppp;
 pub mod stack;
 pub mod transport;
 
 pub mod diagnostic;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[path = "elevation_unix.rs"]
+pub mod elevation;
+
+pub const SUPPORTED: bool = cfg!(any(windows, target_os = "linux", target_os = "macos"));

@@ -2149,7 +2149,7 @@ async fn finish_native_shutdown(
 pub fn run() {
     // Same-binary, app-session socket broker: never open Tauri, profiles or the
     // credential vault in the elevated process.
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     if let Some(code)=conxol_pptp::elevation::broker_entry(&std::env::args().skip(1).collect::<Vec<_>>()) {std::process::exit(code);}
     if let Some(message) = cli_message(std::env::args().nth(1).as_deref()) {
         println!("{message}");

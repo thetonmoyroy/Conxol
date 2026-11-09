@@ -181,8 +181,8 @@ impl PptpManager {
         id: Uuid,
         vault: &NativeVault,
     ) -> Result<conxol_pptp::transport::Connector, String> {
-        if !cfg!(windows) {
-            return Err("Native PPTP connections are currently available on Windows.".into());
+        if !conxol_pptp::SUPPORTED {
+            return Err("Native PPTP connections are available on Windows, Linux and macOS.".into());
         }
         if let Ok(connector) = self.connector(id) {
             return Ok(connector);
@@ -317,7 +317,7 @@ pub fn pptp_list(manager: State<'_, PptpManager>) -> Result<Snapshot, String> {
     profiles.sort_by_key(|p| (p.folder.to_lowercase(), p.name.to_lowercase()));
     Ok(Snapshot {
         profiles,
-        supported: cfg!(windows),
+        supported: conxol_pptp::SUPPORTED,
         max_connections: MAX_CONNECTIONS,
     })
 }
@@ -491,8 +491,8 @@ pub fn pptp_connect(
     vault: State<'_, NativeVault>,
     request: ConnectRequest,
 ) -> Result<(), String> {
-    if !cfg!(windows) {
-        return Err("Native PPTP connections are currently available on Windows.".into());
+    if !conxol_pptp::SUPPORTED {
+        return Err("Native PPTP connections are available on Windows, Linux and macOS.".into());
     }
     start_connection(&manager, &vault, request, false, run_tunnel).map(|_| ())
 }
@@ -629,7 +629,7 @@ pub fn pptp_disconnect(manager: State<'_, PptpManager>, id: Uuid) -> Result<(), 
     }
     Ok(())
 }
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 fn run_tunnel(
     profile: &Profile,
     password: Zeroizing<String>,
@@ -657,8 +657,14 @@ fn run_tunnel(
         let local = control.local()?;
         let mut gre = match Gre::open(local, server, call) {
             Ok(socket) => socket,
+            #[cfg(windows)]
             Err(error) if error.raw_os_error() == Some(10013) => {
                 set_stage("Preparing app-session administrator permission. Windows may ask once…");
+                conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())?
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
+                set_stage("Requesting permission for private PPTP traffic…");
                 conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())?
             }
             Err(error) => return Err(error.into()),
@@ -718,7 +724,7 @@ fn run_tunnel(
     })();
     result.map_err(|e| e.to_string())
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn run_tunnel(
     _: &Profile,
     _: Zeroizing<String>,
@@ -726,7 +732,7 @@ fn run_tunnel(
     _: &Arc<Mutex<ConnectionStatus>>,
     _: &mut conxol_pptp::transport::TcpRouter,
 ) -> Result<(), String> {
-    Err("Native PPTP requires Windows.".into())
+    Err("Native PPTP is unavailable on this platform.".into())
 }
 
 #[cfg(test)]
@@ -794,7 +800,7 @@ mod tests {
         assert_eq!(manager.workers.lock().unwrap().len(), 1);
         let (first, second) = tokio::join!(first.ready(), second.ready());
         assert!(first.is_ok() && second.is_ok());
-        assert_eq!(manager.ensure_connected(p.id, &vault).await.is_ok(), cfg!(windows));
+        assert_eq!(manager.ensure_connected(p.id, &vault).await.is_ok(), conxol_pptp::SUPPORTED);
         let pending =
             start_connection(&manager, &vault, request(), true, simulated_tunnel).unwrap();
         pending.cancel.store(true, Ordering::Release);

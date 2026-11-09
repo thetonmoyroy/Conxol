@@ -10,7 +10,7 @@ export function PptpAttachment({ value, onChange, disabled = false, diagnostics 
   const [snapshot, setSnapshot] = useState<Snapshot>({ supported: false, profiles: [] });
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
-  const help = snapshot.supported ? (diagnostics ? "PPTP connects automatically using its saved password. IPv4 targets only. DNS requires an explicit IPv4 resolver and uses TCP. Ping payload: up to 1332 bytes." : "The selected PPTP profile connects automatically using its saved password. Use an IPv4 destination. Choose Direct connection to connect without PPTP.") : "Native PPTP connections currently require Windows. Saved assignments are preserved.";
+  const help = snapshot.supported ? (diagnostics ? "PPTP connects automatically using its saved password. IPv4 targets only. DNS requires an explicit IPv4 resolver and uses TCP. Ping payload: up to 1332 bytes." : "The selected PPTP profile connects automatically using its saved password. Use an IPv4 destination. Choose Direct connection to connect without PPTP.") : "Native PPTP connections are available on Windows, Linux and macOS. Saved assignments are preserved.";
   useEffect(() => {
     let active = true;
     if (isTauri()) void invoke<Snapshot>("pptp_list").then(result => { if (active) { setSnapshot(result); setError(""); } }).catch(e => { if (active) setError(String(e)); });

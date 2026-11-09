@@ -4597,7 +4597,7 @@ function App() {
     <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
       {fileTransferOpen && <FileTransferClient onClose={() => setFileTransferOpen(false)} onServerRunning={setTftpServerRunning} initialServer={tftpServerRunning} />}
       {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
-      {pptpManagerOpen && <PptpManager onClose={() => setPptpManagerOpen(false)} />}
+      {!IS_ANDROID && pptpManagerOpen && <PptpManager onClose={() => setPptpManagerOpen(false)} />}
       <ApplicationMenuBar>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
           <button onClick={() => setQuickConnectOpen(true)}>New session…</button>
@@ -4616,7 +4616,7 @@ function App() {
         <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu">
           <button onClick={() => setActiveView("files")}>Remote files</button>
           <button onClick={() => setFileTransferOpen(true)}>FTP / TFTP…</button>
-          <button onClick={() => setPptpManagerOpen(true)}>PPTP manager…</button>
+          {!IS_ANDROID && <button onClick={() => setPptpManagerOpen(true)}>PPTP manager…</button>}
           <button onClick={() => setDiagnosticsOpen(true)}>Network diagnostics</button>
           <button onClick={() => setActiveView("tunnels")}>SSH tunnels</button>
           <button onClick={() => setActiveView("transfers")}>Transfers</button>
@@ -5550,7 +5550,7 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
   };
   return <section className="diagnostics-cli" aria-label="Network diagnostics">
     <nav className="diagnostics-cli-tools" aria-label="Diagnostic tool">{tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} disabled={busy && item.id !== tool} onClick={() => { setTool(item.id); setCopyNotice(""); setExportNotice(""); setFollow(true); }}>{item.label}</button>)}</nav>
-    <div className="diagnostics-cli-controls diagnostics-pptp-route"><PptpAttachment diagnostics value={pptpProfileId} onChange={onPptpProfileChange} disabled={busy} /></div>
+    {!IS_ANDROID && <div className="diagnostics-cli-controls diagnostics-pptp-route"><PptpAttachment diagnostics value={pptpProfileId} onChange={onPptpProfileChange} disabled={busy} /></div>}
     <form className="diagnostics-cli-controls" onSubmit={event => { event.preventDefault(); if (!busy) run(); }}>
       <label className="diagnostics-cli-host">Target<input required value={host} disabled={busy} onChange={event => onHostChange(event.target.value)} placeholder={tool === "scan" ? "IP, CIDR (192.0.2.0/24), or hostname" : "Hostname or IP address"} /></label>
       {tool === "scan" && <>
@@ -6797,7 +6797,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                   </details>
                   </section>
                   <section className="session-settings-panel quick-connect-wide" id="session-panel-network" role="tabpanel" aria-labelledby="session-tab-network" data-session-tab="network" hidden={sshTab !== "network"}>
-                  <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
+                  {!IS_ANDROID && <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />}
                   <label className="quick-connect-wide">
                     Jump host <span className="optional">optional · Auto login</span>
                     <input value={jumpHost} onChange={(event) => setJumpHost(event.target.value)} placeholder="bastion.internal.example" />
@@ -6941,10 +6941,10 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     </label>
                     <small className="quick-connect-wide">Leave blank to log in manually. Telnet sends credentials unencrypted.</small>
                   </>}
-                  <details className="quick-connect-wide session-network-options" open={!!pptpProfileId}>
+                  {!IS_ANDROID && <details className="quick-connect-wide session-network-options" open={!!pptpProfileId}>
                     <summary>Network</summary>
                     <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
-                  </details>
+                  </details>}
                   <label className="quick-connect-wide">
                     Terminal type
                     <input required value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder="xterm-256color" />
