@@ -68,6 +68,21 @@ jobs:
           pnpm --dir apps/desktop lint
           pnpm --dir apps/desktop test:unit
           node --test tools/release-assets.test.mjs
+      - name: Fetch verified AppRun through GitHub API
+        if: runner.os == 'Linux'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tools="${XDG_CACHE_HOME:-$HOME/.cache}/tauri"
+          mkdir -p "$tools"
+          curl --fail --location --retry 3 --max-time 120 \
+            -H 'Accept: application/octet-stream' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            https://api.github.com/repos/tauri-apps/binary-releases/releases/assets/274691722 \
+            --output "$tools/AppRun-x86_64.download"
+          printf 'f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f  %s\n' "$tools/AppRun-x86_64.download" | sha256sum --check
+          chmod 0755 "$tools/AppRun-x86_64.download"
+          mv "$tools/AppRun-x86_64.download" "$tools/AppRun-x86_64"
       - name: Generate bundle icons
         run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
       - name: Build installers
