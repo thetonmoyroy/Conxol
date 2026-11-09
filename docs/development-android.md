@@ -3,8 +3,8 @@
 Conxol uses Tauri Android with the existing React interface and native Rust
 SSH/SFTP, Telnet, networking, session storage, and workspace PIN commands.
 The desktop binary calls the same library entry point as the Android shell.
-Android preview 1 uses version name `0.1.62-android-preview.1` and version code
-1063. The desktop version is 0.1.62. This is not a Play Store release.
+Android preview 2 uses version name `0.1.62-android-preview.2` and version code
+1064. The desktop version is 0.1.62. This is not a Play Store release.
 
 ## Build on Windows
 
