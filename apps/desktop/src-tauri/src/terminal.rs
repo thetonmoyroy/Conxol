@@ -710,7 +710,9 @@ fn default_shell() -> String {
 
 #[cfg(not(target_os = "windows"))]
 fn default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_owned())
+    std::env::var("SHELL").unwrap_or_else(|_| {
+        if cfg!(target_os = "android") { "/system/bin/sh" } else { "/bin/sh" }.to_owned()
+    })
 }
 
 #[cfg(target_os = "windows")]

@@ -1,7 +1,34 @@
 export type TemplateField = string;
-export type CombinedSections = { header: string; peer: string; localAs: string; remoteAs?: string; checkboxFields: string[]; policyName: string; prefixes: string; policy: string; platform?: "iosxe" | "junos"; logicalSystems?: boolean };
+export type CombinedSections = { header: string; peer: string; localAs: string; remoteAs?: string; checkboxFields: string[]; policyName: string; prefixes: string; policy: string; platform?: "iosxe" | "iosxr" | "routeros7" | "junos"; logicalSystems?: boolean };
 export type ConfigTemplate = { id: string; name: string; text: string; fields: TemplateField[]; combined?: CombinedSections };
 export type ConfigRow = Record<string, string>;
+export const iosxrPrefixEntry = " {{network}}/{{length}}{{#ge}} ge {{ge}}{{/ge}}{{#le}} le {{le}}{{/le}}";
+export const iosxrImportPolicy = "route-policy {{policy_name}}\n{{prefix_rules}}\nend-policy\n!\nroute-policy deny-all\n drop\nend-policy\n!";
+function upgradeCombinedSections(sections: CombinedSections): CombinedSections {
+  // Upgrade saved defaults as well as the current editor contents.
+  sections = { ...sections, header: typeof sections.header === "string" ? sections.header.replace(/^[ \t]*(?:undo check-first-as|no bgp enforce-first-as|bgp enforce-first-as disable)[ \t]*(?:\r?\n|$)/gm, "") : sections.header };
+  if (sections.platform !== "iosxr") return sections;
+  const oldPrefix = "prefix-set {{policy_name}}-{{index}}\n {{network}}/{{length}}{{#ge}} ge {{ge}}{{/ge}}{{#le}} le {{le}}{{/le}}\nend-set\n!";
+  const oldPolicy = "route-policy {{policy_name}}\n{{prefix_rules}}\n drop\nend-policy\n!\nroute-policy deny-all\n drop\nend-policy\n!";
+  return { ...sections, prefixes: sections.prefixes === oldPrefix ? iosxrPrefixEntry : sections.prefixes, policy: sections.policy === oldPolicy ? iosxrImportPolicy : sections.policy, peer: typeof sections.peer === "string" ? sections.peer.replace("\n  rd {{local_as}}:{{vlan}}", "") : sections.peer };
+}
+function upgradeIosXrInterface(text: string, platform: CombinedSections["platform"]): string {
+  const oldCreation = "vrf {{vpn}}\n address-family ipv4 unicast\n exit\nexit\n";
+  return platform === "iosxr" && text.startsWith(oldCreation) ? text.slice(oldCreation.length) : text;
+}
+export function normalizeConfigTemplate(template: ConfigTemplate): ConfigTemplate {
+  if (!template.combined) return template;
+  const combined = upgradeCombinedSections(template.combined);
+  const text = upgradeIosXrInterface(template.text, combined.platform);
+  return { ...template, text, fields: templateFields(text), combined };
+}
+export function templateSectionVariables(template: ConfigTemplate, section: "prefixes" | "policy" | "header" | "peer"): string[] {
+  const combined = template.combined;
+  if (!combined) return [];
+  const shared = ["local_as", "remote_as", "policy_name"];
+  const extra = section === "prefixes" ? ["index", "action", "network", "length", "ge", "le"] : section === "peer" ? serviceFields(template) : [];
+  return [...new Set([...shared, ...extra, ...templateFields(combined[section])])];
+}
 export function remoteAsOverridden(row: ConfigRow, sections: CombinedSections): boolean {
   // Preserve per-row ASNs only for legacy templates without a shared setting.
   return row.peer_as_override === "true" || (sections.remoteAs === undefined && row.peer_as_override !== "false" && !!row.peer_as?.trim());
@@ -87,7 +114,7 @@ export function huaweiRows(): ConfigRow[] {
 export const combinedTemplate: ConfigTemplate = {
   id: "huawei-combined", name: "Huawei interfaces + policy + BGP", text: huaweiText, fields: templateFields(huaweiText),
   combined: {
-    header: "bgp {{local_as}}\n undo check-first-as\n #\n ipv4-family unicast\n #",
+    header: "bgp {{local_as}}\n #\n ipv4-family unicast\n #",
     peer: " ipv4-family vpn-instance {{vpn}}\n  peer {{peer_ip}} as-number {{peer_as}}\n  peer {{peer_ip}} route-policy {{import_policy}} import\n  peer {{peer_ip}} route-policy {{export_policy}} export\n{{#advertise_default}}  peer {{peer_ip}} default-route-advertise\n{{/advertise_default}} #",
     localAs: "64496", remoteAs: "64497", checkboxFields: ["advertise_default"], policyName: "MGMT_RTR",
     prefixes: "ip ip-prefix {{policy_name}} index {{index}} {{action}} {{network}} {{length}}{{#ge}} greater-equal {{ge}}{{/ge}}{{#le}} less-equal {{le}}{{/le}}",
@@ -126,8 +153,9 @@ function conditionalText(text: string, row: ConfigRow): string {
 }
 export function serviceFields(template: ConfigTemplate): string[] {
   const combined = template.combined;
-  const derived = combined?.platform === "junos" ? ["prefix_length", "export_chain"] : [];
-  return [...new Set([...templateFields(template.text + "\n" + (combined?.peer ?? "")), ...(combined?.platform === "junos" ? ["mask", "export_policy"] : []), ...(combined?.checkboxFields ?? [])])].filter(field => !combined || !["local_as", "policy_name", ...derived].includes(field));
+  const cidr = combined?.platform === "junos" || combined?.platform === "routeros7";
+  const derived = combined?.platform === "junos" ? ["prefix_length", "export_chain"] : combined?.platform === "routeros7" ? ["prefix_length", "default_originate"] : [];
+  return [...new Set([...templateFields(template.text + "\n" + (combined?.peer ?? "")), ...(cidr ? ["mask", "export_policy"] : []), ...(combined?.checkboxFields ?? [])])].filter(field => !combined || !["local_as", "remote_as", "policy_name", ...derived].includes(field));
 }
 export function renderCombined(template: ConfigTemplate, rows: ConfigRow[], prefixes: ConfigRow[]) {
   try {
@@ -136,10 +164,11 @@ export function renderCombined(template: ConfigTemplate, rows: ConfigRow[], pref
       catch (error) { throw Error(`Row ${index + 1}: ${(error as Error).message}`); }
     });
   } catch (error) { return { text: "", errors: [(error as Error).message], count: 0 }; }
-  const sections = template.combined;
+  const sections = template.combined ? upgradeCombinedSections(template.combined) : undefined;
   if (!sections) return renderTemplate(template.text, rows);
+  const interfaceText = upgradeIosXrInterface(template.text, sections.platform);
   const active = rows.filter(row => serviceFields(template).some(field => Object.hasOwn(row, field) && row[field]?.trim()));
-  const shared = { local_as: sections.localAs, policy_name: sections.policyName };
+  const shared = { local_as: sections.localAs, remote_as: sections.remoteAs ?? "", policy_name: sections.policyName };
   let services: ConfigRow[], prefixData: ConfigRow[];
   try {
     services = rows.map((row, index) => {
@@ -147,36 +176,87 @@ export function renderCombined(template: ConfigTemplate, rows: ConfigRow[], pref
       const peer_as = effectiveRemoteAs(row, sections);
       if (templateFields(sections.peer).includes("peer_as") && peer_as.trim() && (!/^\d+$/.test(peer_as) || Number(peer_as) < 1 || Number(peer_as) > 4294967295)) throw Error(`Row ${index + 1}: remote BGP AS must be a number from 1 to 4294967295.`);
       row = { ...row, peer_as };
-      if (sections.platform !== "junos") return { ...row, ...shared };
+      if (sections.platform !== "junos" && sections.platform !== "routeros7") return { ...row, ...shared };
       const mask = row.mask ?? "";
       const octets = mask.split(".");
       const bits = octets.map(part => Number(part).toString(2).padStart(8, "0")).join("");
       if (octets.length !== 4 || octets.some(part => !/^\d{1,3}$/.test(part) || Number(part) > 255) || !/^1*0*$/.test(bits)) throw Error(`Row ${index + 1}: enter a contiguous IPv4 subnet mask.`);
       if (!row.export_policy?.trim()) throw Error(`Row ${index + 1}: export_policy is required.`);
+      if (sections.platform === "routeros7") {
+        for (const field of ["vpn", "interface", "import_policy", "export_policy"]) if (!/^[A-Za-z0-9_.:-]+$/.test(row[field] ?? "")) throw Error(`Row ${index + 1}: ${field} must use letters, digits, dots, underscores, colons or hyphens.`);
+        if (!/^[A-Za-z0-9_.:-]+$/.test(sections.policyName)) throw Error("Use a simple prefix / policy name for RouterOS.");
+        return { ...row, ...shared, prefix_length: String(bits.indexOf("0") < 0 ? 32 : bits.indexOf("0")), default_originate: row.advertise_default === "true" ? "always" : "never" };
+      }
       return { ...row, ...shared, prefix_length: String(bits.indexOf("0") < 0 ? 32 : bits.indexOf("0")), export_chain: row.advertise_default === "true" ? `DEFAULT-${row.vpn} ${row.export_policy}` : row.export_policy };
     });
+    const xrIndexes = new Set<string>();
     prefixData = prefixes.map((row, index) => {
       if (!Object.values(row).some(value => value.trim())) return {};
       if (!sections.platform) return { ...row, ...shared };
       const base = Number(row.length), lower = row.ge ? Number(row.ge) : base, upper = row.le ? Number(row.le) : row.ge ? 32 : base;
       if (![row.length, row.ge || row.length, row.le || "32"].every(value => /^\d{1,2}$/.test(value ?? "")) || base < 0 || base > lower || lower > upper || upper > 32) throw Error(`Prefix ${index + 1}: invalid prefix-length range.`);
       if (!["permit", "deny"].includes(row.action)) throw Error(`Prefix ${index + 1}: action must be permit or deny.`);
-      if (sections.platform === "iosxe") return { ...row, ...shared, ge: lower > base ? String(lower) : "", le: (row.ge || row.le) && upper > base ? String(upper) : "" };
+      if (sections.platform === "iosxr" || sections.platform === "routeros7") {
+        const octets = row.network?.split(".") ?? [];
+        if (octets.length !== 4 || octets.some(part => !/^(0|[1-9]\d{0,2})$/.test(part) || Number(part) > 255)) throw Error(`Prefix ${index + 1}: enter a valid IPv4 network.`);
+        const address = octets.reduce((value, part) => value * 256 + Number(part), 0);
+        if (address % 2 ** (32 - base) !== 0) throw Error(`Prefix ${index + 1}: the network must align with its prefix length.`);
+      }
+      if (sections.platform === "iosxr") {
+        if (!/^\d{1,10}$/.test(row.index ?? "") || Number(row.index) > 4294967295) throw Error(`Prefix ${index + 1}: enter a numeric prefix index.`);
+        if (xrIndexes.has(row.index)) throw Error(`Prefix ${index + 1}: use a unique prefix index.`);
+        xrIndexes.add(row.index);
+      }
+      if (sections.platform === "iosxe" || sections.platform === "iosxr") return { ...row, ...shared, ge: lower > base ? String(lower) : "", le: (row.ge || row.le) && upper > base ? String(upper) : "" };
+      if (sections.platform === "routeros7") return { ...row, ...shared, prefix_condition: `dst in ${row.network}/${base} && dst-len in ${lower}-${upper}`, route_action: row.action === "permit" ? "accept" : "reject" };
       return { ...row, ...shared, route_match: row.ge || row.le ? `prefix-length-range /${lower}-/${upper}` : "exact", route_action: row.action === "permit" ? "accept" : "reject" };
     });
   } catch (error) { return { text: "", errors: [(error as Error).message], count: 0 }; }
-  const check = renderTemplate(template.text + "\n" + sections.peer, services);
+  const check = renderTemplate(interfaceText + "\n" + sections.peer, services);
   if (check.errors.length) return check;
   const activeServices = services.filter(row => Object.keys(row).length);
   // Policies and routing options belong to each logical system, never the master.
   const scopes = sections.logicalSystems ? [...new Set(activeServices.map(row => row.logical_system))].map(logical_system => ({ ...shared, logical_system })) : [shared];
-  const results = [renderTemplate(template.text, activeServices), ...scopes.map(scope => renderTemplate(sections.prefixes, prefixData.map(row => Object.keys(row).length ? { ...row, ...scope } : {}))), ...scopes.map(scope => renderTemplate(sections.policy, [scope])), ...scopes.map(scope => renderTemplate(sections.header, [scope])), renderTemplate(sections.peer, activeServices)];
+  let prefix_rules = "";
+  let xrPrefixResult: ReturnType<typeof renderTemplate> | undefined;
+  if (sections.platform === "iosxr") {
+    const entries = prefixData.filter(row => Object.keys(row).length);
+    const permits = entries.filter(row => row.action === "permit");
+    if (!permits.length) return { text: "", errors: ["Add at least one permitted prefix to the IOS XR prefix set."], count: 0 };
+    const rendered: ReturnType<typeof renderTemplate>[] = [];
+    let prefixSize = 0;
+    for (const row of permits) {
+      const result = renderTemplate(sections.prefixes, [row]);
+      prefixSize += result.text.length + 2;
+      if (prefixSize > 2000000) return { text: "", errors: ["The result is too large. Use fewer rows."], count: 0 };
+      rendered.push(result);
+    }
+    const errors = rendered.flatMap(result => result.errors);
+    xrPrefixResult = { text: `prefix-set ${sections.policyName}\n${rendered.map(result => result.text).join(",\n")}\nend-set\n!`, errors, count: permits.length };
+    const match = (row: ConfigRow) => `${row.network}/${row.length}${row.ge ? ` ge ${row.ge}` : ""}${row.le ? ` le ${row.le}` : ""}`;
+    const rules: string[] = [], earlierPermits: ConfigRow[] = [];
+    let remainingPermits = permits.length, ruleSize = 0;
+    for (const row of entries) {
+      if (row.action === "permit") { earlierPermits.push(row); remainingPermits--; continue; }
+      // A terminal deny is already covered by the final else/drop. Earlier denies
+      // use inline matches, excluding earlier permits to preserve first-match order.
+      if (!remainingPermits) continue;
+      const except = earlierPermits.length ? ` and not destination in (${earlierPermits.map(match).join(", ")})` : "";
+      const rule = ` if destination in (${match(row)})${except} then\n  drop\n endif`;
+      ruleSize += rule.length;
+      if (ruleSize > 2000000) return { text: "", errors: ["The result is too large. Use fewer rows."], count: 0 };
+      rules.push(rule);
+    }
+    rules.push(` if destination in ${sections.policyName} then\n  pass\n else\n  drop\n endif`);
+    prefix_rules = rules.join("\n");
+  }
+  const results = [renderTemplate(interfaceText, activeServices), ...(xrPrefixResult ? [xrPrefixResult] : scopes.map(scope => renderTemplate(sections.prefixes, prefixData.map(row => Object.keys(row).length ? { ...row, ...scope } : {})))), ...scopes.map(scope => renderTemplate(sections.policy, [{ ...scope, ...(sections.platform === "iosxr" ? { prefix_rules } : {}) }], sections.platform === "iosxr" ? ["prefix_rules"] : [])), ...scopes.map(scope => renderTemplate(sections.header, [scope])), renderTemplate(sections.peer, activeServices)];
   const errors = results.flatMap(result => result.errors);
   const text = results.map(result => result.text).join("\n");
   if (text.length > 2000000) errors.push("The result is too large. Use fewer rows.");
   return { text: errors.length ? "" : text, errors, count: active.length };
 }
-export function renderTemplate(text: string, rows: ConfigRow[]) {
+export function renderTemplate(text: string, rows: ConfigRow[], multilineFields: readonly string[] = []) {
   const errors: string[] = [], blocks: string[] = [];
   const fields = templateFields(text);
   if (!text.trim()) errors.push("Enter a template.");
@@ -191,7 +271,7 @@ export function renderTemplate(text: string, rows: ConfigRow[]) {
     for (const field of templateFields(expanded)) {
       const value = Object.hasOwn(row, field) ? row[field] : "";
       if (!value?.trim()) errors.push(`Row ${index + 1}: ${field} is required.`);
-      else if (/[\r\n]/.test(value)) errors.push(`Row ${index + 1}: ${field} must be a single line.`);
+      else if (/[\r\n]/.test(value) && !multilineFields.includes(field)) errors.push(`Row ${index + 1}: ${field} must be a single line.`);
     }
     const block = expanded.replace(placeholder, (_, field: string) => Object.hasOwn(row, field) ? row[field] : "");
     size += block.length + (blocks.length ? 1 : 0);
@@ -214,16 +294,17 @@ export function decodeTemplates(raw: string | null): ConfigTemplate[] {
   return data.templates.map((item: ConfigTemplate) => {
     if (!item || typeof item.id !== "string" || !item.id || item.id.length > 100 || ids.has(item.id) || typeof item.name !== "string" || !item.name.trim() || item.name.length > 100 || typeof item.text !== "string" || item.text.length > 10000 || !Array.isArray(item.fields) || JSON.stringify(item.fields) !== JSON.stringify(templateFields(item.text)) || item.fields.length > 64) throw Error("Invalid saved template.");
     ids.add(item.id);
-    const combined = item.combined;
+    const combined = item.combined ? upgradeCombinedSections(item.combined) : undefined;
     if (combined) {
       if (combined.remoteAs !== undefined && (typeof combined.remoteAs !== "string" || combined.remoteAs.length > 100)) throw Error("Invalid remote BGP AS.");
-      if (combined.platform !== undefined && !["iosxe", "junos"].includes(combined.platform)) throw Error("Invalid template platform.");
+      if (combined.platform !== undefined && !["iosxe", "iosxr", "routeros7", "junos"].includes(combined.platform)) throw Error("Invalid template platform.");
       if (combined.logicalSystems !== undefined && (typeof combined.logicalSystems !== "boolean" || combined.platform !== "junos")) throw Error("Invalid logical systems setting.");
       for (const key of ["header", "peer", "localAs", "policyName", "prefixes", "policy"] as const) if (typeof combined[key] !== "string" || combined[key].length > 10000) throw Error("Invalid combined template section.");
       if (!Array.isArray(combined.checkboxFields) || combined.checkboxFields.length > 64 || combined.checkboxFields.some(field => typeof field !== "string" || !/^[A-Za-z_][A-Za-z0-9_]*$/.test(field))) throw Error("Invalid checkbox fields.");
       for (const section of [item.text, combined.peer, combined.header, combined.prefixes, combined.policy]) conditionalText(section, {});
       if (serviceFields(item).length > 64) throw Error("Too many service fields.");
     }
-    return { id: item.id, name: item.name, text: item.text, fields: templateFields(item.text), ...(combined ? { combined: { header: combined.header, peer: combined.peer, localAs: combined.localAs, checkboxFields: combined.checkboxFields, policyName: combined.policyName, prefixes: combined.prefixes, policy: combined.policy, ...(combined.remoteAs !== undefined ? { remoteAs: combined.remoteAs } : {}), ...(combined.platform ? { platform: combined.platform } : {}), ...(combined.logicalSystems !== undefined ? { logicalSystems: combined.logicalSystems } : {}) } } : {}) };
+    const text = upgradeIosXrInterface(item.text, combined?.platform);
+    return { id: item.id, name: item.name, text, fields: templateFields(text), ...(combined ? { combined: { header: combined.header, peer: combined.peer, localAs: combined.localAs, checkboxFields: combined.checkboxFields, policyName: combined.policyName, prefixes: combined.prefixes, policy: combined.policy, ...(combined.remoteAs !== undefined ? { remoteAs: combined.remoteAs } : {}), ...(combined.platform ? { platform: combined.platform } : {}), ...(combined.logicalSystems !== undefined ? { logicalSystems: combined.logicalSystems } : {}) } } : {}) };
   });
 }

@@ -2036,6 +2036,7 @@ async fn connect_transport(
         SshConnection::connect_with_jump_chain(options, jump_options).await?
     };
     // Ask only after authentication succeeds; never hold a mutex across the dialog.
+    #[cfg(not(target_os = "android"))]
     for saved in saved_passwords.into_inner().expect("local password list") {
         let (id, label, secret) = {
             let mut saved = saved.lock().expect("password state");

@@ -1178,14 +1178,14 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 
 /* The selected sidebar tab opens directly into the panel surface. */
 .app-shell .sidebar { background: var(--bg); }
-.session-activity-strip :is(.activity-favorites, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"] {
+.session-activity-strip :is(.activity-favorites, .activity-recent, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"] {
   position: relative;
   z-index: 1;
   border-color: var(--line);
   border-right-color: transparent;
   background: var(--bg);
 }
-.session-activity-strip :is(.activity-favorites, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"]::after {
+.session-activity-strip :is(.activity-favorites, .activity-recent, .activity-shortcuts, .activity-notes, .activity-sessions, .activity-files)[aria-pressed="true"]::after {
   content: "";
   position: absolute;
   top: 0;

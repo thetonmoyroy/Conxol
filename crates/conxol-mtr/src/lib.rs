@@ -206,7 +206,7 @@ fn run_native(
 ) -> Result<Report, Error> {
     options.validate()?;
     check_cancel(cancel)?;
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     {
         run_with_mode(
             options,
@@ -216,7 +216,7 @@ fn run_native(
             live,
         )
     }
-    #[cfg(not(any(windows, target_os = "macos")))]
+    #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
     {
         let _ = (progress, live);
         Err(Error::UnsupportedPlatform)

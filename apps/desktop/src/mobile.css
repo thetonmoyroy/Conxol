@@ -1,0 +1,45 @@
+/* Android is a separate target; desktop window geometry stays unchanged. */
+html.android, html.android body, html.android #root {
+  width: 100%; min-width: 0; min-height: 0; height: 100%; overflow: hidden;
+}
+.android .app-shell { min-width: 0; min-height: 0; height: 100dvh; }
+.android .app-shell .app-body { min-width: 0; min-height: 0; }
+.android .desktop-menubar { flex-basis: 36px; height: 36px; max-width: 100%; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; scrollbar-width: none; }
+.android .desktop-menubar::-webkit-scrollbar { display: none; }
+.android .desktop-menubar > * { flex-shrink: 0; }
+.android .desktop-menubar > button, .android .desktop-menubar summary { height: 35px; padding-inline: 10px; }
+.android .desktop-menu { position: fixed; top: 36px; left: 4px; width: min(280px, calc(100vw - 8px)); max-height: calc(100dvh - 44px); overflow-y: auto; }
+.android .desktop-menu button { min-height: 42px; }
+.android .desktop-menu-status { display: none; }
+.android .session-activity-strip { flex-basis: 42px; overflow-y: auto; }
+.android .session-activity-strip button { width: 41px; height: 44px; min-height: 44px; }
+.android .app-shell .sidebar { position: absolute; z-index: 15; top: 0; bottom: 0; left: 42px; width: min(78vw, 300px); background: var(--panel); box-shadow: 8px 0 20px #0005; }
+.android .app-body { position: relative; }
+.android-sidebar-backdrop { position: absolute; z-index: 14; inset: 0 0 0 42px; padding: 0; border: 0; background: transparent; cursor: default; }
+.android-sidebar-backdrop:focus-visible { outline: 1px solid var(--amber); outline-offset: -2px; }
+.android .sidebar-collapsed .sidebar { display: none; }
+.android .sidebar-divider { display: none; }
+.android .app-shell .session-row { height: 42px; min-height: 42px; }
+.android .app-shell .session-row-main { min-height: 42px; }
+.android .app-shell .search-box input { min-height: 36px; font-size: 14px; }
+.android .workspace, .android .terminal-workspace, .android .terminal-area { min-width: 0; min-height: 0; }
+.android :is(input, select, textarea) { font-size: max(14px, 1em); }
+.android :is(.modal, .quick-connect-modal, .settings-modal, .session-settings) { box-sizing: border-box; min-width: 0; max-width: calc(100vw - 16px); max-height: calc(100dvh - 20px); }
+.android .session-protocols { flex-wrap: wrap; }
+.android .session-protocols > button { min-height: 44px; }
+.android .quick-connect-grid { grid-template-columns: minmax(0, 1fr); }
+.android .quick-connect-wide { grid-column: 1 / -1; }
+.android .session-settings-ssh > .quick-connect-grid { grid-template-columns: minmax(0, 1fr) 80px; }
+.android .session-settings-ssh .session-basic-host { grid-column: 1; grid-row: 1; }
+.android .session-settings-ssh .session-basic-port { grid-column: 2; grid-row: 1; }
+.android .session-settings-ssh .session-basic-username { grid-column: 1 / -1; grid-row: 2; }
+.android .session-settings-panel { min-width: 0; grid-template-columns: minmax(0, 1fr); max-height: none; overflow: visible; padding: 12px; }
+.android .session-settings-tabs { min-width: 0; }
+.android .session-settings-tabs button { flex: 1; min-width: 0; min-height: 44px; padding: 8px 4px; }
+.android .session-settings .quick-connect-grid :is(label, input, select, textarea, details) { min-width: 0; }
+.android .session-settings .quick-connect-footer { flex-wrap: wrap; }
+.android .session-settings .quick-connect-footer > span { flex-basis: 100%; max-width: none; }
+.android .session-settings .quick-connect-footer > div { width: 100%; justify-content: flex-end; }
+.android .session-settings .quick-connect-footer button { min-height: 44px; }
+.android .tab-bar { overflow-x: auto; }
+.android .template-generator { min-width: 0; }

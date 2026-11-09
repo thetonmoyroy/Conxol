@@ -29,8 +29,11 @@ Conxol brings **SSH, SFTP/SCP, serial consoles, SSH tunnels and network diagnost
 | **macOS · Intel** | x64 | [Download Intel DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg) |
 | **Linux · Debian / Ubuntu** | x64 | [Download DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb) |
 | **Linux · AppImage** | x64 portable | [Download AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage) |
+| **Android preview · ARM64** | Signed APK · Android 7+ | [Download preview APK](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60-android-preview.1/Conxol-0.1.60-android-preview.1-aarch64.apk) |
 
 [Release notes & SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60) · [What changed in 0.1.60](docs/release/v0.1.60.md)
+
+[Android preview notes, limitations & signing information](docs/release/v0.1.60-android-preview.1.md). Older debug APKs use a different signing certificate; read the installation note before replacing one.
 
 <details>
 <summary>Installation notes</summary>
@@ -90,7 +93,7 @@ Conxol keeps settings and saved connection data locally. Rust handles connection
 <details>
 <summary>Platform and protocol limits</summary>
 
-- Native Ping/MTR currently support IPv4 on Windows and macOS. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
+- Native Ping/MTR currently support IPv4 on Windows, macOS, and the Android preview. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
 - RDP is experimental and excluded from normal release bundles. VNC uses the packaged native helper; VNC TCP and Telnet are unencrypted.
 - RSA private-key authentication is unsupported. RSA-SHA2 server host-signature verification is supported.
 - FTP/FTPS client support depends on the system curl build. External X11 forwarding requires an X server.
