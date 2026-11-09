@@ -1,6 +1,6 @@
-use std::{io, net::Ipv4Addr};
 #[cfg(windows)]
 use std::mem::size_of;
+use std::{io, net::Ipv4Addr};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "gre_unix.rs"]
 mod unix;
@@ -197,20 +197,21 @@ impl Gre {
         let n = unsafe { recv(self.socket, buffer.as_mut_ptr(), buffer.len() as i32, 0) };
         if n == -1 {
             let e = error();
-            if e.raw_os_error() == Some(10060) { return Ok(None); }
+            if e.raw_os_error() == Some(10060) {
+                return Ok(None);
+            }
             return Err(e);
         }
         Ok(Some(n as usize))
     }
     pub fn receive(&mut self, peer_call: u16) -> io::Result<Option<Vec<u8>>> {
         let mut buffer = [0u8; 4096];
-        let Some(n) = self.read(&mut buffer)? else { return Ok(None); };
-        let Some((sequence, payload)) = parse(
-            &buffer[..n as usize],
-            self.remote.ip,
-            self.local.octets(),
-            self.call,
-        ) else {
+        let Some(n) = self.read(&mut buffer)? else {
+            return Ok(None);
+        };
+        let Some((sequence, payload)) =
+            parse(&buffer[..n], self.remote.ip, self.local.octets(), self.call)
+        else {
             return Ok(None);
         };
         if let Some(seq) = sequence {

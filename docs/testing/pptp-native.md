@@ -1,10 +1,10 @@
-# Native PPTP feasibility (Windows)
+# Native PPTP transport
 
 The goal is per-session/per-group PPTP without host VPN profiles, route/DNS
 changes, installed drivers, services, QEMU, or an external VPN client. This is
 available through **Tools > PPTP manager** for saved profiles and private
-connections. Assigning those tunnels to SSH sessions/groups remains separate
-work. The shared native engine implements
+connections. SSH/Telnet attachments and diagnostics routing are described below.
+The shared native engine implements
 PPTP control setup, GRE, PPP LCP, verified MS-CHAPv2 authentication,
 stateless 128-bit MPPE, IPCP, and a private smoltcp IPv4/TCP/ICMP stack.
 
@@ -49,8 +49,9 @@ not remote PPTP interoperability, authentication, or a complete VPN connection.
 
 ## Remaining gates before app integration
 
-1. Add native GRE transports and platform-specific permission handling for
-   Linux/macOS. Windows uses the app-session UAC socket broker described below.
+1. Native GRE transport and permission handling are now implemented for
+   Linux/macOS (see the platform section below). Windows retains its app-session
+   UAC socket broker.
 2. Harden sustained-session transport handling, cancellation, backpressure,
    lifecycle ownership, and resource limits beyond the bounded probe.
 3. Add tunnel-scoped DNS if hostname targets are required. The private TCP/IP
@@ -366,3 +367,44 @@ closed TCP, correlated TTL errors, malformed packets and cancellation;
 CIDR scan scheduling/cancellation plus direct-network loopback regressions;
 `cargo xtask test-pptp-diagnostics` covers native route failure/cancellation.
 All are synthetic and do not use a live PPTP endpoint or real credentials.
+
+
+## Linux/macOS transport and Android visibility (2026-11-10)
+
+Linux and macOS use native IPv4 raw GRE sockets with the shared PPTP, PPP,
+MS-CHAPv2, MPPE, private IP stack and tunnel-scoped streams. No adapters,
+system VPN profiles, route/DNS changes, drivers or external VPN clients are
+created. Receive polling is bounded to 10 ms; descriptors are owned and marked
+close-on-exec. Source/destination, GRE call IDs, lengths, fragments and sequence
+numbers retain the shared validation. XNU raw-IP length and fragment fields are
+normalized at the OS boundary before parsing.
+
+When raw-socket permission is absent, Linux requests authorization through
+`/usr/bin/pkexec` (requires polkit and a desktop authentication agent); macOS
+uses the system administrator prompt through `/usr/bin/osascript`. A one-shot
+same-binary helper runs before GUI, logging, profile or vault initialization.
+It creates one GRE socket, transfers only its descriptor over a random private
+0700 Unix-socket directory, then exits. Both peers verify OS-provided Unix
+credentials. The app checks the received socket type (and GRE protocol on Linux),
+then binds/connects it to the selected endpoint. Passwords never enter the
+helper, command line, IPC or files. Cancellation and a 90-second timeout stop
+the authorization launcher and remove its rendezvous. Permission may be requested
+for each new tunnel; no persistent privileged service is installed. A cancelled
+or unavailable permission request fails the connection without direct fallback.
+
+Android hides the PPTP manager, SSH/Telnet attachment controls and diagnostics
+route selector. Native PPTP remains unsupported there. Existing saved profile
+references are preserved and fail explicitly if used, rather than bypassing the
+selected tunnel.
+
+Validation on Windows/WSL: frontend type check, lint and unit suite; 22 Windows
+engine tests and six manager tests; Linux 23-test engine/FD/cancellation/header
+suite under isolated WSL HOME/XDG settings; an explicitly invoked privileged,
+synthetic 127.0.0.1 raw-GRE loopback test. Strict Clippy checks passed for Linux
+x64 and macOS ARM64; Android ARM64 crate check passed. No real VPN, credentials,
+system routing change or interactive Unix elevation prompt was used. macOS
+native permission/runtime testing and live-device tunnel interoperability remain
+manual acceptance. No release build or version bump was made for this change.
+
+Platform references: [Linux raw sockets](https://man7.org/linux/man-pages/man7/raw.7.html)
+and [XNU raw IPv4 handling](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet/raw_ip.c).

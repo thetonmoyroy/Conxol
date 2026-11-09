@@ -34,7 +34,7 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-store` | Versioned atomic persistence; OpenSSH and profile import/export; validation and corruption refusal |
 | `crates/conxol-vault` | PIN-encrypted native credentials and legacy portable vault using Argon2id/AES-GCM; zeroizing secret material |
 | `crates/conxol-network` | Bounded DNS/TCP/scan and async native Ping/MTR adapters |
-| `crates/conxol-pptp` | Native Windows GRE/PPTP, MS-CHAPv2, MPPE/IPCP, and a private smoltcp stack without host VPN routing |
+| `crates/conxol-pptp` | Native Windows/Linux/macOS GRE/PPTP, MS-CHAPv2, MPPE/IPCP, and a private smoltcp stack without host VPN routing |
 | `crates/conxol-ping` | Shared native IPv4 ICMP transport, Ping statistics/scheduler and CLI |
 | `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
 | `crates/conxol-telnet` | Plaintext Telnet negotiation, transport, and lifecycle |

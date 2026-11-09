@@ -182,7 +182,9 @@ impl PptpManager {
         vault: &NativeVault,
     ) -> Result<conxol_pptp::transport::Connector, String> {
         if !conxol_pptp::SUPPORTED {
-            return Err("Native PPTP connections are available on Windows, Linux and macOS.".into());
+            return Err(
+                "Native PPTP connections are available on Windows, Linux and macOS.".into(),
+            );
         }
         if let Ok(connector) = self.connector(id) {
             return Ok(connector);
@@ -800,7 +802,10 @@ mod tests {
         assert_eq!(manager.workers.lock().unwrap().len(), 1);
         let (first, second) = tokio::join!(first.ready(), second.ready());
         assert!(first.is_ok() && second.is_ok());
-        assert_eq!(manager.ensure_connected(p.id, &vault).await.is_ok(), conxol_pptp::SUPPORTED);
+        assert_eq!(
+            manager.ensure_connected(p.id, &vault).await.is_ok(),
+            conxol_pptp::SUPPORTED
+        );
         let pending =
             start_connection(&manager, &vault, request(), true, simulated_tunnel).unwrap();
         pending.cancel.store(true, Ordering::Release);

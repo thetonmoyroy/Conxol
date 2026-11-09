@@ -52,6 +52,7 @@ version = "0.1.64"
 dependencies = [
  "des",
  "getrandom",
+ "libc",
  "md4",
  "rc4",
  "sha1",
