@@ -1,13 +1,5 @@
-mod auth;
-mod control;
 #[cfg(windows)]
-mod gre;
-#[cfg(windows)]
-mod link;
-mod mppe;
-#[cfg(windows)]
-mod ppp;
-mod stack;
+use conxol_pptp::{control, gre, link, ppp, stack};
 
 #[cfg(windows)]
 fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -158,6 +150,77 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 fn main() {
+    #[cfg(windows)]
+    {
+        let args = std::env::args().skip(1).collect::<Vec<_>>();
+        if let Some(code) = conxol_pptp::elevation::broker_entry(&args) {
+            std::process::exit(code);
+        }
+        if args == ["--test-elevation"] {
+            let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+                use std::{
+                    net::{Ipv4Addr, UdpSocket},
+                    sync::{Arc, atomic::AtomicBool},
+                    time::{Duration, Instant},
+                };
+                let _winsock = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0))?;
+                let mut gre = conxol_pptp::elevation::open_gre(
+                    Ipv4Addr::LOCALHOST,
+                    Ipv4Addr::LOCALHOST,
+                    0x7a31,
+                    Arc::new(AtomicBool::new(false)),
+                )?;
+                let echo = [9, 1, 0, 8, 0x43, 0x58, 0x4f, 0x4c];
+                gre.send(0x7a31, 0xc021, &echo)?;
+                let expected = [0xff, 3, 0xc0, 0x21, 9, 1, 0, 8, 0x43, 0x58, 0x4f, 0x4c];
+                let start = Instant::now();
+                while start.elapsed() < Duration::from_secs(2) {
+                    if gre.receive(0x7a31)?.as_deref() == Some(&expected[..]) {
+                        println!("PASS: first elevated socket handoff and loopback send/receive.");
+                        let pid = conxol_pptp::elevation::helper_process_id()
+                            .ok_or("missing helper process")?;
+                        drop(gre);
+                        println!("Checking permission reuse after 31 seconds disconnected…");
+                        std::thread::sleep(Duration::from_secs(31));
+                        let mut second = conxol_pptp::elevation::open_gre(
+                            Ipv4Addr::LOCALHOST,
+                            Ipv4Addr::LOCALHOST,
+                            0x7a32,
+                            Arc::new(AtomicBool::new(false)),
+                        )?;
+                        if conxol_pptp::elevation::helper_process_id() != Some(pid) {
+                            return Err("elevated helper was not reused".into());
+                        }
+                        second.send(0x7a32, 0xc021, &echo)?;
+                        let second_start = Instant::now();
+                        let mut received = false;
+                        while second_start.elapsed() < Duration::from_secs(2) {
+                            if second.receive(0x7a32)?.as_deref() == Some(&expected[..]) {
+                                received = true;
+                                break;
+                            }
+                        }
+                        if !received {
+                            return Err("reused socket loopback receive timed out".into());
+                        }
+                        println!(
+                            "PASS: same elevated helper reused for a new connection after idle; no second elevation launch."
+                        );
+                        drop(second);
+                        conxol_pptp::elevation::shutdown()?;
+                        println!("PASS: elevated helper exited when the app session closed.");
+                        return Ok(());
+                    }
+                }
+                Err("elevated socket loopback deadline exceeded".into())
+            })();
+            if let Err(e) = result {
+                eprintln!("Elevation test failed: {e}");
+                std::process::exit(1);
+            }
+            return;
+        }
+    }
     #[cfg(windows)]
     if let Err(e) = run() {
         eprintln!("Native PPTP attempt failed: {e}");

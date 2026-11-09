@@ -10,14 +10,38 @@ use std::io;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+use conxol_core::{ConnectionEvent, ConnectionLifecycle, ConnectionState, Utf8OutputDecoder};
 use encoding_rs::WINDOWS_1252;
 use serde::{Deserialize, Serialize};
-use conxol_core::{ConnectionEvent, ConnectionLifecycle, ConnectionState, Utf8OutputDecoder};
+use std::{future::Future, pin::Pin};
 use thiserror::Error;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::Mutex as AsyncMutex;
+pub trait TelnetStream: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync {}
+impl<T: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + Sync> TelnetStream for T {}
+pub type BoxTelnetStream = Box<dyn TelnetStream>;
+pub type TelnetConnector = Arc<
+    dyn Fn(String, u16) -> Pin<Box<dyn Future<Output = io::Result<BoxTelnetStream>> + Send>>
+        + Send
+        + Sync,
+>;
+async fn open_transport(
+    options: &TelnetOptions,
+    connector: &Option<TelnetConnector>,
+) -> Result<BoxTelnetStream, TelnetError> {
+    tokio::time::timeout(options.connect_timeout, async {
+        if let Some(connect) = connector {
+            return connect(options.host.clone(), options.port).await;
+        }
+        let stream = TcpStream::connect((options.host.as_str(), options.port)).await?;
+        stream.set_nodelay(true)?;
+        Ok(Box::new(stream) as BoxTelnetStream)
+    })
+    .await
+    .map_err(|_| TelnetError::Timeout)?
+    .map_err(map_connect_error)
+}
 
 pub const DEFAULT_TELNET_PORT: u16 = 23;
 
@@ -393,8 +417,9 @@ fn naws_response(options: &TelnetOptions) -> Vec<u8> {
 /// A connected, plaintext Telnet stream.
 pub struct TelnetConnection {
     options: TelnetOptions,
-    reader: OwnedReadHalf,
-    writer: Arc<AsyncMutex<OwnedWriteHalf>>,
+    reader: tokio::io::ReadHalf<BoxTelnetStream>,
+    connector: Option<TelnetConnector>,
+    writer: Arc<AsyncMutex<tokio::io::WriteHalf<BoxTelnetStream>>>,
     codec: TelnetCodec,
     pending: VecDeque<u8>,
     responses: VecDeque<(Vec<u8>, usize)>,
@@ -423,19 +448,17 @@ impl TelnetConnection {
     }
 
     pub async fn connect(options: TelnetOptions) -> Result<Self, TelnetError> {
-        options.validate()?;
-        let stream = tokio::time::timeout(
-            options.connect_timeout,
-            TcpStream::connect((options.host.as_str(), options.port)),
-        )
-        .await
-        .map_err(|_| TelnetError::Timeout)?
-        .map_err(map_connect_error)?;
-        stream
-            .set_nodelay(true)
-            .map_err(|error| io_error("connection setup", error))?;
+        Self::connect_with_connector(options, None).await
+    }
 
-        let (reader, writer) = stream.into_split();
+    /// A private connector is retained for all reconnects; never falls back to host TCP.
+    pub async fn connect_with_connector(
+        options: TelnetOptions,
+        connector: Option<TelnetConnector>,
+    ) -> Result<Self, TelnetError> {
+        options.validate()?;
+        let stream = open_transport(&options, &connector).await?;
+        let (reader, writer) = tokio::io::split(stream);
         let mut lifecycle = ConnectionLifecycle::new();
         lifecycle
             .apply(ConnectionEvent::BeginConnect)
@@ -448,6 +471,7 @@ impl TelnetConnection {
             .expect("Telnet negotiation completes the connection setup");
 
         let connection = Self {
+            connector,
             options,
             reader,
             writer: Arc::new(AsyncMutex::new(writer)),
@@ -633,13 +657,7 @@ impl TelnetConnection {
             .apply(ConnectionEvent::BeginReconnect)
             .map_err(|error| TelnetError::Protocol(error.to_string()))?;
 
-        let result = tokio::time::timeout(
-            self.options.connect_timeout,
-            TcpStream::connect((self.options.host.as_str(), self.options.port)),
-        )
-        .await
-        .map_err(|_| TelnetError::Timeout)
-        .and_then(|result| result.map_err(map_connect_error));
+        let result = open_transport(&self.options, &self.connector).await;
         let stream = match result {
             Ok(stream) => stream,
             Err(error) => {
@@ -647,11 +665,7 @@ impl TelnetConnection {
                 return Err(error);
             }
         };
-        if let Err(error) = stream.set_nodelay(true) {
-            self.mark_failed();
-            return Err(io_error("connection setup", error));
-        }
-        let (reader, writer) = stream.into_split();
+        let (reader, writer) = tokio::io::split(stream);
         self.reader = reader;
         self.writer = Arc::new(AsyncMutex::new(writer));
         self.codec = TelnetCodec::default();
@@ -765,6 +779,57 @@ mod tests {
     use super::*;
     use tokio::io::AsyncReadExt;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn pptp_connector_is_retained_for_telnet_reconnect_and_never_falls_back() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let (server_tx, mut server_rx) = tokio::sync::mpsc::channel(4);
+        let connector: TelnetConnector = Arc::new(move |host, port| {
+            assert_eq!(host, "192.0.2.8");
+            assert_eq!(port, 23);
+            let call = count.fetch_add(1, Ordering::SeqCst);
+            let server_tx = server_tx.clone();
+            Box::pin(async move {
+                if call >= 2 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::NotConnected,
+                        "synthetic tunnel closed",
+                    ));
+                }
+                let (client, server) = tokio::io::duplex(4096);
+                server_tx.send(server).await.unwrap();
+                Ok(Box::new(client) as BoxTelnetStream)
+            })
+        });
+        let mut connection = TelnetConnection::connect_with_connector(
+            TelnetOptions::new("192.0.2.8", 23),
+            Some(connector),
+        )
+        .await
+        .unwrap();
+        let mut server = server_rx.recv().await.unwrap();
+        let mut negotiation = [0; 9];
+        server.read_exact(&mut negotiation).await.unwrap();
+        server.write_all(b"login: ").await.unwrap();
+        let mut text = [0; 32];
+        let n = connection.read(&mut text).await.unwrap();
+        assert_eq!(&text[..n], b"login: ");
+        connection.write(b"fixture\r\n").await.unwrap();
+        let mut input = [0; 9];
+        server.read_exact(&mut input).await.unwrap();
+        assert_eq!(&input, b"fixture\r\n");
+        connection.mark_connection_lost().unwrap();
+        connection.reconnect().await.unwrap();
+        drop(server);
+        let mut server = server_rx.recv().await.unwrap();
+        server.read_exact(&mut negotiation).await.unwrap();
+        connection.mark_connection_lost().unwrap();
+        assert!(connection.reconnect().await.is_err());
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        connection.close().await.unwrap();
+    }
 
     #[test]
     fn naws_escapes_iac_in_window_dimensions() {

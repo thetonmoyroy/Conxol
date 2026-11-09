@@ -4,6 +4,7 @@ mod store_updates;
 mod backup;
 use backup::{workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences};
 mod notes;
+mod pptp;
 mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
 mod workspace_lock;
@@ -219,6 +220,8 @@ struct NetworkMtrRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SshFingerprintRequest {
+    #[serde(default)]
+    pptp_profile_id: Option<uuid::Uuid>,
     #[serde(default)]
     legacy_rsa: bool,
     host: String,
@@ -969,6 +972,7 @@ fn session_save_ssh(
             .map_err(|error| format!("invalid X11 configuration: {error}"))?;
     }
     let SshConnectRequest {
+        pptp_profile_id,
         host,
         port,
         username,
@@ -1029,6 +1033,7 @@ fn session_save_ssh(
         startup_directory,
         startup_command,
         environment,
+        pptp_profile_id,
         jump_hosts: jump_hosts.iter().map(|jump| jump.host.clone()).collect(),
         jump_host_profiles: jump_hosts
             .into_iter()
@@ -1112,6 +1117,7 @@ fn session_save_serial(
         startup_directory: None,
         startup_command: None,
         environment: Vec::new(),
+        pptp_profile_id: None,
         jump_hosts: Vec::new(),
         jump_host_profiles: Vec::new(),
         notes: None,
@@ -1147,6 +1153,7 @@ fn session_save_telnet(
 ) -> Result<SessionRecord, String> {
     let SaveTelnetSessionRequest { name, request } = payload;
     let TelnetConnectRequest {
+        pptp_profile_id,
         host,
         port,
         terminal,
@@ -1180,6 +1187,7 @@ fn session_save_telnet(
         startup_directory: None,
         startup_command: None,
         environment: Vec::new(),
+        pptp_profile_id,
         jump_hosts: Vec::new(),
         jump_host_profiles: Vec::new(),
         notes: Some("Telnet is an unencrypted legacy protocol.".into()),
@@ -1245,6 +1253,7 @@ fn session_save_remote_desktop(
         startup_directory: None,
         startup_command: None,
         environment: Vec::new(),
+        pptp_profile_id: None,
         jump_hosts: Vec::new(),
         jump_host_profiles: Vec::new(),
         notes: None,
@@ -1338,17 +1347,23 @@ async fn network_check_tcp(
 
 #[tauri::command]
 async fn ssh_inspect_host_key(
+    vault: State<'_, NativeVault>,
+    pptp: State<'_, pptp::PptpManager>,
     request: SshFingerprintRequest,
 ) -> Result<conxol_ssh::SshHostKeyInspection, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
+    let options = SshFingerprintOptions { legacy_rsa: request.legacy_rsa, host: request.host, port: request.port, timeout };
     conxol_ssh::diagnostics::scope(conxol_ssh::diagnostics::Operation::HostKeyInspection, request.timeout_ms, 0, async {
-        inspect_host_key(SshFingerprintOptions {
-            legacy_rsa: request.legacy_rsa,
-            host: request.host,
-            port: request.port,
-            timeout,
-        }).await.inspect_err(|error| conxol_ssh::diagnostics::record_error(conxol_ssh::diagnostics::Stage::Connect, error))
-    }).await.map_err(|error| error.to_string())
+        if let Some(id) = request.pptp_profile_id {
+            let connector = pptp.ensure_connected(id, &vault).await?;
+            let stream = tokio::time::timeout(timeout, connector.connect(&options.host, options.port)).await
+                .map_err(|_| "PPTP TCP connection timed out.".to_string())?
+                .map_err(|e| e.to_string())?;
+            conxol_ssh::inspect_host_key_stream(options, stream).await.map_err(|e| e.to_string())
+        } else {
+            inspect_host_key(options).await.map_err(|e| e.to_string())
+        }
+    }).await
 }
 
 #[tauri::command]
@@ -2083,6 +2098,10 @@ async fn finish_native_shutdown(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Same-binary, app-session socket broker: never open Tauri, profiles or the
+    // credential vault in the elevated process.
+    #[cfg(windows)]
+    if let Some(code)=conxol_pptp::elevation::broker_entry(&std::env::args().skip(1).collect::<Vec<_>>()) {std::process::exit(code);}
     if let Some(message) = cli_message(std::env::args().nth(1).as_deref()) {
         println!("{message}");
         return;
@@ -2183,6 +2202,7 @@ pub fn run() {
             let snippets = SnippetStore::open(data_dir.join("snippets.json"))
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(notes::NoteStore::open(data_dir.join("notes.json"))?));
+            app.manage(pptp::PptpManager::open(data_dir.join("pptp.json"))?);
             let macros = MacroStore::open(data_dir.join("macros.json"))
                 .map_err(|error| error.to_string())?;
             let audit =
@@ -2205,6 +2225,7 @@ pub fn run() {
             if !allowed { invoke.resolver.reject("Workspace is locked. Enter your PIN to continue."); return true; }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
             workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure,
+            pptp::pptp_list, pptp::pptp_save, pptp::pptp_delete, pptp::pptp_connect, pptp::pptp_disconnect,
             clipboard_read_text, clipboard_write_text,
             file_transfer_run, file_transfer_cancel,
             tftp_server_start, tftp_server_stop, tftp_server_status,
@@ -2338,10 +2359,12 @@ pub fn run() {
                 let transfers = app.state::<FileTransferManager>().inner().clone();
                 transfers.cancel_all();
                 let manager = app.state::<SshManager>().inner().clone();
+                let pptp = app.state::<pptp::PptpManager>().inner().clone();
                 let local_cleanup = app.state::<TerminalManager>().shutdown();
                 let app = app.clone();
                 let exit_ready = Arc::clone(&exit_ready);
                 tauri::async_runtime::spawn(async move {
+                    let _ = tokio::task::spawn_blocking(move || pptp.shutdown()).await;
                     finish_native_shutdown(manager, transfers, server, local_cleanup).await;
                     exit_ready.store(true, Ordering::Release);
                     app.exit(code.unwrap_or(0));
@@ -2355,6 +2378,7 @@ pub fn run() {
             let transfers = app.state::<FileTransferManager>().inner().clone();
             transfers.cancel_all();
             let manager = app.state::<SshManager>().inner().clone();
+            app.state::<pptp::PptpManager>().shutdown();
             let local_cleanup = app.state::<TerminalManager>().shutdown();
             tauri::async_runtime::block_on(finish_native_shutdown(manager, transfers, server, local_cleanup));
         }

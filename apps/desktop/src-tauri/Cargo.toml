@@ -23,6 +23,7 @@ subtle = "2.6"
 tempfile = "3.23.0"
 anyhow.workspace = true
 conxol-core = { path = "../../../crates/conxol-core" }
+conxol-pptp = { path = "../../../crates/conxol-pptp" }
 conxol-telnet = { path = "../../../crates/conxol-telnet" }
 conxol-ssh = { path = "../../../crates/conxol-ssh" }
 conxol-serial = { path = "../../../crates/conxol-serial" }

@@ -890,6 +890,44 @@ pub async fn inspect_host_key(
     })
 }
 
+/// Observe a host key over an explicitly supplied private transport.
+pub async fn inspect_host_key_stream<S>(
+    options: SshFingerprintOptions,
+    stream: S,
+) -> Result<SshHostKeyInspection, SshError>
+where S: AsyncRead + AsyncWrite + Unpin + Send + 'static {
+    validate_fingerprint_options(&options)?;
+    let ConnectionParts {
+        observed_fingerprint,
+        handler,
+        config,
+        ..
+    } = inspection_connection_parts(&options);
+    let connect = tokio::time::timeout(
+        options.timeout,
+        client::connect_stream(config, stream, handler),
+    )
+    .await;
+    let handle = map_connect_result(connect, Arc::clone(&observed_fingerprint))?;
+    let fingerprint = lock_observed_fingerprint(&observed_fingerprint)
+        .clone()
+        .ok_or_else(|| SshError::Handshake("SSH server did not present a host key".into()))?;
+
+    // Dropping the handle also closes the transport, but attempt the protocol
+    // disconnect first. A failed close must not hide the already observed key.
+    let _ = tokio::time::timeout(
+        options.timeout,
+        handle.disconnect(Disconnect::ByApplication, "", "en"),
+    )
+    .await;
+
+    Ok(SshHostKeyInspection {
+        host: options.host,
+        port: options.port,
+        fingerprint,
+    })
+}
+
 const REMOTE_MONITOR_OUTPUT_LIMIT: usize = 64 * 1024;
 const REMOTE_MONITOR_TEXT_LIMIT: usize = 256;
 const REMOTE_MONITOR_TIMEOUT: Duration = Duration::from_secs(6);
@@ -1120,6 +1158,26 @@ impl SshConnection {
         Self::finish_authenticated(options, handle, None, forwarded_channels, x11_channels).await
     }
 
+    /// Authenticate over a caller-owned private byte stream, preserving host-key policy.
+    pub async fn connect_stream<S>(options: SshConnectOptions, stream: S) -> Result<Self, SshError>
+    where S: AsyncRead + AsyncWrite + Unpin + Send + 'static {
+        validate_options(&options)?;
+        let ConnectionParts {
+            observed_fingerprint,
+            handler,
+            config,
+            forwarded_channels,
+            x11_channels,
+        } = connection_parts(&options);
+        let connect = tokio::time::timeout(
+            options.timeout,
+            client::connect_stream(config, stream, handler),
+        )
+        .await;
+        let handle = map_connect_result(connect, observed_fingerprint)?;
+        Self::finish_authenticated(options, handle, None, forwarded_channels, x11_channels).await
+    }
+
     /// Connects through one or more already described jump hosts. Every hop
     /// is a real SSH connection; the target handshake travels through the
     /// previous hop's `direct-tcpip` channel.
@@ -1137,6 +1195,29 @@ impl SshConnection {
         validate_options(first)?;
         let first = jumps.remove(0);
         let mut upstream = Arc::new(Self::connect(first).await?);
+        for jump in jumps {
+            upstream = Arc::new(Self::connect_via_upstream(jump, upstream).await?);
+        }
+        Self::connect_via_upstream(options, upstream).await
+    }
+
+    /// Route the first hop through a supplied stream; preserve per-hop trust.
+    pub async fn connect_with_jump_chain_stream<S>(
+        options: SshConnectOptions,
+        mut jumps: Vec<SshJumpOptions>,
+        stream: S,
+    ) -> Result<Self, SshError>
+    where S: AsyncRead + AsyncWrite + Unpin + Send + 'static {
+        if jumps.len() > MAX_SSH_JUMP_HOSTS {
+            return Err(SshError::TooManyJumpHosts);
+        }
+        validate_options(&options)?;
+        let Some(first) = jumps.first() else {
+            return Self::connect_stream(options, stream).await;
+        };
+        validate_options(first)?;
+        let first = jumps.remove(0);
+        let mut upstream = Arc::new(Self::connect_stream(first, stream).await?);
         for jump in jumps {
             upstream = Arc::new(Self::connect_via_upstream(jump, upstream).await?);
         }

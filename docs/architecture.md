@@ -34,6 +34,7 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-store` | Versioned atomic persistence; OpenSSH and profile import/export; validation and corruption refusal |
 | `crates/conxol-vault` | PIN-encrypted native credentials and legacy portable vault using Argon2id/AES-GCM; zeroizing secret material |
 | `crates/conxol-network` | Bounded DNS/TCP/scan and async native Ping/MTR adapters |
+| `crates/conxol-pptp` | Native Windows GRE/PPTP, MS-CHAPv2, MPPE/IPCP, and a private smoltcp stack without host VPN routing |
 | `crates/conxol-ping` | Shared native IPv4 ICMP transport, Ping statistics/scheduler and CLI |
 | `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
 | `crates/conxol-telnet` | Plaintext Telnet negotiation, transport, and lifecycle |
@@ -51,6 +52,15 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 The two helper tools have separate Cargo workspaces/lockfiles. Keeping the RDP
 candidate outside the desktop workspace prevents its experimental crypto and
 native dependencies from weakening the SSH or portable-vault boundaries.
+
+Tools > PPTP manager is a React dialog hosted by the existing Tauri app.
+`apps/desktop/src-tauri/src/pptp.rs` owns profile persistence, PIN-vault password
+references, and independent tunnel workers. Closing the dialog preserves live
+tunnels; disconnect or app exit cancels and joins their workers. Profiles are
+included in encrypted workspace backup/restore. SSH and Telnet sessions can explicitly select a PPTP profile in their Network
+settings. Process-private async streams bridge the selected tunnel’s bounded TCP
+sockets into the existing transports, including SSH fingerprint inspection and
+the first jump hop. There is no host TCP/DNS fallback. See [native PPTP notes](testing/pptp-native.md).
 
 ## Follow an SSH workflow
 

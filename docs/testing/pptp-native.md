@@ -2,7 +2,9 @@
 
 The goal is per-session/per-group PPTP without host VPN profiles, route/DNS
 changes, installed drivers, services, QEMU, or an external VPN client. This is
-not implemented in the desktop yet. A standalone development probe now implements
+available through **Tools > PPTP manager** for saved profiles and private
+connections. Assigning those tunnels to SSH sessions/groups remains separate
+work. The shared native engine implements
 PPTP control setup, GRE, PPP LCP, verified MS-CHAPv2 authentication,
 stateless 128-bit MPPE, IPCP, and a private smoltcp IPv4/TCP/ICMP stack.
 
@@ -47,8 +49,8 @@ not remote PPTP interoperability, authentication, or a complete VPN connection.
 
 ## Remaining gates before app integration
 
-1. Choose the app's privilege model for native GRE send/receive. The elevated
-   standalone probe works; elevating the entire desktop is not assumed or enabled.
+1. Add native GRE transports and platform-specific permission handling for
+   Linux/macOS. Windows uses the app-session UAC socket broker described below.
 2. Harden sustained-session transport handling, cancellation, backpressure,
    lifecycle ownership, and resource limits beyond the bounded probe.
 3. Add tunnel-scoped DNS if hostname targets are required. The private TCP/IP
@@ -65,11 +67,13 @@ The initial loopback probe used no real VPN, remote SSH server, or credentials.
 
 ## Native encrypted tunnel prototype
 
-`tools/pptp-native/` is a separate Cargo workspace so its experimental legacy
-authentication dependencies do not enter the desktop dependency graph. Crypto
+The shared engine now lives in `crates/conxol-pptp` and is compiled into the
+Tauri backend. `tools/pptp-native/` remains a separate CLI workspace using that
+same library for bounded manual diagnostics. Crypto
 crates compile into the executable; runtime networking uses Windows' built-in
 Winsock API. No external VPN client, helper service, QEMU, or installed driver
-is used. Elevated raw-socket access is still required.
+is used. Windows raw-socket creation uses an app-session elevated broker when needed;
+the Tauri window and the VPN/SSH networking state remain in the normal process.
 
 The prototype has a bounded TCP control connection, validates PPTP framing and peer call
 IDs, services control echoes, filters GRE by peer/local address and call ID,
@@ -80,10 +84,11 @@ authentication phase has a 30-second deadline; TCP/control operations have separ
 An exit guard sends call-clear/stop-control messages and closes the TCP socket.
 The GRE socket also closes on success or failure.
 
-Build and synthetic tests (no sockets or real credentials used by these tests):
+Build the CLI and run isolated engine/profile tests (synthetic credentials,
+temporary stores, in-memory IP fixtures and loopback-only cancellation tests):
 
 ```powershell
-cargo test --locked --manifest-path tools/pptp-native/Cargo.toml --target-dir target/pptp-native-build
+cargo xtask test-pptp
 cargo build --locked --manifest-path tools/pptp-native/Cargo.toml --target-dir target/pptp-native-build
 ```
 
@@ -130,12 +135,12 @@ probe; do not expose this launcher or legacy authentication as a supported UI.
   banner was recognized without logging its contents. No SSH login, trust
   acceptance, commands, or credentials are sent to that target.
 
-Twelve synthetic tests pass: RFC 2759 authentication and RFC 3079 key/ciphertext
+The engine's synthetic tests cover RFC 2759 authentication and RFC 3079 key/ciphertext
 vectors; MPPE packet loss, duplicate/late rejection and rollover beyond 4096
 packets; malformed framing; no-encryption/weak-mode refusal; IPCP address
 assignment; bounded queues; encrypted ICMP echo; and a private TCP handshake
 with an SSH-shaped synthetic banner transported over encrypted IP packets
-between two in-memory stacks. No real socket is used by these tests. Clippy
+between two in-memory stacks, plus cancellation before a loopback socket read. Clippy
 passes for all targets with `-D warnings`.
 
 Protocol references: [MPPE framing/key changes (RFC 3078)](https://www.rfc-editor.org/rfc/rfc3078.html),
@@ -165,10 +170,159 @@ source. No host VPN profile, route, firewall, or DNS changes were made, and no
 driver, external VPN client, or runtime service was installed. Only development
 executables were built; desktop versions and release packages were not changed.
 
-**Limits:** this remains an isolated Windows development prototype, not a
-desktop feature. Stateful/40-bit/56-bit MPPE, MPPC, IPv6, IP fragmentation, and
+**Limits:** Stateful/40-bit/56-bit MPPE, MPPC, IPv6, IP fragmentation, and
 hostname resolution are not supported. Live TCP/SSH-over-VPN testing still
 requires a user-selected target; TCP is verified with in-memory encrypted
-fixtures. Desktop session/group settings, vault binding, async SSH byte streams,
-and lifecycle integration remain separate work. Windows raw GRE still requires
-administrator elevation.
+fixtures. Desktop SSH session/group assignment and async SSH byte streams
+remain separate work. Windows raw GRE still requires
+administrator permission for socket creation, requested via UAC when needed.
+
+## Desktop manager
+
+Tools > PPTP manager opens a resizable React dialog inside the existing Tauri
+application. It supports up to 2000 profiles, folder organization, search over
+profile metadata, status filtering, and 50-row pagination. Add/edit/duplicate/
+delete are backed by bounded, validated, atomically replaced `pptp.json` in
+the active workspace. Duplication copies metadata only. Connected or connecting
+profiles must disconnect before they can be changed/deleted.
+
+Passwords are optional. Saved passwords use opaque `pptp-<UUID>` references in
+the PIN-encrypted native vault; no passwords are stored in the profile JSON or
+returned through list IPC. Saving passwords requires the existing 4–12-digit
+workspace PIN. Leaving a password blank on edit keeps the saved value; replacing
+or removing it cleans up its vault reference. Profiles without saved passwords
+prompt transiently on Connect. Profile changes participate in the backup
+operation guard; encrypted workspace backups include PPTP profiles and rebind
+their password references during restore.
+
+Up to 16 independent native tunnels can run concurrently. A connected status
+means authentication, bidirectional MPPE, and IPCP negotiation completed. A
+single private stack per tunnel services encrypted peer keepalives and reports
+packet counts. Closing the manager leaves its tunnels running; Disconnect
+cancels the worker. App exit cancels and joins all owned workers. Native socket
+access denied requests elevation through Windows UAC once per app session. No
+Windows VPN profile, route, adapter, firewall, or DNS change is performed.
+SSH sessions are not implicitly routed into a manager connection.
+
+Validation includes the engine tests, profile persistence/corruption and failed
+write tests, encrypted-vault save/replace/clear/delete and rollback tests,
+worker cancellation/join tests, and PPTP password rebinding through encrypted
+workspace backup/restore. Frontend type checking, lint, unit tests and build,
+plus a native Tauri debug build, were also checked. GUI automation reached the
+isolated Tauri app, but interaction was blocked by active input detection; the
+complete manager visual workflow was not verified in that session.
+
+## Automatic Windows permission request
+
+On Connect, native GRE creation is attempted normally. If Windows returns
+WSAEACCES (10013), the worker reports that it is waiting for Windows permission
+and uses ShellExecuteExW's `runas` verb to start the same Conxol executable in
+`--conxol-gre-broker` mode. Already-elevated apps skip this step. Declining UAC
+leaves the app running and reports that permission was declined; Connect can
+be retried. The Windows UAC dialog itself waits for the user's decision.
+
+The elevated process stays available for the app session and handles subsequent
+GRE socket requests over the same authenticated pipe. Disconnect/reconnect,
+switching profiles, or disconnecting every PPTP tunnel does not request UAC
+again. Concurrent requests serialize through one shared broker, so simultaneous
+Connect actions cannot launch multiple prompts. No permission is requested at
+ordinary app startup; the helper starts on the first PPTP connection that needs
+it. Existing SSH and other connections stay running.
+
+The helper does not initialize Tauri, open a workspace/vault, receive VPN
+passwords, execute a shell, install a service, or change host networking. The
+normal app receives the duplicated socket through Winsock's documented
+WSADuplicateSocketW/WSASocketW mechanism, then runs PPTP/PPP/MPPE in its existing
+worker. The UI does not restart or acquire administrator privileges.
+
+`crates/conxol-pptp/src/elevation.rs` uses a unique local-only named pipe, an
+explicit owner/Administrators/SYSTEM DACL, first-instance protection, peer PID
+and executable checks, identification-only client security QoS, versioned fixed
+frames, and a 30-second deadline for each handshake/request after UAC completes.
+Idle time between requests has no expiry. Socket information is
+process-specific; handoff is acknowledged before the helper closes its copy.
+The protocol carries only socket parameters and the opaque socket capability.
+Cancel is checked before prompting and while waiting for the shared broker. Once
+UAC is approved, helper authentication and an in-progress capability handoff
+complete even if that connection is cancelled, preserving permission for later
+connections. The cancelled connection closes its donated socket immediately.
+Ordinary socket/bind failures preserve the authenticated channel. If the helper
+crashes or its protocol breaks, the app reports an error rather than silently
+requesting UAC again; restarting Conxol starts a new permission session.
+
+App exit cancels and joins connection workers, closes the shared pipe, and waits
+for the helper to exit. The helper also watches the parent's process handle and
+pipe EOF, so a crashed/killed parent cannot leave it running indefinitely. It
+holds no donated GRE socket after the corresponding handoff is acknowledged.
+
+The engine and UI keep privilege handling platform-specific with Windows-only
+APIs under `cfg(windows)`. Linux and macOS retain profile management and an
+explicit unsupported-connection status; no Windows elevation command is used
+there. Native PPTP connections on those platforms are not implemented yet.
+
+Manual local validation (not part of routine tests, may show Windows UAC):
+
+```powershell
+cargo build --locked --manifest-path tools/pptp-native/Cargo.toml --target-dir target/pptp-native-build
+.\target\pptp-native-build\debug\conxol-pptp-native-probe.exe --test-elevation
+```
+
+On 2026-11-09 the extended loopback check passed: the normal process sent and
+received a synthetic packet through an elevated GRE socket, closed that socket,
+waited 31 seconds disconnected, and received a second working socket from the
+**same helper PID**, without another elevation launch. Explicit session shutdown
+then verified that the helper process exited. No real VPN or credentials were
+used. Routine tests validate broker argument framing, cancellation before UAC,
+and two failed socket requests over the same usable named-pipe channel; they do
+not display elevation prompts. UAC rejection and complete desktop Connect
+interaction remain manual acceptance cases.
+
+
+## SSH and Telnet attachments
+
+New/edit SSH session > Network > PPTP attachment selects a manager profile.
+Telnet exposes the same selector under its Network disclosure. Direct connection
+remains the default. Opening an attached session automatically connects its
+assigned profile using the saved PIN-vault password, then waits for encrypted
+IP readiness before opening TCP. Concurrent sessions share a single connection
+attempt; an already connected profile is reused without requesting its password.
+Profiles without saved passwords can be manually connected with a transient
+password, or saved in PPTP manager for automatic connection. Windows requests
+permission through the existing app-session helper when needed. The assignment is saved as `pptp_profile_id` (UUID) in the
+secret-free session record and survives editing, duplicate/export and workspace
+backup. Older records without the field remain direct connections.
+
+The first destination must be an explicit IPv4 address. With an SSH jump chain,
+this means the first jump host; later destinations travel through SSH channels.
+No system DNS lookup is used for the PPTP destination. SSH host-key inspection
+uses the same selected tunnel before approval, and authentication still verifies
+the approved pin. SFTP, shell branches and SSH forwarding share that authenticated
+transport. Telnet keeps its existing negotiation and optional login behavior;
+MPPE covers the PPTP leg but does not add end-to-end encryption to Telnet beyond
+the PPTP server.
+
+`conxol-pptp::transport` provides bounded Tokio duplex streams without a loopback
+proxy listener. The owning tunnel worker polls up to 64 private TCP sockets,
+with 64 KiB buffers and bounded admission, 15-second connect deadlines, explicit
+backpressure, cancellation and EOF cleanup. Each tunnel owns its own connector;
+an absent, removed or failed assignment returns an error rather than silently
+using host networking. Automatic setup waits up to 120 seconds, reports the
+worker failure, and respects an explicit Disconnect without restarting that
+in-flight attempt. A later session/reconnect may start a fresh attempt. Tunnel disconnect closes attached transports.
+SSH and Telnet reconnects automatically prepare the same assigned profile.
+Closing or cancelling a waiting session leaves the independently managed tunnel
+available to other sessions; explicit PPTP Disconnect and app exit stop it. Closing a terminal leaves the
+shared PPTP tunnel running for other attached sessions.
+
+`cargo xtask test-pptp-attachments` uses only synthetic peers: encrypted in-memory
+IPv4/TCP streams with bidirectional data exceeding buffer capacity, cancellation
+and tunnel loss, SSH fingerprint inspection/changed-key rejection and terminal
+traffic through a supplied first-hop stream, and Telnet negotiation, data and
+route-preserving reconnect failure. These tests do not invoke UAC, access real
+credentials, create host routes or contact a VPN server. Real-device attachment
+and Linux/macOS native PPTP support remain outside this verification.
+
+Auto-connect regressions in `cargo xtask test-pptp` use an injected synthetic
+worker: saved-password retrieval, sharing one pending/connected worker, explicit
+cancellation, shutdown, missing-password refusal and negotiation failure. No UAC
+or real networking is used for these regressions.

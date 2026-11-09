@@ -2394,3 +2394,59 @@ async fn rejected_branch_keeps_parent_shell_alive() {
     drop(connection);
     fixture.finish().await;
 }
+
+// Explicit private transport emulation: only the fixture address is ever opened.
+async fn pptp_fixture_stream(address: SocketAddr) -> (tokio::io::DuplexStream, JoinHandle<()>) {
+    let (client, mut relay) = tokio::io::duplex(65536);
+    let mut fixture = TcpStream::connect(address).await.unwrap();
+    let task = tokio::spawn(async move { let _ = tokio::io::copy_bidirectional(&mut relay, &mut fixture).await; });
+    (client, task)
+}
+
+#[tokio::test]
+async fn pptp_supplied_stream_preserves_host_key_inspection_and_rejects_changed_pin() {
+    let fixture = Fixture::start(Method::Password, false).await;
+    let (stream, relay) = pptp_fixture_stream(fixture.address).await;
+    let observed = conxol_ssh::inspect_host_key_stream(conxol_ssh::SshFingerprintOptions {
+        host: "192.0.2.8".into(), port: 22, legacy_rsa: false, timeout: DEADLINE,
+    }, stream).await.unwrap();
+    assert_eq!(observed.host, "192.0.2.8");
+    assert_eq!(observed.fingerprint, fixture.fingerprint);
+    assert_eq!(fixture.observations.password_requests.load(Ordering::SeqCst), 0);
+    tokio::time::timeout(DEADLINE, relay).await.unwrap().unwrap();
+    fixture.finish().await;
+
+    let fixture = Fixture::start(Method::Password, false).await;
+    let mut options = fixture.options(Method::Password, true);
+    options.host = "192.0.2.8".into();
+    options.host_key_policy = HostKeyPolicy::PinnedFingerprint(format!("SHA256:{}", "A".repeat(43)));
+    let (stream, relay) = pptp_fixture_stream(fixture.address).await;
+    assert!(SshConnection::connect_stream(options, stream).await.is_err());
+    assert_eq!(fixture.observations.password_requests.load(Ordering::SeqCst), 0);
+    tokio::time::timeout(DEADLINE, relay).await.unwrap().unwrap();
+    fixture.finish().await;
+}
+
+#[tokio::test]
+async fn pptp_supplied_stream_authenticates_terminal_and_first_jump_hop() {
+    let target = Fixture::start_configured(Method::Password, false, None, true).await;
+    let jump = Fixture::start_configured(Method::Password, false, Some(target.address), false).await;
+    let mut first = jump.options(Method::Password, true);
+    first.host = "192.0.2.8".into(); // never looked up or opened by host TCP
+    let (stream, relay) = pptp_fixture_stream(jump.address).await;
+    let connection = SshConnection::connect_with_jump_chain_stream(target.options(Method::Password, true), vec![first], stream).await.unwrap();
+    let mut shell = connection.open_shell(80, 24).await.unwrap();
+    shell.write(b"private-route").await.unwrap();
+    let received = tokio::time::timeout(DEADLINE, async {
+        let mut bytes = Vec::new();
+        while bytes.len() < SHELL_BANNER.len() + b"private-route".len() {
+            if let SshOutput::Stdout(data) = shell.next_output().await.unwrap().unwrap() { bytes.extend(data); }
+        }
+        bytes
+    }).await.unwrap();
+    assert_eq!(received, [SHELL_BANNER, b"private-route"].concat());
+    shell.close().await.unwrap(); drop(shell);
+    connection.disconnect().await.unwrap(); drop(connection);
+    tokio::time::timeout(DEADLINE, relay).await.unwrap().unwrap();
+    target.finish().await; jump.finish().await;
+}

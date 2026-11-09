@@ -1,3 +1,4 @@
+import { PptpAttachment } from "./PptpAttachment";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { attachTerminalGpuRenderer } from "./terminal-gpu-renderer";
 import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalTouchPan } from "./terminal-mobile-layout";
@@ -15,6 +16,7 @@ import { createTerminalFitScheduler } from "./terminal-fit";
 import { handleTerminalControlKey } from "./terminal-control-keys";
 import { FileTransferClient } from "./FileTransferClient";
 import { SyntaxHighlightSettings } from "./SyntaxHighlightSettings";
+import { PptpManager } from "./PptpManager";
 import { WorkspaceBackup } from "./WorkspaceBackup";
 import { applyWorkspacePreferences } from "./workspace-backup-model";
 import { handleTerminalFindKey } from "./terminal-find";
@@ -417,6 +419,7 @@ type SavedSession = {
   x11_single_connection?: boolean;
   server_alive_interval?: number | null;
   folder: string | null;
+  pptp_profile_id?: string | null;
   jump_hosts: string[];
   tags: string[];
   favorite: boolean;
@@ -544,6 +547,7 @@ type SshAuthRequest =
   | { method: "keyboardInteractive"; credentialId: string };
 
 type SshConnectRequest = {
+  pptpProfileId?: string;
   host: string;
   port: number;
   username: string;
@@ -583,6 +587,7 @@ type SshConnectResponse = {
 };
 
 type TelnetConnectRequest = {
+  pptpProfileId?: string;
   username?: string;
   password?: string;
   savePassword?: boolean;
@@ -1731,6 +1736,7 @@ function App() {
   const [tftpServerRunning, setTftpServerRunning] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useToolDialog("fileTransfer", activeToolDialog, setActiveToolDialog);
   const [syntaxSettingsOpen, setSyntaxSettingsOpen] = useToolDialog("syntaxSettings", activeToolDialog, setActiveToolDialog);
+  const [pptpManagerOpen, setPptpManagerOpen] = useToolDialog("pptpManager", activeToolDialog, setActiveToolDialog);
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof window === "undefined" || !window.matchMedia("(max-width: 720px)").matches);
   const notesOpen = sidebarOpen && sidebarMode === "notes";
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -2768,7 +2774,7 @@ function App() {
           if (!await confirmSessionStartup(request.startupCommand, `SSH ${request.username}@${request.host}:${request.port}`, sshSettings.reconnectEnabled && sshSettings.reconnectAttempts > 0, stillAllowed) || !stillAllowed()) return;
           const trustServices = {
             lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
-            inspect: (target: { host: string; port: number; legacyRsa?: boolean }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs, legacyRsa: target.legacyRsa ?? false } }),
+            inspect: (target: { host: string; port: number; legacyRsa?: boolean }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs, pptpProfileId: request.pptpProfileId, legacyRsa: target.legacyRsa ?? false } }),
             confirm: (target: { host: string; port: number }, fingerprint: string) => confirmAction(`Unknown SSH host key\n\nHost: ${target.host}:${target.port}\nSHA-256 fingerprint:\n${fingerprint}\n\nVerify this fingerprint with the server administrator. Accept and save this key for future connections?` , { title: "Unknown SSH host key", acceptLabel: "Accept and save" }),
             save: (target: { host: string; port: number }, fingerprint: string) => invoke<void>("ssh_trust_accept", { host: target.host, port: target.port, fingerprint }),
           };
@@ -3192,6 +3198,7 @@ function App() {
         return;
       }
       return connectTelnet({
+        pptpProfileId: session.pptp_profile_id ?? undefined,
         host: session.hostname,
         port: session.port,
         username: session.username ?? undefined,
@@ -4580,6 +4587,7 @@ function App() {
     <main style={{ "--terminal-surface": terminalSurface(colorTheme, settings.terminal) } as React.CSSProperties} className={`app-shell ${sidebarOpen ? "" : "sidebar-collapsed"} theme-${colorTheme}`}>
       {fileTransferOpen && <FileTransferClient onClose={() => setFileTransferOpen(false)} onServerRunning={setTftpServerRunning} initialServer={tftpServerRunning} />}
       {syntaxSettingsOpen && <SyntaxHighlightSettings onClose={() => setSyntaxSettingsOpen(false)} />}
+      {pptpManagerOpen && <PptpManager onClose={() => setPptpManagerOpen(false)} />}
       <ApplicationMenuBar>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
           <button onClick={() => setQuickConnectOpen(true)}>New session…</button>
@@ -4598,6 +4606,7 @@ function App() {
         <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu">
           <button onClick={() => setActiveView("files")}>Remote files</button>
           <button onClick={() => setFileTransferOpen(true)}>FTP / TFTP…</button>
+          <button onClick={() => setPptpManagerOpen(true)}>PPTP manager…</button>
           <button onClick={() => setDiagnosticsOpen(true)}>Network diagnostics</button>
           <button onClick={() => setActiveView("tunnels")}>SSH tunnels</button>
           <button onClick={() => setActiveView("transfers")}>Transfers</button>
@@ -5013,6 +5022,7 @@ function requestFromSavedSession(session: SavedSession, catalog: SavedSession[],
     environment: session.environment ?? [],
     startupDirectory: session.startup_directory ?? undefined,
     startupCommand: session.startup_command ?? undefined,
+    pptpProfileId: session.pptp_profile_id ?? undefined,
     jumpHosts: jumpHosts.length > 0 ? jumpHosts : undefined,
     cols: 120,
     rows: 32,
@@ -6302,6 +6312,7 @@ function SettingsModal({ systemDark, canRestore, settings, error, portableVaultS
 const CONSOLE_BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
 function QuickConnectDialog({ connecting = false, initialSession, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onConnectRemoteDesktop, onShell, onWsl }: { connecting?: boolean; initialSession?: SavedSession; onSave?: (session: SavedSession) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: { name: string; folder: string }) => void; onConnectTelnet: (request: TelnetConnectRequest) => void; onConnectSerial: (request: SerialConnectRequest) => void; onConnectRemoteDesktop: (request: RemoteDesktopConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
+  const [pptpProfileId, setPptpProfileId] = useState(initialSession?.pptp_profile_id ?? "");
   const [sshTab, setSshTab] = useState<"advanced" | "terminal" | "network">("advanced");
   const [bookmarkOpen, setBookmarkOpen] = useState(() => {
     try { return localStorage.getItem("conxol.sessionBookmarkOpen") === "true"; } catch { return false; }
@@ -6437,7 +6448,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
         const originalJump = initialSession.jump_host_profiles?.[0];
         const jumps = jumpHost.trim() ? [{ ...originalJump, host: jumpHost.trim(), port: Number(jumpPort), username: jumpUsername.trim() || username.trim(), auth: originalJump?.auth ?? { kind: "keyboardInteractivePrompt" as const } }, ...(initialSession.jump_host_profiles?.slice(1) ?? [])] : [];
         onSave({
-          ...initialSession, name: sessionName.trim(), folder: sessionFolder.trim() || null,
+          ...initialSession, pptp_profile_id: protocol === "ssh" || protocol === "telnet" ? pptpProfileId || null : null, name: sessionName.trim(), folder: sessionFolder.trim() || null,
           hostname: protocol === "local" ? initialSession.hostname : protocol === "serial" ? serialDevice.trim() : host.trim(),
           port: protocol === "local" || protocol === "serial" ? initialSession.port : Number(port),
           username: protocol === "ssh" || protocol === "telnet" || protocol === "rdp" || protocol === "vnc" ? username.trim() || null : initialSession.username,
@@ -6470,6 +6481,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       if (password && !username.trim()) { setValidationError("Enter a username for Telnet auto login."); return; }
       if (telnetPassword.current) telnetPassword.current.value = "";
       onConnectTelnet({
+        pptpProfileId: pptpProfileId || undefined,
         username: username.trim() || undefined, password, savePassword: saveTelnetPassword,
         host: host.trim(),
         port: Number(port),
@@ -6558,6 +6570,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       startupDirectory: startupDirectory.trim() || undefined,
       startupCommand: startupCommand.trim() || undefined,
       jumpHosts,
+      pptpProfileId: pptpProfileId || undefined,
       cols: 120,
       rows: 32,
     }, { name: sessionName.trim(), folder: sessionFolder.trim() });
@@ -6765,6 +6778,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                   </details>
                   </section>
                   <section className="session-settings-panel quick-connect-wide" id="session-panel-network" role="tabpanel" aria-labelledby="session-tab-network" data-session-tab="network" hidden={sshTab !== "network"}>
+                  <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
                   <label className="quick-connect-wide">
                     Jump host <span className="optional">optional · Auto login</span>
                     <input value={jumpHost} onChange={(event) => setJumpHost(event.target.value)} placeholder="bastion.internal.example" />
@@ -6908,6 +6922,10 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     </label>
                     <small className="quick-connect-wide">Leave blank to log in manually. Telnet sends credentials unencrypted.</small>
                   </>}
+                  <details className="quick-connect-wide" open={!!pptpProfileId}>
+                    <summary>Network</summary>
+                    <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
+                  </details>
                   <label className="quick-connect-wide">
                     Terminal type
                     <input required value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder="xterm-256color" />

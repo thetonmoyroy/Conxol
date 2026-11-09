@@ -55,6 +55,8 @@ const TUNNEL_PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SshConnectRequest {
+    #[serde(default)]
+    pub pptp_profile_id: Option<Uuid>,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -818,7 +820,7 @@ impl SshManager {
         let connection = tokio::select! {
             biased;
             _ = shutdown.changed() => return Err(SshManagerError::Closed),
-            result = connect_transport(vault.as_ref(), app.state::<NativeVault>().inner().clone(), &request, self, &auth_events, None) => result.inspect_err(record_connection_diagnostic)?,
+            result = connect_transport(&app, vault.as_ref(), app.state::<NativeVault>().inner().clone(), &request, self, &auth_events, None) => result.inspect_err(record_connection_diagnostic)?,
         };
         let connection = Arc::new(connection);
         let shell = tokio::select! {
@@ -1946,6 +1948,7 @@ fn record_connection_diagnostic(error: &SshManagerError) {
 }
 
 async fn connect_transport(
+    app: &AppHandle,
     vault: &dyn CredentialLookup,
     native_vault: NativeVault,
     request: &SshConnectRequest,
@@ -2034,7 +2037,15 @@ async fn connect_transport(
             startup_command: None,
         });
     }
-    let connection = if jump_options.is_empty() {
+    let connection = if let Some(id) = request.pptp_profile_id {
+        let pptp = app.state::<crate::pptp::PptpManager>().inner().clone();
+        let connector = pptp.ensure_connected(id, &native_vault).await.map_err(SshManagerError::InvalidRequest)?;
+        let first = jump_options.first().unwrap_or(&options);
+        let stream = tokio::time::timeout(options.timeout, connector.connect(&first.host, first.port)).await
+            .map_err(|_| SshManagerError::InvalidRequest("PPTP TCP connection timed out.".into()))?
+            .map_err(|e| SshManagerError::InvalidRequest(e.to_string()))?;
+        SshConnection::connect_with_jump_chain_stream(options, jump_options, stream).await?
+    } else if jump_options.is_empty() {
         SshConnection::connect(options).await?
     } else {
         SshConnection::connect_with_jump_chain(options, jump_options).await?
@@ -2370,6 +2381,7 @@ async fn run_remote_session(
                     },
                     |_attempt| ssh_diagnostics::scope(DiagnosticOperation::Reconnect, request.connect_timeout_ms, request.jump_hosts.len(), async {
                         let new_connection = connect_transport(
+                            &app,
                             vault.as_ref(),
                             app.state::<NativeVault>().inner().clone(),
                             &request,

@@ -19,6 +19,8 @@ const PENDING_OUTPUT_CHUNKS: usize = 32;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TelnetConnectRequest {
+    #[serde(default)]
+    pub pptp_profile_id: Option<Uuid>,
     pub host: String,
     pub port: u16,
     #[serde(default)]
@@ -117,6 +119,9 @@ impl TelnetManager {
         request: TelnetConnectRequest,
     ) -> Result<TelnetConnectResponse, TelnetManagerError> {
         let host = request.host.clone();
+        if request.pptp_profile_id.is_some() && request.host.parse::<std::net::Ipv4Addr>().is_err() {
+            return Err(TelnetManagerError::InvalidRequest("PPTP destinations must be IPv4 addresses; DNS is not routed through PPTP yet.".into()));
+        }
         let username = request.username.clone().unwrap_or_default();
         if username.len() > 256 || username.chars().any(char::is_control) {
             return Err(TelnetManagerError::InvalidRequest(
@@ -151,7 +156,7 @@ impl TelnetManager {
             }
         }
         let save_password = request.save_password;
-        let options = TelnetOptions {
+        let mut options = TelnetOptions {
             host: request.host,
             port: request.port,
             terminal: request.terminal,
@@ -163,7 +168,23 @@ impl TelnetManager {
         options
             .validate()
             .map_err(|error| TelnetManagerError::InvalidRequest(error.to_string()))?;
-        let mut connection = TelnetConnection::connect(options).await?;
+        let connector: Option<conxol_telnet::TelnetConnector> = if let Some(id) = request.pptp_profile_id {
+            // Resolve the selected profile again for each reconnect, including a restarted tunnel.
+            let pptp = app.state::<crate::pptp::PptpManager>().inner().clone();
+            let native_vault = vault.inner().clone();
+            pptp.ensure_connected(id, &native_vault).await.map_err(TelnetManagerError::InvalidRequest)?;
+            // VPN setup has its own bounded wait; TCP itself remains capped at 15 seconds.
+            options.connect_timeout = std::time::Duration::from_secs(150);
+            Some(Arc::new(move |host, port| {
+                let pptp = pptp.clone();
+                let native_vault = native_vault.clone();
+                Box::pin(async move {
+                    let connector = pptp.ensure_connected(id, &native_vault).await.map_err(std::io::Error::other)?;
+                    Ok(Box::new(connector.connect(&host, port).await?) as conxol_telnet::BoxTelnetStream)
+                })
+            }))
+        } else { None };
+        let mut connection = TelnetConnection::connect_with_connector(options, connector).await?;
         if save_password {
             if let Some(password) = &password {
                 let id = CredentialId::new(format!("telnet-{}", Uuid::new_v4()))

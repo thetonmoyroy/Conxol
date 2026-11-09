@@ -158,7 +158,7 @@ impl Stack {
             tcp::SocketBuffer::new(vec![0; 65536]),
             tcp::SocketBuffer::new(vec![0; 65536]),
         );
-        socket.set_timeout(Some(smoltcp::time::Duration::from_secs(15)));
+        socket.set_timeout(Some(smoltcp::time::Duration::from_secs(60)));
         socket.set_keep_alive(Some(smoltcp::time::Duration::from_secs(10)));
         self.sockets.add(socket)
     }
@@ -169,10 +169,15 @@ impl Stack {
         local_port: u16,
     ) -> Result<SocketHandle, String> {
         let handle = self.tcp_socket();
-        self.sockets
+        if self
+            .sockets
             .get_mut::<tcp::Socket>(handle)
             .connect(self.interface.context(), (target, port), local_port)
-            .map_err(|_| "private TCP connect failed")?;
+            .is_err()
+        {
+            self.sockets.remove(handle);
+            return Err("private TCP connect failed".into());
+        }
         Ok(handle)
     }
 }

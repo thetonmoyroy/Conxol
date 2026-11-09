@@ -7,6 +7,7 @@ pub struct Control {
     stream: TcpStream,
     buffered: Vec<u8>,
     call: Option<u16>,
+    cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }
 pub fn frame(kind: u16, body: &[u8]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(12 + body.len());
@@ -27,6 +28,7 @@ impl Control {
             stream,
             buffered: Vec::new(),
             call: None,
+            cancel: None,
         })
     }
     pub fn local(&self) -> io::Result<Ipv4Addr> {
@@ -35,10 +37,23 @@ impl Control {
             _ => Err(io::Error::other("IPv4 required")),
         }
     }
+    pub fn set_cancellation(&mut self, cancel: std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        self.cancel = Some(cancel);
+    }
     pub fn send(&mut self, kind: u16, body: &[u8]) -> io::Result<()> {
         self.stream.write_all(&frame(kind, body))
     }
     pub fn poll(&mut self) -> io::Result<Option<(u16, Vec<u8>)>> {
+        if self
+            .cancel
+            .as_ref()
+            .is_some_and(|cancel| cancel.load(std::sync::atomic::Ordering::Acquire))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "PPTP connection cancelled",
+            ));
+        }
         if let Some(message) = extract(&mut self.buffered)? {
             return Ok(Some(message));
         }
@@ -160,6 +175,24 @@ fn extract(buffer: &mut Vec<u8>) -> io::Result<Option<(u16, Vec<u8>)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cancellation_interrupts_control_before_socket_read() {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (_peer, _) = listener.accept().unwrap();
+        let mut control = Control {
+            stream,
+            buffered: Vec::new(),
+            call: None,
+            cancel: Some(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                true,
+            ))),
+        };
+        assert_eq!(
+            control.poll().unwrap_err().kind(),
+            io::ErrorKind::Interrupted
+        );
+    }
     #[test]
     fn fragmented_coalesced_and_invalid_control_frames() {
         let bytes = frame(5, &[1, 2, 3, 4]);

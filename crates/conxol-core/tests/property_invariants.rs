@@ -1,5 +1,5 @@
-use proptest::prelude::*;
 use conxol_core::{AuthMethod, Protocol, SessionId, SessionRecord};
+use proptest::prelude::*;
 
 fn ascii_token(max_length: usize) -> impl Strategy<Value = String> {
     prop::collection::vec(prop::char::range('a', 'z'), 1..=max_length)
@@ -35,6 +35,7 @@ fn ssh_session(
         startup_directory: None,
         startup_command: None,
         environment: Vec::new(),
+        pptp_profile_id: None,
         jump_hosts: Vec::new(),
         jump_host_profiles: Vec::new(),
         notes: None,

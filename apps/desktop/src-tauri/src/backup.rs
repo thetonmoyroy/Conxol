@@ -25,6 +25,7 @@ const FILES: &[&str] = &[
     "snippets.json",
     "macros.json",
     "notes.json",
+    "pptp.json",
     "audit.json",
     "ssh-trust.json",
     "workspace-lock.json",
@@ -227,6 +228,8 @@ fn validate_files(directory: &Path) -> Result<(), String> {
         .map_err(|_| error("Backup audit data is invalid."))?;
     crate::notes::NoteStore::open(directory.join("notes.json"))
         .map_err(|_| error("Backup notes are invalid."))?;
+    crate::pptp::ProfileStore::open(directory.join("pptp.json"))
+        .map_err(|_| error("Backup PPTP profiles are invalid."))?;
     WorkspaceLock::open(directory.join("workspace-lock.json"))?;
     if directory.join("ssh-trust.json").exists() {
         crate::ssh_trust::SshTrustStore::new(directory.join("ssh-trust.json")).validate_backup()?;
@@ -355,7 +358,8 @@ fn snapshot(
     }
     let mut ids: BTreeSet<_> = ids.into_iter().collect();
     ids.extend(credential_index(directory)?);
-    if let Some(bytes) = archive.files.get_mut("sessions.json") {
+    for profile_file in ["sessions.json", "pptp.json"] {
+    if let Some(bytes) = archive.files.get_mut(profile_file) {
         let mut sessions: serde_json::Value =
             serde_json::from_slice(bytes).map_err(|_| error("Could not read saved sessions."))?;
         let mut paths: BTreeMap<String, String> = BTreeMap::new();
@@ -381,6 +385,7 @@ fn snapshot(
         })?;
         *bytes = serde_json::to_vec(&sessions)
             .map_err(|_| error("Could not encode backup sessions."))?;
+    }
     }
     if ids.len() > 4096 {
         return Err(error("Too many saved credentials for one backup."));
@@ -573,7 +578,8 @@ fn apply_archive(
     for (id, bytes) in &archive.attachments {
         atomic_write(&keys.join(id), bytes)?;
     }
-    let sessions_path = stage.path().join("sessions.json");
+    for profile_file in ["sessions.json", "pptp.json"] {
+    let sessions_path = stage.path().join(profile_file);
     if sessions_path.exists() {
         let mut sessions: serde_json::Value =
             serde_json::from_slice(&read_bounded(&sessions_path, MAX_FILE)?)
@@ -605,6 +611,7 @@ fn apply_archive(
             &sessions_path,
             &serde_json::to_vec(&sessions).map_err(|_| error("Could not restore sessions."))?,
         )?;
+    }
     }
     atomic_write(
         &stage.path().join("credential-index.json"),
@@ -777,6 +784,20 @@ mod tests {
             |id| Ok(SecretMaterial::new(format!("synthetic-secret-{id}"))),
         )
         .unwrap()
+    }
+    #[test]
+    fn pptp_profiles_and_password_references_survive_backup_restore() {
+        let src=tempfile::tempdir().unwrap();source(src.path());
+        fs::write(src.path().join("pptp.json"),serde_json::to_vec(&serde_json::json!([{
+            "id":uuid::Uuid::new_v4(),"name":"VPN fixture","server":"192.0.2.5","username":"fixture-user",
+            "folder":"Testing","notes":"Synthetic fixture","credentialRef":"pptp-fixture"
+        }])).unwrap()).unwrap();
+        let archive=make_archive(src.path());assert!(archive.credentials.contains_key("pptp-fixture"));
+        let dst=tempfile::tempdir().unwrap();let vault=FakeVault::default();apply_archive(dst.path(),&archive,&vault).unwrap();
+        let active=resolve_workspace(dst.path()).unwrap();let profiles:serde_json::Value=serde_json::from_slice(&fs::read(active.join("pptp.json")).unwrap()).unwrap();
+        let reference=profiles[0]["credentialRef"].as_str().unwrap();assert!(reference.starts_with("restored-"));
+        assert_eq!(vault.entries.lock().unwrap().get(reference).unwrap(),"synthetic-secret-pptp-fixture");
+        crate::pptp::ProfileStore::open(active.join("pptp.json")).unwrap();
     }
     #[test]
     fn native_restore_stages_only_restored_credentials_under_current_screen_pin() {

@@ -2,6 +2,7 @@
 members = [
   "benchmarks",
   "crates/conxol-core",
+  "crates/conxol-pptp",
   "crates/conxol-ssh",
   "crates/conxol-store",
   "crates/conxol-vault",

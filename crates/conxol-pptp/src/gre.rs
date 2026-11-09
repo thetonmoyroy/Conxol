@@ -1,4 +1,5 @@
 use std::{io, mem::size_of, net::Ipv4Addr};
+pub use windows_sys::Win32::Networking::WinSock::WSAPROTOCOL_INFOW as ProtocolInfo;
 
 #[repr(C)]
 struct Address {
@@ -43,6 +44,62 @@ impl Drop for Gre {
     }
 }
 impl Gre {
+    /// Duplicate only for the OS-verified requesting process. The source must
+    /// remain alive until the receiving process acknowledges reconstruction.
+    pub fn duplicate_for_process(&self, pid: u32) -> io::Result<ProtocolInfo> {
+        let mut info: ProtocolInfo = unsafe { std::mem::zeroed() };
+        if unsafe {
+            windows_sys::Win32::Networking::WinSock::WSADuplicateSocketW(
+                self.socket,
+                pid,
+                &mut info,
+            )
+        } != 0
+        {
+            return Err(error());
+        }
+        Ok(info)
+    }
+    pub fn from_protocol_info(
+        local: Ipv4Addr,
+        remote: Ipv4Addr,
+        call: u16,
+        info: &ProtocolInfo,
+    ) -> io::Result<Self> {
+        use windows_sys::Win32::Networking::WinSock::{
+            AF_INET, SOCK_RAW, WSA_FLAG_OVERLAPPED, WSASocketW,
+        };
+        // Windows' generic raw-IP catalog entry reports protocol 0 with offset
+        // 255 even for a GRE socket. The authenticated broker creates only GRE.
+        let gre_provider =
+            info.iProtocol == 47 || (info.iProtocol == 0 && info.iProtocolMaxOffset == 255);
+        if info.iAddressFamily != i32::from(AF_INET)
+            || info.iSocketType != SOCK_RAW
+            || !gre_provider
+        {
+            return Err(io::Error::other(
+                "unexpected socket type from elevation helper",
+            ));
+        }
+        // Microsoft requires OVERLAPPED when duplicating a socket created by socket().
+        let socket = unsafe { WSASocketW(-1, -1, -1, info, 0, WSA_FLAG_OVERLAPPED) };
+        if socket == usize::MAX {
+            return Err(error());
+        }
+        Ok(Self {
+            socket,
+            remote: Address {
+                family: 2,
+                port: 0,
+                ip: remote.octets(),
+                padding: [0; 8],
+            },
+            local,
+            call,
+            sequence: 0,
+            received: None,
+        })
+    }
     pub fn open(local: Ipv4Addr, remote: Ipv4Addr, call: u16) -> io::Result<Self> {
         // Winsock is already initialized by the caller's TCP socket.
         let s = unsafe { socket(2, 3, 47) };

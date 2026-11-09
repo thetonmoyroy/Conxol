@@ -316,6 +316,8 @@ pub struct SessionRecord {
     pub startup_command: Option<String>,
     #[serde(default)]
     pub environment: Vec<(String, String)>,
+    #[serde(default)]
+    pub pptp_profile_id: Option<Uuid>,
     pub jump_hosts: Vec<String>,
     #[serde(default)]
     pub jump_host_profiles: Vec<JumpHostRecord>,
@@ -346,6 +348,8 @@ pub enum SessionValidationError {
     InvalidSerialProfile,
     #[error("Telnet profile is invalid")]
     InvalidTelnetProfile,
+    #[error("PPTP attachment is only supported for SSH and Telnet sessions")]
+    InvalidPptpAttachment,
     #[error("remote desktop profile is invalid")]
     InvalidRemoteDesktopProfile,
     #[error("X11 display target is invalid")]
@@ -428,6 +432,7 @@ impl SessionRecord {
             startup_directory: None,
             startup_command: None,
             environment: Vec::new(),
+            pptp_profile_id: None,
             jump_hosts: Vec::new(),
             jump_host_profiles: Vec::new(),
             notes: None,
@@ -438,6 +443,11 @@ impl SessionRecord {
     }
 
     pub fn validate(&self) -> Result<(), SessionValidationError> {
+        if self.pptp_profile_id.is_some()
+            && !matches!(self.protocol, Protocol::Ssh | Protocol::Telnet)
+        {
+            return Err(SessionValidationError::InvalidPptpAttachment);
+        }
         if self.name.trim().is_empty() {
             return Err(SessionValidationError::EmptyName);
         }
@@ -609,11 +619,13 @@ mod tests {
         let mut session: SessionRecord = serde_json::from_value(value).unwrap();
         assert!(!session.legacy_rsa);
         session.legacy_rsa = true;
-        let restored: SessionRecord = serde_json::from_value(serde_json::to_value(session).unwrap()).unwrap();
+        let restored: SessionRecord =
+            serde_json::from_value(serde_json::to_value(session).unwrap()).unwrap();
         assert!(restored.legacy_rsa);
         let jump: JumpHostRecord = serde_json::from_value(serde_json::json!({
             "host": "fixture.test", "port": 22, "username": "test", "auth": {"kind": "agent"}
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(!jump.legacy_rsa);
     }
 
@@ -648,6 +660,7 @@ mod tests {
             startup_directory: None,
             startup_command: None,
             environment: Vec::new(),
+            pptp_profile_id: None,
             jump_hosts: Vec::new(),
             jump_host_profiles: Vec::new(),
             notes: None,

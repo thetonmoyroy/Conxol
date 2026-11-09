@@ -990,6 +990,7 @@ impl SessionStore {
                 startup_directory: None,
                 startup_command: None,
                 environment: Vec::new(),
+                pptp_profile_id: None,
                 jump_hosts,
                 jump_host_profiles: Vec::new(),
                 notes,
@@ -1537,6 +1538,7 @@ mod tests {
             startup_directory: None,
             startup_command: None,
             environment: Vec::new(),
+            pptp_profile_id: None,
             jump_hosts: Vec::new(),
             jump_host_profiles: Vec::new(),
             notes: None,
@@ -1544,6 +1546,22 @@ mod tests {
             telnet_profile: None,
             remote_desktop_profile: None,
         }
+    }
+
+    #[test]
+    fn pptp_assignment_persists_and_older_sessions_remain_direct() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("sessions.json");
+        let mut store = SessionStore::open(&path).unwrap();
+        let mut session = remote_session();
+        session.pptp_profile_id = Some(uuid::Uuid::new_v4());
+        store.save(session.clone()).unwrap();
+        assert_eq!(SessionStore::open(&path).unwrap().list(), &[session.clone()]);
+        let mut old = serde_json::to_value(&session).unwrap();
+        old.as_object_mut().unwrap().remove("pptp_profile_id");
+        assert_eq!(serde_json::from_value::<SessionRecord>(old).unwrap().pptp_profile_id, None);
+        session.protocol = Protocol::Local;
+        assert!(session.validate().is_err());
     }
 
     #[test]
