@@ -1,3 +1,4 @@
+import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalHorizontalPan } from "./terminal-mobile-layout";
 import { useStoreUpdates } from "./StoreUpdates";
 import { literalInputProps } from "./literal-input";
 import { ApplicationMenuBar } from "./ApplicationMenuBar";
@@ -865,6 +866,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     };
     const terminal = new Terminal({
       allowProposedApi: true,
+      cols: IS_ANDROID ? ANDROID_TERMINAL_COLUMNS : 80,
       // Serial devices may emit bare LF; start the next prompt at column zero.
       convertEol: remoteProtocol === "serial",
       cursorBlink: terminalOptionsRef.current.cursorBlink,
@@ -913,7 +915,9 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
 
     const fit = () => {
       if (disposed || host.clientWidth <= 0 || host.clientHeight <= 0) return false;
-      fitAddon.fit();
+      if (IS_ANDROID) {
+        if (!fitAndroidTerminal(terminal, fitAddon)) return false;
+      } else { fitAddon.fit(); }
       const terminalId = terminalIdRef.current;
       if (IS_TAURI && terminalId && remoteProtocol !== "serial") {
         const resizeCommand = remoteProtocol === "ssh" ? "ssh_resize" : remoteProtocol === "telnet" ? "telnet_resize" : "terminal_resize";
@@ -931,6 +935,10 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
 
     const resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(host);
+    if (IS_ANDROID && host.parentElement) resizeObserver.observe(host.parentElement);
+    const disposeHorizontalPan = IS_ANDROID && host.parentElement
+      ? attachTerminalHorizontalPan(host.parentElement, () => !disposed && !isWorkspaceLocked() && host.getClientRects().length > 0)
+      : () => {};
     const initialFitFrame = window.requestAnimationFrame(fit);
     // A fallback font has different cell metrics. Re-measure after the bundled
     // faces load so glyphs and terminal columns stay aligned on first launch.
@@ -1113,6 +1121,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       terminalLinks.dispose();
       host.removeEventListener("paste", onPaste, true);
       pasteReveal.dispose();
+      disposeHorizontalPan();
       fitScheduler.dispose();
       if (terminalFitRef.current === fitScheduler) terminalFitRef.current = null;
       resizeObserver.disconnect();
@@ -1136,7 +1145,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     terminalRef.current?.textarea?.setAttribute("aria-label", `${label} terminal input`);
   }, [label, instanceKey, localTarget, remoteProtocol, remoteSessionId]);
 
-  return <><div className="terminal-host" ref={hostRef} role="group" aria-label={`${label} · ${remoteProtocol ? remoteProtocol.toUpperCase() : "local"} terminal`} onContextMenuCapture={event => {
+  return <><div className="terminal-scroll-frame"><div className="terminal-host" ref={hostRef} role="group" aria-label={`${label} · ${remoteProtocol ? remoteProtocol.toUpperCase() : "local"} terminal`} onContextMenuCapture={event => {
     event.preventDefault(); event.stopPropagation(); if (isWorkspaceLocked()) return;
     setClipboardError(null);
     if (rightClickToPaste && event.button === 2 && !event.shiftKey) {
@@ -1144,7 +1153,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       return;
     }
     setContextMenu({ x: event.clientX, y: event.clientY, selection: terminalRef.current?.getSelection() ?? "" });
-  }} />{clipboardError && <p role="alert">{clipboardError}</p>}{contextMenu && <TerminalContextMenu {...contextMenu} onClose={closeContextMenu} onCopy={async () => {
+  }} /></div>{clipboardError && <p role="alert">{clipboardError}</p>}{contextMenu && <TerminalContextMenu {...contextMenu} onClose={closeContextMenu} onCopy={async () => {
     if (isWorkspaceLocked()) return;
     if (!IS_TAURI && !navigator.clipboard?.writeText) throw new Error("Clipboard writer unavailable.");
     await writeClipboardText(contextMenu.selection);

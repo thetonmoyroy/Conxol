@@ -43,3 +43,8 @@ html.android, html.android body, html.android #root {
 .android .session-settings .quick-connect-footer button { min-height: 44px; }
 .android .tab-bar { overflow-x: auto; }
 .android .template-generator { min-width: 0; }
+
+/* Keep a real 120-column terminal; pan the terminal rather than the whole app. */
+.android .terminal-scroll-frame { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
+.android .terminal-scroll-frame > .terminal-host { width: max-content; min-width: 100%; }
+.android .terminal-scroll-frame .xterm { padding-right: 16px; }
