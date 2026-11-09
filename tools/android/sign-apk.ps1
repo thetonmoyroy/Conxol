@@ -9,12 +9,15 @@ $passwordFile = Join-Path $signingDirectory 'password.dpapi'
 $alias = 'conxol-android-preview'
 New-Item -ItemType Directory -Path $signingDirectory -Force | Out-Null
 # The private key and DPAPI password are local to this Windows account.
-$acl = Get-Acl -LiteralPath $signingDirectory
+$directoryInfo = [IO.DirectoryInfo]::new($signingDirectory)
+# Read/write only the DACL; Set-Acl can also attempt a SACL update that
+# requires SeSecurityPrivilege even when only access rules were changed.
+$acl = [IO.FileSystemAclExtensions]::GetAccessControl($directoryInfo, [Security.AccessControl.AccessControlSections]::Access)
 $acl.SetAccessRuleProtection($true, $false)
 foreach ($principal in @([Security.Principal.WindowsIdentity]::GetCurrent().User, [Security.Principal.SecurityIdentifier]::new('S-1-5-18'))) {
     $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($principal, 'FullControl', 'ContainerInherit,ObjectInherit', 'None', 'Allow'))
 }
-Set-Acl -LiteralPath $signingDirectory -AclObject $acl
+[IO.FileSystemAclExtensions]::SetAccessControl($directoryInfo, $acl)
 if (!(Test-Path -LiteralPath $passwordFile)) {
     if (Test-Path -LiteralPath $keystore) { throw 'Signing keystore exists without its password file; refusing to replace it.' }
     $generated = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(48))
