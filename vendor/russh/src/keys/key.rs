@@ -46,6 +46,57 @@ pub fn safe_rng() -> impl rand::CryptoRng {
     rng()
 }
 
+/// Decode an exchange signature, accepting redundant positive ECDSA mpint zeros.
+/// This only normalizes representation; the caller must still verify the signature.
+#[doc(hidden)]
+pub fn decode_server_signature(bytes: &[u8]) -> Result<ssh_key::Signature, crate::Error> {
+    use ssh_encoding::Encode;
+    use ssh_key::{Mpint, Signature};
+    let mut reader = bytes;
+    match Signature::decode(&mut reader) {
+        Ok(signature) => {
+            crate::parsing::ensure_end(&reader)?;
+            return Ok(signature);
+        }
+        Err(ssh_key::Error::Encoding(ssh_encoding::Error::MpintEncoding)) => (),
+        Err(error) => return Err(error.into()),
+    }
+    let mut reader = bytes;
+    let algorithm = Algorithm::decode(&mut reader)?;
+    let Algorithm::Ecdsa { curve } = algorithm else {
+        return Err(ssh_key::Error::FormatEncoding.into());
+    };
+    // Decode borrowed slices to bound each component before allocating.
+    let mut components = signature_string(&mut reader)?;
+    crate::parsing::ensure_end(&reader)?;
+    let field_size = match curve {
+        EcdsaCurve::NistP256 => 32,
+        EcdsaCurve::NistP384 => 48,
+        EcdsaCurve::NistP521 => 66,
+    };
+    let mut canonical = Vec::new();
+    for _ in 0..2 {
+        let component = signature_string(&mut components)?;
+        if component.is_empty()
+            || component.len() > field_size + 1
+            || component[0] & 0x80 != 0
+            || component.iter().all(|byte| *byte == 0)
+        {
+            return Err(ssh_key::Error::FormatEncoding.into());
+        }
+        Mpint::from_positive_bytes(component).encode(&mut canonical)?;
+    }
+    crate::parsing::ensure_end(&components)?;
+    Ok(Signature::new(Algorithm::Ecdsa { curve }, canonical)?)
+}
+
+fn signature_string<'a>(reader: &mut &'a [u8]) -> Result<&'a [u8], crate::Error> {
+    let length = u32::decode(reader)? as usize;
+    let (value, rest) = reader.split_at_checked(length).ok_or(ssh_encoding::Error::Length)?;
+    *reader = rest;
+    Ok(value)
+}
+
 mod private_key_with_hash_alg {
     use std::ops::Deref;
     use std::sync::Arc;

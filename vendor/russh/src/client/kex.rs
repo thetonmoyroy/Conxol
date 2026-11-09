@@ -6,7 +6,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use ssh_encoding::{Decode, Encode};
-use ssh_key::{Certificate, Mpint, PublicKey, Signature};
+use ssh_key::{Certificate, Mpint, PublicKey};
 
 use super::IncomingSshPacket;
 use crate::client::{Config, NewKeys};
@@ -289,8 +289,14 @@ impl ClientKex {
                 // looks like a bad signature and is computed entirely locally,
                 // so there is nothing on the wire to compare against.
                 let server_host_key_blob = Bytes::decode(r)?;
+                let context = |step, input_length, source| Error::HandshakeContext {
+                    step,
+                    negotiated: Box::new(crate::HandshakeAlgorithms::from(&names)),
+                    input_length,
+                    source: Box::new(source),
+                };
                 let server_host_certificate = if names.host_key_is_certificate {
-                    Some(Certificate::from_bytes(&server_host_key_blob)?)
+                    Some(Certificate::from_bytes(&server_host_key_blob).map_err(|e| context(crate::HandshakeStep::HostCertificate, server_host_key_blob.len(), e.into()))?)
                 } else {
                     None
                 };
@@ -301,7 +307,7 @@ impl ClientKex {
                     // contains. The two are separate proofs and collapsing them
                     // would accept a certificate nobody vouched for.
                     Some(certificate) => PublicKey::new(certificate.public_key().clone(), ""),
-                    None => parse_public_key(&server_host_key_blob)?,
+                    None => parse_public_key(&server_host_key_blob).map_err(|e| context(crate::HandshakeStep::HostPublicKey, server_host_key_blob.len(), e.into()))?,
                 };
                 debug!(
                     "received server host key: {:?} (certificate: {})",
@@ -313,7 +319,7 @@ impl ClientKex {
                 self.exchange
                     .server_ephemeral
                     .extend_from_slice(&server_ephemeral);
-                kex.compute_shared_secret(&self.exchange.server_ephemeral)?;
+                kex.compute_shared_secret(&self.exchange.server_ephemeral).map_err(|e| context(crate::HandshakeStep::SharedSecret, server_ephemeral.len(), e))?;
 
                 let mut pubkey_vec = Vec::new();
                 server_host_key_blob.encode(&mut pubkey_vec)?;
@@ -328,14 +334,12 @@ impl ClientKex {
                 })?;
 
                 let signature = Bytes::decode(r)?;
-                let mut signature_reader = &signature[..];
-                let signature = Signature::decode(&mut signature_reader)?;
-                ensure_end(&signature_reader)?;
+                let signature = crate::keys::key::decode_server_signature(&signature).map_err(|e| context(crate::HandshakeStep::ExchangeSignature, signature.len(), e))?;
                 ensure_end(r)?;
 
                 if !crate::keys::key::verify_server_signature(&server_host_key, &names.key, hash.as_ref(), &signature) {
                     debug!("wrong server exchange signature");
-                    return Err(Error::WrongServerSig);
+                    return Err(context(crate::HandshakeStep::SignatureVerification, signature.as_bytes().len(), Error::WrongServerSig));
                 }
 
                 let newkeys = compute_keys(

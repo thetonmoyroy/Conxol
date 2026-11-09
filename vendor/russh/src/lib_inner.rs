@@ -229,6 +229,16 @@ pub enum Error {
     #[error("Signature: {0}")]
     Signature(#[from] signature::Error),
 
+    /// Safe structural context for a failed client key exchange.
+    #[error("SSH handshake step {step:?} failed: {source}")]
+    HandshakeContext {
+        step: HandshakeStep,
+        negotiated: Box<HandshakeAlgorithms>,
+        input_length: usize,
+        #[source]
+        source: Box<Error>,
+    },
+
     #[error("SshKey: {0}")]
     SshKey(#[from] ssh_key::Error),
 
@@ -242,6 +252,42 @@ pub enum Error {
     /// This is common in SSH-Agent, for example when the Agent client directly rejects an authorization request.
     #[error("Unable to receive more messages from the channel")]
     RecvError,
+}
+
+/// Fixed decode stages; never contains peer-provided text.
+#[derive(Debug, Clone, Copy)]
+pub enum HandshakeStep {
+    HostCertificate,
+    HostPublicKey,
+    SharedSecret,
+    ExchangeSignature,
+    SignatureVerification,
+}
+
+/// Negotiated algorithm identifiers only; no addresses, keys or server banners.
+#[derive(Debug, Clone)]
+pub struct HandshakeAlgorithms {
+    pub kex: kex::Name,
+    pub key: keys::Algorithm,
+    pub cipher: cipher::Name,
+    pub client_mac: mac::Name,
+    pub server_mac: mac::Name,
+    pub client_compression: compression::Compression,
+    pub server_compression: compression::Compression,
+}
+
+impl From<&negotiation::Names> for HandshakeAlgorithms {
+    fn from(names: &negotiation::Names) -> Self {
+        Self {
+            kex: names.kex,
+            key: names.key.clone(),
+            cipher: names.cipher,
+            client_mac: names.client_mac,
+            server_mac: names.server_mac,
+            client_compression: names.client_compression.clone(),
+            server_compression: names.server_compression.clone(),
+        }
+    }
 }
 
 pub(crate) fn strict_kex_violation(message_type: u8, sequence_number: usize) -> crate::Error {

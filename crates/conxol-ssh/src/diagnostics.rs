@@ -49,6 +49,52 @@ pub struct Failure {
     error_chain: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     authentication: Option<AuthenticationFailure>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    handshake: Option<HandshakeFailure>,
+}
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct HandshakeFailure {
+    step: String,
+    input_length: usize,
+    key_exchange: String,
+    host_key: String,
+    cipher: String,
+    client_mac: String,
+    server_mac: String,
+    client_compression: String,
+    server_compression: String,
+}
+fn handshake_failure(error: &anyhow::Error) -> Option<HandshakeFailure> {
+    error.chain().find_map(|cause| {
+        let russh::Error::HandshakeContext {
+            step,
+            negotiated,
+            input_length,
+            ..
+        } = cause.downcast_ref::<russh::Error>()?
+        else {
+            return None;
+        };
+        // Negotiated transport Name types can only be constructed from the
+        // library's built-in algorithms. Host-key Algorithm::Other can contain
+        // arbitrary peer text, so never serialize that label.
+        let host_key = match &negotiated.key {
+            russh::keys::Algorithm::Other(_) => "<unknown-algorithm>".into(),
+            algorithm => algorithm.to_string(),
+        };
+        Some(HandshakeFailure {
+            step: format!("{step:?}"),
+            input_length: *input_length,
+            key_exchange: negotiated.kex.as_ref().into(),
+            host_key,
+            cipher: negotiated.cipher.as_ref().into(),
+            client_mac: negotiated.client_mac.as_ref().into(),
+            server_mac: negotiated.server_mac.as_ref().into(),
+            client_compression: format!("{:?}", negotiated.client_compression),
+            server_compression: format!("{:?}", negotiated.server_compression),
+        })
+    })
 }
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -130,9 +176,13 @@ fn event(stage: Stage, chain: Vec<String>) -> Failure {
         raw_error: chain.first().cloned().unwrap_or_default(),
         error_chain: chain,
         authentication: None,
+        handshake: None,
     }
 }
 fn record(stage: Stage, chain: Vec<String>) {
+    record_details(stage, chain, None);
+}
+fn record_details(stage: Stage, chain: Vec<String>, handshake: Option<HandshakeFailure>) {
     let chain = chain
         .into_iter()
         .take(8)
@@ -148,10 +198,12 @@ fn record(stage: Stage, chain: Vec<String>) {
             }
         })
         .collect();
+    let mut failure = event(stage, chain);
+    failure.handshake = handshake;
     history()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .push(event(stage, chain));
+        .push(failure);
 }
 fn io_raw(error: &std::io::Error) -> String {
     // Retain the actual OS code and its standard message, not custom payloads
@@ -169,19 +221,26 @@ fn io_raw(error: &std::io::Error) -> String {
     }
 }
 fn algorithm_names(names: &[String]) -> Vec<String> {
+    static KNOWN: OnceLock<Vec<String>> = OnceLock::new();
+    let known = KNOWN.get_or_init(|| {
+        let preferences = crate::diagnostic_algorithm_preferences();
+        preferences
+            .key_exchange
+            .into_iter()
+            .chain(preferences.host_keys)
+            .chain(preferences.ciphers)
+            .chain(preferences.macs)
+            .chain(["none".into(), "zlib".into(), "zlib@openssh.com".into()])
+            .collect()
+    });
     names
         .iter()
         .take(32)
         .map(|name| {
-            if !name.is_empty()
-                && name.len() <= 96
-                && name
-                    .bytes()
-                    .all(|byte| byte.is_ascii_alphanumeric() || b"-_.@+".contains(&byte))
-            {
+            if known.contains(name) {
                 name.clone()
             } else {
-                "<invalid-or-oversized-algorithm>".into()
+                "<unrecognized-algorithm-redacted>".into()
             }
         })
         .collect()
@@ -189,6 +248,7 @@ fn algorithm_names(names: &[String]) -> Vec<String> {
 fn russh_raw(error: &russh::Error) -> String {
     use russh::Error as E;
     match error {
+        E::HandshakeContext { step, .. } => format!("russh::Error::HandshakeContext({step:?})"),
         E::IO(error) => format!("russh::Error::IO({})", io_raw(error)),
         E::NoCommonAlgo { kind, ours, theirs } => format!(
             "russh::Error::NoCommonAlgo {{ kind: {kind:?}, ours: {:?}, theirs: {:?} }}",
@@ -226,7 +286,7 @@ fn russh_raw(error: &russh::Error) -> String {
         | E::StrictKeyExchangeViolation { .. }
         | E::RecvError => format!("russh::Error::{error:?}"),
         E::Keys(_) => "russh::Error::Keys(<key details redacted>)".into(),
-        E::SshKey(_) => "russh::Error::SshKey(<key details redacted>)".into(),
+        E::SshKey(error) => format!("russh::Error::SshKey({})", ssh_key_raw(error)),
         E::Signature(_) => "russh::Error::Signature".into(),
         E::SshEncoding(_) => "russh::Error::SshEncoding".into(),
         E::Utf8(error) => format!(
@@ -236,6 +296,39 @@ fn russh_raw(error: &russh::Error) -> String {
         ),
         E::InvalidConfig(_) => "russh::Error::InvalidConfig(<config text redacted>)".into(),
         _ => "russh::Error::<internal error details redacted>".into(),
+    }
+}
+// Use fixed categories: algorithm labels and nested errors can contain peer data.
+fn ssh_key_raw(error: &russh::keys::ssh_key::Error) -> &'static str {
+    use russh::keys::ssh_key::Error as E;
+    match error {
+        E::AlgorithmUnknown => "ssh_key::Error::AlgorithmUnknown",
+        E::AlgorithmUnsupported { .. } => "ssh_key::Error::AlgorithmUnsupported",
+        E::CertificateFieldInvalid(_) => "ssh_key::Error::CertificateFieldInvalid",
+        E::CertificateValidation => "ssh_key::Error::CertificateValidation",
+        E::Crypto => "ssh_key::Error::Crypto",
+        E::Ecdsa(_) => "ssh_key::Error::Ecdsa",
+        E::Encoding(error) => encoding_raw(error),
+        E::FormatEncoding => "ssh_key::Error::FormatEncoding",
+        E::HashSize => "ssh_key::Error::HashSize",
+        E::PublicKey => "ssh_key::Error::PublicKey",
+        E::Signature => "ssh_key::Error::Signature",
+        E::TrailingData { .. } => "ssh_key::Error::TrailingData",
+        E::Version { .. } => "ssh_key::Error::Version",
+        _ => "ssh_key::Error::<additional details redacted>",
+    }
+}
+fn encoding_raw(error: &russh::keys::ssh_key::encoding::Error) -> &'static str {
+    use russh::keys::ssh_key::encoding::Error as E;
+    match error {
+        E::CharacterEncoding => "ssh_encoding::Error::CharacterEncoding",
+        E::Label(_) => "ssh_encoding::Error::Label",
+        E::Length => "ssh_encoding::Error::Length",
+        E::MpintEncoding => "ssh_encoding::Error::MpintEncoding",
+        E::Overflow => "ssh_encoding::Error::Overflow",
+        E::TrailingData { .. } => "ssh_encoding::Error::TrailingData",
+        E::InvalidDiscriminant(_) => "ssh_encoding::Error::InvalidDiscriminant",
+        _ => "ssh_encoding::Error::<additional details redacted>",
     }
 }
 fn ssh_raw(error: &SshError) -> String {
@@ -360,7 +453,7 @@ pub(crate) fn record_handshake(error: &anyhow::Error) {
     } else {
         Stage::Handshake
     };
-    record(stage, raw_chain(error));
+    record_details(stage, raw_chain(error), handshake_failure(error));
 }
 fn raw_chain(error: &anyhow::Error) -> Vec<String> {
     error
@@ -369,8 +462,16 @@ fn raw_chain(error: &anyhow::Error) -> Vec<String> {
         .map(|cause| {
             if let Some(error) = cause.downcast_ref::<russh::Error>() {
                 russh_raw(error)
+            } else if let Some(error) = cause.downcast_ref::<Box<russh::Error>>() {
+                russh_raw(error)
             } else if let Some(error) = cause.downcast_ref::<std::io::Error>() {
                 io_raw(error)
+            } else if let Some(error) = cause.downcast_ref::<russh::keys::ssh_key::Error>() {
+                ssh_key_raw(error).into()
+            } else if let Some(error) =
+                cause.downcast_ref::<russh::keys::ssh_key::encoding::Error>()
+            {
+                encoding_raw(error).into()
             } else if let Some(error) = cause.downcast_ref::<SshError>() {
                 ssh_raw(error)
             } else {
@@ -383,6 +484,79 @@ fn raw_chain(error: &anyhow::Error) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn handshake_context_exports_structure_without_peer_text() {
+        let error = anyhow::Error::new(russh::Error::HandshakeContext {
+            step: russh::HandshakeStep::ExchangeSignature,
+            input_length: 139,
+            negotiated: Box::new(russh::HandshakeAlgorithms {
+                kex: russh::kex::ECDH_SHA2_NISTP256,
+                key: russh::keys::Algorithm::new("fixture-secret@example.com").unwrap(),
+                cipher: russh::cipher::AES_256_CTR,
+                client_mac: russh::mac::HMAC_SHA256,
+                server_mac: russh::mac::HMAC_SHA256,
+                client_compression: russh::compression::Compression::None,
+                server_compression: russh::compression::Compression::None,
+            }),
+            source: Box::new(russh::Error::SshKey(russh::keys::ssh_key::Error::Encoding(
+                russh::keys::ssh_key::encoding::Error::MpintEncoding,
+            ))),
+        })
+        .context("fixture-host fixture-user fixture-password C:/private/file");
+        let details = handshake_failure(&error).unwrap();
+        let output = serde_json::to_value(details).unwrap();
+        assert_eq!(output["step"], "ExchangeSignature");
+        assert_eq!(output["inputLength"], 139);
+        assert_eq!(output["keyExchange"], "ecdh-sha2-nistp256");
+        assert_eq!(output["hostKey"], "<unknown-algorithm>");
+        assert_eq!(output["cipher"], "aes256-ctr");
+        let serialized = format!("{output} {:?}", raw_chain(&error));
+        for forbidden in [
+            "fixture-secret",
+            "fixture-host",
+            "fixture-user",
+            "fixture-password",
+            "C:/private",
+        ] {
+            assert!(!serialized.contains(forbidden));
+        }
+        assert!(serialized.contains("MpintEncoding"));
+        assert!(matches!(
+            super::super::map_connect_error(error),
+            SshError::HostKeyEncoding
+        ));
+    }
+    #[test]
+    fn host_key_errors_preserve_categories_without_peer_labels() {
+        use russh::keys::ssh_key::{Algorithm, Error};
+        let error = anyhow::Error::new(russh::Error::SshKey(Error::AlgorithmUnsupported {
+            algorithm: Algorithm::new("fixture-secret@example.com").unwrap(),
+        }));
+        let chain = raw_chain(&error);
+        assert_eq!(
+            chain[0],
+            "russh::Error::SshKey(ssh_key::Error::AlgorithmUnsupported)"
+        );
+        assert_eq!(chain[1], "ssh_key::Error::AlgorithmUnsupported");
+        assert!(!chain.join(" ").contains("fixture-secret"));
+        let error = anyhow::Error::new(russh::Error::SshKey(Error::Encoding(
+            russh::keys::ssh_key::encoding::Error::Length,
+        )));
+        let chain = raw_chain(&error);
+        assert_eq!(
+            chain[0],
+            "russh::Error::SshKey(ssh_encoding::Error::Length)"
+        );
+        assert_eq!(chain[2], "ssh_encoding::Error::Length");
+        for (error, category) in [
+            (Error::Crypto, "Crypto"),
+            (Error::PublicKey, "PublicKey"),
+            (Error::Signature, "Signature"),
+            (Error::TrailingData { remaining: 42 }, "TrailingData"),
+        ] {
+            assert_eq!(ssh_key_raw(&error), format!("ssh_key::Error::{category}"));
+        }
+    }
     #[test]
     fn diagnostic_errors_keep_library_variants_and_os_codes_without_payloads() {
         let custom = std::io::Error::new(
@@ -424,6 +598,7 @@ mod tests {
             theirs: vec![
                 "diffie-hellman-group1-sha1".into(),
                 "password=fixture-secret".into(),
+                "fixture-user@private-host".into(),
                 "\u{1b}[31m".into(),
                 "x".repeat(10000),
             ],
@@ -432,6 +607,8 @@ mod tests {
         assert!(output.contains("curve25519-sha256"));
         assert!(output.contains("diffie-hellman-group1-sha1"));
         assert!(!output.contains("fixture-secret"));
+        assert!(!output.contains("fixture-user"));
+        assert!(!output.contains("private-host"));
         assert!(!output.contains('\u{1b}'));
         assert!(output.len() < 1024);
         assert_eq!(

@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-remote-desktop"
-version = "0.1.62"
+version = "0.1.63"
 dependencies = [
  "serde",
  "serde_json",

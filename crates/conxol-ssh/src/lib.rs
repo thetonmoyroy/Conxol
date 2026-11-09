@@ -2190,7 +2190,11 @@ fn map_connect_error(error: anyhow::Error) -> SshError {
     if let Some(error) = error.downcast_ref::<std::io::Error>() {
         return map_io_connect_error(error);
     }
-    if let Some(error) = error.downcast_ref::<russh::Error>() {
+    // Context wrappers preserve the original typed cause and user-facing mapping.
+    if let Some(mut error) = error.downcast_ref::<russh::Error>() {
+        while let russh::Error::HandshakeContext { source, .. } = error {
+            error = source;
+        }
         return match error {
             russh::Error::IO(error) => map_io_connect_error(error),
             russh::Error::ConnectionTimeout => SshError::Timeout,

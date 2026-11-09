@@ -102,3 +102,27 @@ unused-variable warning without changing decryption or key-support behavior.
 
 Focused RSA verifier regressions: `cargo xtask test-ssh-signatures`. The direct
 aws-lc-sys dependency must stay aligned with aws-lc-rs's backend version.
+
+## ECDSA exchange-signature integer padding
+
+The client exchange-signature decoder retries only `MpintEncoding` failures
+for ECDSA signatures. It strips redundant leading zeros from positive r/s
+integers, bounded to each curve's field width plus one sign byte. It rejects
+zero/negative components, truncation, extra fields and trailing bytes. Other
+algorithms retain their strict decoder. The normalized signature still goes
+through the existing cryptographic verifier and host-key trust checks.
+This addresses a suspected appliance compatibility issue identified from a
+Huawei diagnostic report; actual device acceptance remains unverified.
+
+Regression: `ecdsa_signature_encoding` under `cargo xtask test-ssh` checks
+all three curves, valid signatures, altered messages and invalid encodings.
+
+## Structural handshake failure context
+
+Client certificate/key decoding, shared-secret computation, exchange-signature
+decoding and signature verification attach a typed `HandshakeContext` error.
+It retains a fixed `HandshakeStep`, negotiated algorithm identifiers, input
+byte count and the original typed error source. It contains no key bytes,
+endpoint, username, credentials or server banner. Application diagnostics
+redact unknown host algorithm labels and preserve the original error mapping.
+Privacy and mapping regressions run under `cargo xtask test-ssh-signatures`.
