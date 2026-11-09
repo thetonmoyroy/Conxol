@@ -1,3 +1,4 @@
+import { useStoreUpdates } from "./StoreUpdates";
 import { literalInputProps } from "./literal-input";
 import { ApplicationMenuBar } from "./ApplicationMenuBar";
 import { canReconnectTerminal, isReconnectKey } from "./terminal-reconnect";
@@ -1568,6 +1569,7 @@ function useToolDialog(name: string, active: string | null, setActive: React.Dis
 
 function App() {
   const workspaceSecurity = useWorkspaceLock();
+  const storeUpdates = useStoreUpdates(workspaceSecurity.status?.locked === false);
   useEffect(() => {
     if (!IS_TAURI) return;
     void invoke<{ workspaceId: string; preferences: Record<string, string> } | null>("workspace_backup_preferences").then(snapshot => {
@@ -1608,6 +1610,7 @@ function App() {
   const [quickConnectOpen, setQuickConnectOpen] = useToolDialog("quickConnect", activeToolDialog, setActiveToolDialog);
   const [wslTerminalOpen, setWslTerminalOpen] = useToolDialog("wslTerminal", activeToolDialog, setActiveToolDialog);
   const [helpOpen, setHelpOpen] = useToolDialog("help", activeToolDialog, setActiveToolDialog);
+  const [aboutOpen, setAboutOpen] = useToolDialog("about", activeToolDialog, setActiveToolDialog);
   const [settingsOpen, setSettingsOpen] = useToolDialog("settings", activeToolDialog, setActiveToolDialog);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const openSettings = () => { setSettingsError(null); setSettingsOpen(true); };
@@ -4617,7 +4620,11 @@ function App() {
           <button onClick={() => setCredentialsOpen(true)}>Credential vault…</button>
           <button onClick={() => setPaletteOpen(true)}>Command palette…</button>
         </div></details>
-        <button onClick={() => setHelpOpen(true)}>Help</button>
+        <details name="desktop-menu"><summary>Help</summary><div className="desktop-menu">
+          <button onClick={() => setHelpOpen(true)}>Help topics…</button>
+          <button onClick={() => setAboutOpen(true)}>About</button>
+          {storeUpdates.menuItem}
+        </div></details>
         {activeView === "terminal" && !!selectedTerminalId && remoteProtocol !== "rdp" && remoteProtocol !== "vnc" && (terminalSearchOpen || settings.general.alwaysShowTerminalSearch) && <div className="terminal-search-bar" role="search"><Search size={14} /><input ref={terminalSearchInputRef} value={terminalSearchQuery} onChange={(event) => updateTerminalSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); closeTerminalSearch(); } if (!event.ctrlKey && !event.metaKey && !event.altKey && (event.key === "Enter" || (!event.shiftKey && (event.key === "ArrowUp" || event.key === "ArrowDown")))) { event.preventDefault(); event.stopPropagation(); findTerminalMatch(event.key === "ArrowUp" || (event.key === "Enter" && event.shiftKey) ? "previous" : "next"); } }} title="Up: previous match · Down: next match · Enter: next · Shift+Enter: previous" placeholder="Find in terminal" aria-label="Find in terminal" /><span>{terminalSearchResult.resultCount > 0 ? `${terminalSearchResult.resultIndex + 1}/${terminalSearchResult.resultCount}` : terminalSearchQuery ? "No match" : "Search"}</span><label><input type="checkbox" checked={terminalSearchCaseSensitive} onChange={(event) => setTerminalSearchCaseSensitive(event.target.checked)} /> Aa</label><button type="button" aria-label="Previous terminal match" title="Previous match (↑)" onClick={() => findTerminalMatch("previous")} disabled={!terminalSearchQuery}><ArrowUpFromLine size={13} /></button><button type="button" aria-label="Next terminal match" title="Next match (↓)" onClick={() => findTerminalMatch("next")} disabled={!terminalSearchQuery}><ArrowDownToLine size={13} /></button><button type="button" aria-label="Close terminal search" title="Close search" onClick={closeTerminalSearch}><X size={14} /></button></div>}
         <div className="desktop-menu-end">{tftpServerRunning && <button className="tftp-server-indicator" onClick={() => setFileTransferOpen(true)} title="TFTP server is running. Open to stop sharing.">TFTP serving</button>}{workspaceSecurity.status?.enabled && <button aria-label="Lock workspace" title="Lock workspace" onClick={() => void workspaceSecurity.lock()}><LockKeyhole size={14} strokeWidth={1.5} /></button>}<span className="desktop-menu-status" title={IS_TAURI ? "Desktop runtime" : "Browser preview"}><span className="live-dot" /> Conxol</span></div>
       </ApplicationMenuBar>
@@ -4864,6 +4871,7 @@ function App() {
       </div>
 
       <div className="app-notifications">
+          {storeUpdates.notice}
           {pendingSavedSession && !terminalTabs.some(terminal => terminal.connecting) && <div className="workspace-notice connection-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={15} aria-hidden="true" /><span>Connecting to {pendingSavedSession.name}…</span></div>}
           {connectionError && !quickConnectOpen && activeView !== "files" && <div className="connect-error workspace-error" role="alert"><span>{connectionError}</span><button type="button" className="outline-button" aria-label="Dismiss error" onClick={() => setConnectionError(null)}>Dismiss</button></div>}
           {sessionNotice && <div className={`workspace-notice${typeof sessionNotice === "string" ? "" : " workspace-notice-review"}`} role="status">
@@ -4882,7 +4890,8 @@ function App() {
         <NetworkDiagnosticsView pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
       </FloatingDiagnostics>
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
-      {helpOpen && <HelpModal onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
+      {helpOpen && <HelpModal mode="help" onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
+      {aboutOpen && <HelpModal mode="about" onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setAboutOpen(false)} />}
       {recoveryOpen && <div className="palette-backdrop" role="presentation" onMouseDown={() => setRecoveryOpen(false)}><section className="session-recovery-dialog" role="dialog" aria-modal="true" aria-label="Recover previous sessions" onMouseDown={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === "Escape") setRecoveryOpen(false); }}><header><h2>Recover previous sessions</h2><button autoFocus aria-label="Close recovery" onClick={() => setRecoveryOpen(false)}><X size={16} /></button></header><p>Select a recently used session to reconnect.</p>{sessionRows.filter((session) => session.lastUsedAt != null).sort((a, b) => (b.lastUsedAt ?? 0) - (a.lastUsedAt ?? 0)).map((session) => <button className="recovery-session" disabled={pendingSavedSession !== null && session.type !== "LOCAL"} key={session.id ?? session.name} onClick={() => { setRecoveryOpen(false); const saved = savedSessions.find((item) => item.id === session.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (session.type === "LOCAL") startNewTerminal(); else setQuickConnectOpen(true); }}><TerminalIcon size={15} /><span>{session.name}<small>{session.detail}</small></span></button>)}{!sessionRows.some((session) => session.lastUsedAt != null) && <p>No previous sessions yet. Start a local terminal or create a session with the + tab.</p>}</section></div>}
       {folderContextMenu && <SessionFolderMenu folder={folderContextMenu.folder} x={folderContextMenu.x} y={folderContextMenu.y} onCreate={() => { const parent = folderContextMenu.folder; setFolderContextMenu(null); void createSessionFolder(parent); }} disabled={deletingFolder !== null || createdSessionFolders.some(path => path !== folderContextMenu.folder && sessionFolderWithin(path, folderContextMenu.folder)) || sessionRows.some(session => sessionFolderWithin(session.folder.trim(), folderContextMenu.folder))} onCustomize={() => { setCustomizingFolder(folderContextMenu.folder); setFolderContextMenu(null); }} onClose={() => setFolderContextMenu(null)} onDelete={() => void deleteSessionFolder(folderContextMenu.folder)} />}
       {customizingHost && <FolderCustomization key={customizingHost.id} host folder={customizingHost.name} bookmark={{ folder: customizingHost.folder ?? "", tags: customizingHost.tags, notes: customizingHost.notes ?? "", favorite: customizingHost.favorite }} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} appearance={hostStyles[customizingHost.id] ?? { icon: customizingHost.protocol === "LOCAL" ? "terminal" : "server", color: "" }} onClose={() => setCustomizingHost(null)} onSave={async (name, style, bookmark) => {
@@ -5621,7 +5630,7 @@ function Metric({ label, value }: { label: string; value: string }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>;
 }
 
-function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSettings["keyboard"]; onClose: () => void; onExportDiagnostics: () => Promise<boolean> }) {
+function HelpModal({ mode, keyboard, onClose, onExportDiagnostics }: { mode: "help" | "about"; keyboard: AppSettings["keyboard"]; onClose: () => void; onExportDiagnostics: () => Promise<boolean> }) {
   const [diagnosticsBusy, setDiagnosticsBusy] = useState(false);
   const [diagnosticsMessage, setDiagnosticsMessage] = useState("");
   const [diagnosticsError, setDiagnosticsError] = useState("");
@@ -5632,8 +5641,8 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
     catch (cause) { setDiagnosticsError(String(cause)); }
     finally { setDiagnosticsBusy(false); }
   };
-  const tabs = ["Overview", "Shortcuts", "Credits", "About"] as const;
-  const [tab, setTab] = useState<typeof tabs[number]>("Overview");
+  const tabs = ["Overview", "Shortcuts"] as const;
+  const [tab, setTab] = useState<typeof tabs[number] | "About">(mode === "about" ? "About" : "Overview");
   const shortcuts: Array<[string, string]> = [
     ["New terminal", keyboard.newTerminal], ["New session", keyboard.quickConnect],
     ["Command palette", keyboard.commandPalette], ["Close tab", keyboard.closeTab],
@@ -5644,12 +5653,12 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
     ["Stop broadcast", keyboard.emergencyBroadcastDisable],
   ];
   return <div className="palette-backdrop" role="presentation" onMouseDown={onClose}>
-    <section className="help-modal help-compact" role="dialog" aria-modal="true" aria-label="Conxol help" onMouseDown={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
+    <section className="help-modal help-compact" role="dialog" aria-modal="true" aria-label={mode === "about" ? "About" : "Conxol help"} onMouseDown={event => event.stopPropagation()} onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); onClose(); } }}>
       <header className="help-header">
         <div className="help-brand"><div className="desktop-home-logo" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none"><path className="conxol-mark-frame" d="M36 10H22a14 14 0 0 0 0 28h14" /><path className="conxol-mark-prompt" d="m21 19 6 5-6 5m10 1h7" /></svg></div><div><h2>Conxol</h2><p>Your network, in command</p></div></div>
-        <button autoFocus type="button" className="icon-button" aria-label="Close help" onClick={onClose}><X size={16} /></button>
+        <button autoFocus type="button" className="icon-button" aria-label={mode === "about" ? "Close about" : "Close help"} onClick={onClose}><X size={16} /></button>
       </header>
-      <div className="help-tabs" role="tablist" aria-label="Help topics">
+      {mode === "help" && <div className="help-tabs" role="tablist" aria-label="Help topics">
         {tabs.map((item, index) => <button key={item} type="button" id={`help-tab-${item}`} role="tab" aria-selected={tab === item} aria-controls={`help-panel-${item}`} tabIndex={tab === item ? 0 : -1} onClick={() => setTab(item)} onKeyDown={event => {
           let next = index;
           if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
@@ -5659,7 +5668,7 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
           else return;
           event.preventDefault(); setTab(tabs[next]); document.getElementById(`help-tab-${tabs[next]}`)?.focus();
         }}>{item}</button>)}
-      </div>
+      </div>}
       <div className="help-body">
         <section className="help-panel" id="help-panel-Overview" role="tabpanel" aria-labelledby="help-tab-Overview" hidden={tab !== "Overview"}>
           <h3>Get started</h3>
@@ -5673,20 +5682,19 @@ function HelpModal({ keyboard, onClose, onExportDiagnostics }: { keyboard: AppSe
           <div className="help-shortcuts-grid">{shortcuts.map(([label, value]) => <div key={label} className="help-shortcut"><span>{label}</span><kbd>{formatShortcut(value)}</kbd></div>)}</div>
           <p className="help-note">Change shortcuts in Settings → Shortcuts. Escape always stops broadcast.</p>
         </section>
-        <section className="help-panel" id="help-panel-Credits" role="tabpanel" aria-labelledby="help-tab-Credits" hidden={tab !== "Credits"}><ThirdPartyCredits /></section>
-        <section className="help-panel" id="help-panel-About" role="tabpanel" aria-labelledby="help-tab-About" hidden={tab !== "About"}>
-          <h3>About Conxol</h3>
+        <section className="help-panel" id="help-panel-About" hidden={mode !== "about"}>
+          <h3>About</h3>
           <p className="help-about-description">An open-source workspace for terminals, remote sessions, and everyday network operations.</p>
           <dl className="help-about-details">
             <div><dt>Maintainer</dt><dd><a href="https://github.com/thetonmoyroy" target="_blank" rel="noopener noreferrer">Tonmoy Roy <span className="help-profile-handle">@thetonmoyroy</span></a></dd></div>
             <div><dt>Version</dt><dd>{desktopPackage.version}</dd></div>
             <div><dt>License</dt><dd>Apache License 2.0</dd></div>
           </dl>
-          <p className="help-note">See Credits for Conxol components, third-party tools and project links.</p>
           <div className="help-diagnostics"><div><h4>Support diagnostics</h4><p>Save app information, recent SSH errors, and algorithm details for troubleshooting. Passwords, key contents, host addresses, and terminal output are excluded.</p></div><button type="button" className="outline-button" disabled={diagnosticsBusy} onClick={() => void exportReport()}><Download size={14} />{diagnosticsBusy ? "Saving…" : "Export diagnostics"}</button></div>
           <p className="help-note">For SSH issues, reproduce the failure and export before restarting Conxol. The report keeps the latest 64 failure records from this app session.</p>
           {diagnosticsMessage && <p className="help-note" role="status">{diagnosticsMessage}</p>}
           {diagnosticsError && <p className="help-diagnostics-error" role="alert">{diagnosticsError}</p>}
+          <ThirdPartyCredits />
         </section>
       </div>
       <footer className="help-footer"><span>Maintained by <a href="https://github.com/thetonmoyroy" target="_blank" rel="noopener noreferrer">Tonmoy Roy</a></span><span className="help-version">v{desktopPackage.version}</span><button type="button" className="outline-button" onClick={onClose}>Done</button></footer>

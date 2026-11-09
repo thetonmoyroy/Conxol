@@ -16,6 +16,8 @@ use thiserror::Error;
 use crate::helpers::EncodedExt;
 
 pub mod key;
+#[cfg(feature = "aws-lc-rs")]
+mod legacy_rsa;
 pub use key::PrivateKeyWithHashAlg;
 
 mod format;

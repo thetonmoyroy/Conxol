@@ -23,7 +23,9 @@ fn main() {
                 .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "serial::tests", "--", "--nocapture"], None))
         },
         "test-telnet" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "telnet::tests", "--", "--nocapture"], None),
+        "test-ssh-signatures" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-ssh", "--lib", "--test", "rsa_host_signature"], None),
         "test-ssh-branch" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "-p", "conxol-ssh", "branch", "--", "--nocapture"], None),
+        "test-store-updates" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "store_updates::", "--", "--nocapture"], None),
         "test-settings" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "settings::tests", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
         "test-mtr" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-mtr", "--", "--nocapture"], None),

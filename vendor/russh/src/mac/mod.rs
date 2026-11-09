@@ -73,6 +73,8 @@ impl TryFrom<&str> for Name {
 pub const NONE: Name = Name("none");
 /// `hmac-sha1`
 pub const HMAC_SHA1: Name = Name("hmac-sha1");
+/// `hmac-sha1-96`
+pub const HMAC_SHA1_96: Name = Name("hmac-sha1-96");
 /// `hmac-sha2-256`
 pub const HMAC_SHA256: Name = Name("hmac-sha2-256");
 /// `hmac-sha2-512`
@@ -85,6 +87,8 @@ pub const HMAC_SHA256_ETM: Name = Name("hmac-sha2-256-etm@openssh.com");
 pub const HMAC_SHA512_ETM: Name = Name("hmac-sha2-512-etm@openssh.com");
 
 pub(crate) static _NONE: NoMacAlgorithm = NoMacAlgorithm {};
+pub(crate) static _HMAC_SHA1_96: CryptoMacAlgorithm<Hmac<Sha1>, U20, 12> =
+    CryptoMacAlgorithm(PhantomData, PhantomData);
 pub(crate) static _HMAC_SHA1: CryptoMacAlgorithm<Hmac<Sha1>, U20> =
     CryptoMacAlgorithm(PhantomData, PhantomData);
 pub(crate) static _HMAC_SHA256: CryptoMacAlgorithm<Hmac<Sha256>, U32> =
@@ -101,6 +105,7 @@ pub(crate) static _HMAC_SHA512_ETM: CryptoEtmMacAlgorithm<Hmac<Sha512>, U64> =
 pub const ALL_MAC_ALGORITHMS: &[&Name] = &[
     &NONE,
     &HMAC_SHA1,
+    &HMAC_SHA1_96,
     &HMAC_SHA256,
     &HMAC_SHA512,
     &HMAC_SHA1_ETM,
@@ -113,6 +118,7 @@ pub(crate) static MACS: LazyLock<HashMap<&'static Name, &(dyn MacAlgorithm + Sen
         let mut h: HashMap<&'static Name, &(dyn MacAlgorithm + Send + Sync)> = HashMap::new();
         h.insert(&NONE, &_NONE);
         h.insert(&HMAC_SHA1, &_HMAC_SHA1);
+        h.insert(&HMAC_SHA1_96, &_HMAC_SHA1_96);
         h.insert(&HMAC_SHA256, &_HMAC_SHA256);
         h.insert(&HMAC_SHA512, &_HMAC_SHA512);
         h.insert(&HMAC_SHA1_ETM, &_HMAC_SHA1_ETM);

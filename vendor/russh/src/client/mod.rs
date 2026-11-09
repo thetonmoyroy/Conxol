@@ -2229,9 +2229,9 @@ impl GexParams {
     fn validate(&self, kind: ValidationKind) -> Result<(), Error> {
         match kind {
             ValidationKind::ClientConfig => {
-                if self.min_group_size < 2048 {
+                if self.min_group_size < 1024 {
                     return Err(Error::InvalidConfig(format!(
-                        "min_group_size must be at least 2048 bits. We got {} bits",
+                        "min_group_size must be at least 1024 bits. We got {} bits",
                         self.min_group_size
                     )));
                 }

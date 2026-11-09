@@ -11,15 +11,16 @@ use super::{Mac, MacAlgorithm};
 pub struct CryptoMacAlgorithm<
     M: digest::Mac + KeyInit + Send + 'static,
     KL: ArrayLength + 'static,
+    const ML: usize = 0,
 >(pub PhantomData<M>, pub PhantomData<KL>);
 
-pub struct CryptoMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> {
+pub struct CryptoMac<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static, const ML: usize = 0> {
     pub(crate) key: GenericArray<u8, KL>,
     pub(crate) p: PhantomData<M>,
 }
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> MacAlgorithm
-    for CryptoMacAlgorithm<M, KL>
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static, const ML: usize> MacAlgorithm
+    for CryptoMacAlgorithm<M, KL, ML>
 where
     <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
@@ -30,19 +31,19 @@ where
     fn make_mac(&self, mac_key: &[u8]) -> Box<dyn Mac + Send> {
         let mut key = GenericArray::<u8, KL>::default();
         key.copy_from_slice(mac_key);
-        Box::new(CryptoMac::<M, KL> {
+        Box::new(CryptoMac::<M, KL, ML> {
             key,
             p: PhantomData,
         }) as Box<dyn Mac + Send>
     }
 }
 
-impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static> Mac for CryptoMac<M, KL>
+impl<M: digest::Mac + KeyInit + Send + 'static, KL: ArrayLength + 'static, const ML: usize> Mac for CryptoMac<M, KL, ML>
 where
     <M as OutputSizeUser>::OutputSize: ArrayLength,
 {
     fn mac_len(&self) -> usize {
-        M::OutputSize::to_usize()
+        if ML == 0 { M::OutputSize::to_usize() } else { ML }
     }
 
     fn compute(&self, sequence_number: u32, payload: &[u8], output: &mut [u8]) {
@@ -52,12 +53,12 @@ where
         BigEndian::write_u32(&mut seqno_buf, sequence_number);
         hmac.update(&seqno_buf);
         hmac.update(payload);
-        output.copy_from_slice(&hmac.finalize().into_bytes());
+        output.copy_from_slice(&hmac.finalize().into_bytes()[..self.mac_len()]);
     }
 
     fn verify(&self, sequence_number: u32, payload: &[u8], mac: &[u8]) -> bool {
         let mut buf = GenericArray::<u8, M::OutputSize>::default();
-        self.compute(sequence_number, payload, &mut buf);
-        buf.ct_eq(mac).into()
+        self.compute(sequence_number, payload, &mut buf[..self.mac_len()]);
+        buf[..self.mac_len()].ct_eq(mac).into()
     }
 }

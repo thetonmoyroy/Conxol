@@ -2071,7 +2071,15 @@ fn connection_parts_for(
             russh::kex::ECDH_SHA2_NISTP521,
         ],
     );
+    kex.extend([russh::kex::DH_G14_SHA1, russh::kex::DH_GEX_SHA1, russh::kex::DH_G1_SHA1]);
     preferred.kex = kex.into();
+    let mut ciphers = preferred.cipher.to_vec();
+    ciphers.extend([russh::cipher::AES_256_CBC, russh::cipher::AES_192_CBC,
+        russh::cipher::AES_128_CBC, russh::cipher::TRIPLE_DES_CBC]);
+    preferred.cipher = ciphers.into();
+    let mut macs = preferred.mac.to_vec();
+    macs.extend([russh::mac::HMAC_SHA1_ETM, russh::mac::HMAC_SHA1, russh::mac::HMAC_SHA1_96]);
+    preferred.mac = macs.into();
     // Automatically negotiate legacy RSA only after all modern host signatures.
     preferred.key = preferred
         .key
@@ -2082,12 +2090,14 @@ fn connection_parts_for(
         .into();
     let mut keys = preferred.key.to_vec();
     keys.push(russh::keys::Algorithm::Rsa { hash: None });
+    keys.push(russh::keys::Algorithm::Dsa);
     preferred.key = keys.into();
     let config = Arc::new(client::Config {
         preferred,
         // Setup deadlines are enforced around connect/auth/channel operations;
         // quiet established sessions must survive those deadlines.
         keepalive_interval,
+        gex: client::GexParams::new(1024, 3072, 8192).expect("bounded legacy GEX sizes"),
         ..Default::default()
     });
     ConnectionParts {
@@ -4592,6 +4602,7 @@ mod tests {
         let modern = inspection_connection_parts(&options(false));
         let legacy = inspection_connection_parts(&options(true));
         let mut keys = modern.config.preferred.key.to_vec();
+        assert_eq!(keys.pop(), Some(russh::keys::Algorithm::Dsa));
         assert_eq!(keys.pop(), Some(russh::keys::Algorithm::Rsa { hash: None }));
         assert!(!keys.contains(&russh::keys::Algorithm::Rsa { hash: None }));
         assert_eq!(legacy.config.preferred.key.as_ref(), modern.config.preferred.key.as_ref());

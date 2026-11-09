@@ -47,6 +47,8 @@ tauri-plugin-clipboard-manager = "2"
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+windows-collections = "0.3.2"
+windows = { version = "0.62.2", features = ["ApplicationModel", "Services_Store", "Win32_UI_Shell", "Win32_Foundation"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]

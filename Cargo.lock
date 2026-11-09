@@ -822,7 +822,7 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "conxol"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "anyhow",
  "argon2",
@@ -853,13 +853,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows",
+ "windows-collections",
  "windows-sys 0.61.2",
  "zeroize",
 ]
 
 [[package]]
 name = "conxol-benchmarks"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-core",
  "serde_json",
@@ -867,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-core"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "proptest",
  "serde",
@@ -878,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-mtr"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-ping",
  "serde",
@@ -887,7 +889,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-network"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-mtr",
  "conxol-ping",
@@ -903,7 +905,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-ping"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "libc",
  "rand 0.9.5",
@@ -915,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-remote-desktop"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "serde",
  "serde_json",
@@ -926,7 +928,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-serial"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-core",
  "libc",
@@ -938,11 +940,12 @@ dependencies = [
 
 [[package]]
 name = "conxol-ssh"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "anyhow",
  "conxol-core",
  "encoding_rs",
+ "rand 0.10.2",
  "russh",
  "russh-sftp",
  "serde",
@@ -957,7 +960,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-store"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-core",
  "libc",
@@ -971,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-telnet"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "conxol-core",
  "encoding_rs",
@@ -982,7 +985,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-vault"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -1145,6 +1148,16 @@ checksum = "ce6e4c961d6cd6c9a86db418387425e8bdeaf05b3c8bc1411e6dca4c252f1453"
 dependencies = [
  "getrandom 0.4.3",
  "hybrid-array",
+ "rand_core 0.10.1",
+]
+
+[[package]]
+name = "crypto-primes"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3633a51a39c69ebbaa4feaa694bd83d241e4093901c84a0963b19d9bb3f0cf8f"
+dependencies = [
+ "crypto-bigint",
  "rand_core 0.10.1",
 ]
 
@@ -1508,6 +1521,23 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "dsa"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5c8573b60d07b5b5cecadc1f978c9b71d5504151e703cbb0439ee4ad301338f3"
+dependencies = [
+ "crypto-bigint",
+ "crypto-common 0.2.2",
+ "crypto-primes",
+ "der",
+ "digest 0.11.3",
+ "rfc6979",
+ "sha2 0.11.0",
+ "signature",
+ "zeroize",
 ]
 
 [[package]]
@@ -4494,6 +4524,7 @@ version = "0.63.3"
 dependencies = [
  "aes 0.9.3",
  "aws-lc-rs",
+ "aws-lc-sys",
  "bitflags 2.13.1",
  "block-padding 0.4.2",
  "byteorder",
@@ -4506,6 +4537,7 @@ dependencies = [
  "data-encoding",
  "delegate",
  "der",
+ "des",
  "digest 0.11.3",
  "ecdsa",
  "ed25519-dalek",
@@ -5275,6 +5307,7 @@ checksum = "7b54d0ed0498daf3f78d82e00e28c8eec9d75a067c4cfbcc7a0f7d0f4077749e"
 dependencies = [
  "base64ct",
  "bytes",
+ "crypto-bigint",
  "ctutils",
  "digest 0.11.3",
  "pem-rfc7468",
@@ -5290,6 +5323,7 @@ dependencies = [
  "argon2",
  "bcrypt-pbkdf",
  "ctutils",
+ "dsa",
  "ed25519-dalek",
  "hex",
  "hmac 0.13.0",
@@ -7122,7 +7156,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.1.61"
+version = "0.1.62"
 dependencies = [
  "sha2 0.11.0",
 ]

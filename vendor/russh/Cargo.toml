@@ -36,7 +36,7 @@ all-features = true
 [features]
 _bench = ["dep:criterion"]
 async-trait = ["dep:async-trait"]
-aws-lc-rs = ["dep:aws-lc-rs"]
+aws-lc-rs = ["dep:aws-lc-rs", "dep:aws-lc-sys"]
 default = [
     "flate2",
     "aws-lc-rs",
@@ -68,6 +68,10 @@ optional = true
 
 [dependencies.aws-lc-rs]
 version = "1.16.2"
+optional = true
+
+[dependencies.aws-lc-sys]
+version = "0.44.0"
 optional = true
 
 [dependencies.bitflags]

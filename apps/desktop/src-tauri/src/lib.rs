@@ -1,5 +1,6 @@
 
 mod logging;
+mod store_updates;
 mod backup;
 use backup::{workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences};
 mod notes;
@@ -2207,6 +2208,7 @@ pub fn run() {
             file_transfer_run, file_transfer_cancel,
             tftp_server_start, tftp_server_stop, tftp_server_status,
             app_snapshot,
+            store_updates::store_update_supported, store_updates::store_update,
             diagnostic_export,
             diagnostic_export_save,
             workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences,

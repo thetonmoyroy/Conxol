@@ -136,16 +136,26 @@ pub fn verify_server_signature(
 ) -> bool {
     #[cfg(feature = "aws-lc-rs")]
     if let ssh_key::public::KeyData::Rsa(rsa) = key.key_data() {
-        use aws_lc_rs::signature::{RsaPublicKeyComponents, RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_2048_8192_SHA256, RSA_PKCS1_2048_8192_SHA512};
+        use aws_lc_rs::signature::{RsaPublicKeyComponents, RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY};
         if signature.algorithm() != *negotiated { return false; }
         let parameters = match negotiated {
-            Algorithm::Rsa { hash: None } => &RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY,
-            Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha256) } => &RSA_PKCS1_2048_8192_SHA256,
-            Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha512) } => &RSA_PKCS1_2048_8192_SHA512,
+            Algorithm::Rsa { hash: None } => &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+            Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha256) } => &RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
+            Algorithm::Rsa { hash: Some(ssh_key::HashAlg::Sha512) } => &RSA_PKCS1_1024_8192_SHA512_FOR_LEGACY_USE_ONLY,
             _ => return false,
         };
         let (Some(n), Some(e)) = (rsa.n().as_positive_bytes(), rsa.e().as_positive_bytes()) else { return false; };
-        return RsaPublicKeyComponents { n, e }.verify(parameters, message, signature.as_bytes()).is_ok();
+        // RFC 4253 permits RSA signatures shorter than the modulus width.
+        // Normalize only omitted leading zeros; never truncate oversized values.
+        let bytes = signature.as_bytes();
+        if n.len() > 1024 || bytes.len() > n.len() { return false; }
+        let mut padded = vec![0; n.len()];
+        padded[n.len() - bytes.len()..].copy_from_slice(bytes);
+        let bits = n.first().map_or(0, |first| n.len() * 8 - first.leading_zeros() as usize);
+        if (512..1024).contains(&bits) {
+            return super::legacy_rsa::verify(n, e, negotiated, message, &padded);
+        }
+        return RsaPublicKeyComponents { n, e }.verify(parameters, message, &padded).is_ok();
     }
     let _ = negotiated;
     signature::Verifier::verify(key, message, signature).is_ok()

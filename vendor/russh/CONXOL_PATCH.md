@@ -61,31 +61,44 @@ parser bytes or markers in any other indexed file are refused. No private-key
 fixture is included. The root dependency retains `default-features = false`
 and enables only `aws-lc-rs` and `flate2`; RSA remains disabled.
 
-## RSA-SHA2 server verification through AWS-LC
+## Legacy SSH2 transport compatibility
 
-`keys::key::verify_server_signature` verifies RSA-SHA2 server exchange
-signatures with the already enabled AWS-LC backend's public-key-only
-`RsaPublicKeyComponents` verifier (2048–8192 bits). The client KEX path calls
-it with the negotiated algorithm; mismatched signature algorithms are rejected.
-Explicitly negotiated ssh-rsa uses AWS-LC
-`RSA_PKCS1_2048_8192_SHA1_FOR_LEGACY_USE_ONLY` public verification with the
-same 2048–8192-bit bound. Other host key types retain the existing verifier.
+`keys::key::verify_server_signature` uses AWS-LC public verification for
+RSA SHA-1/SHA-256/SHA-512 server signatures with 512–8192-bit keys.
+For 512–1023-bit public keys only, `keys::legacy_rsa` calls AWS-LC
+`RSA_new_public_key` and `RSA_verify` through aws-lc-sys 0.44. This narrow path
+keeps strict PKCS#1 v1.5 padding/DigestInfo verification and bounded public
+modulus/exponent inputs. No private key or raw RSA operation is used. The
+512-bit size cannot accommodate a SHA-512 signature; verification rejects it. Signature
+algorithms must match negotiation. Short unsigned RSA signatures are left-padded
+to modulus width; oversized signatures, invalid padding, and altered messages
+remain rejected. RSA private-key parsing/signing and the advisory-gated `rsa`
+feature remain disabled.
 
-This does not enable the `rsa` feature, RSA private-key loading/signing, or
-the RustCrypto RSA dependency gated by RUSTSEC-2023-0071. Conxol excludes
-legacy ssh-rsa/SHA-1 from its default advertised host algorithms. An explicit
-per-host legacy_rsa option appends it last for inspection and connection;
-other algorithms and trust enforcement are unchanged. Host-key approval
-and exact fingerprint matching remain required for authenticated sessions.
+Conxol appends ssh-rsa and ssh-dss after modern host-key algorithms. It also
+appends SHA-1 DH group14/group-exchange/group1, AES-CBC/3DES, and SHA-1 MACs
+(including the 96-bit truncated variant) after modern transport preferences.
+The existing `des` and `dsa` features enable those implementations.
+`mac::crypto` supports an explicit truncated output length while retaining
+full-length HMAC key material and constant-time verification. Client GEX accepts
+an explicitly configured 1024-bit minimum; its default stays unchanged. Conxol
+requests 1024/3072/8192-bit min/preferred/max GEX bounds.
 
-Regression: `cargo test --locked -p conxol-ssh --lib --test rsa_host_signature`.
-Synthetic OpenSSL-generated public-key/signature vectors cover RSA-SHA256,
-RSA-SHA512, modified messages/signatures, algorithm mismatches, and SHA-1
-tampering refusal. A separate synthetic SHA-1 signature/public-key fixture
-covers valid legacy verification and mismatches. No fixture private key is retained. No upstream result is claimed.
+Host-key approval, pinning, and changed-key rejection remain required. No clear
+cipher, null MAC, or SSH1 support is enabled. This is legacy SSH2 compatibility,
+not a claim of support for every historical SSH implementation.
+
+Regressions: `cargo xtask test-ssh` includes 36 combinations of SHA-1 KEX,
+CBC ciphers and SHA-1 MACs plus a DSA-only peer on disposable loopback sockets.
+Public-only OpenSSL-generated RSA vectors cover 512-, 768-, 1024- and 2048-bit signatures,
+short signatures, algorithm mismatches, oversized signatures, and tampering.
+No fixture private key is retained; no upstream result is claimed.
 
 ## PKCS#5 feature-gated local variable
 
 `src/keys/format/pkcs5.rs` names its decrypted key buffer `_sec` because its
 consumer is compiled only with the disabled `rsa` feature. This suppresses the
 unused-variable warning without changing decryption or key-support behavior.
+
+Focused RSA verifier regressions: `cargo xtask test-ssh-signatures`. The direct
+aws-lc-sys dependency must stay aligned with aws-lc-rs's backend version.
