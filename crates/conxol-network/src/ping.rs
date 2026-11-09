@@ -55,7 +55,7 @@ async fn execute(
     if *cancel.borrow() {
         return Err(NetworkDiagnosticError::Cancelled);
     }
-    if !cfg!(any(windows, target_os = "macos")) {
+    if !cfg!(any(windows, target_os = "macos", target_os = "android")) {
         return Err(NetworkDiagnosticError::PingUnsupported);
     }
     let target = match options.host.parse::<IpAddr>() {

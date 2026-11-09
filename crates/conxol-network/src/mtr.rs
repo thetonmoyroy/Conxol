@@ -43,7 +43,7 @@ async fn execute(
     if *cancellation.borrow() {
         return Err(NetworkDiagnosticError::Cancelled);
     }
-    if !cfg!(any(windows, target_os = "macos")) {
+    if !cfg!(any(windows, target_os = "macos", target_os = "android")) {
         return Err(NetworkDiagnosticError::MtrUnsupported);
     }
     let target = match options.host.parse::<IpAddr>() {
@@ -170,7 +170,7 @@ mod tests {
         ));
     }
 
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     #[tokio::test]
     async fn native_loopback_report_and_live_stop() {
         let (sender, mut cancel) = watch::channel(false);

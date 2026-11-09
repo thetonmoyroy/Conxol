@@ -1,0 +1,18 @@
+{
+  "build": {
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "windows": [{
+      "title": "Conxol",
+      "width": 412,
+      "height": 915,
+      "minWidth": 0,
+      "minHeight": 0,
+      "decorations": false
+    }]
+  },
+  "bundle": {
+    "resources": []
+  }
+}

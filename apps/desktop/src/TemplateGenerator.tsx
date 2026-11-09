@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { writeClipboardText } from "./clipboard-access";
 import { confirmAction, promptText } from "./text-prompt";
-import { effectiveRemoteAs, remoteAsOverridden, editServiceValue, normalizeInterfaceAddress, combinedTemplate, combinedRows, prefixRows, renderCombined, serviceFields, decodeTemplates, encodeTemplates, templateFields, templateStorageKey, type CombinedSections, type ConfigRow, type ConfigTemplate } from "./config-templates";
-import { builtinRows, builtinTemplates } from "./vendor-config-templates";
+import { normalizeConfigTemplate, templateSectionVariables, effectiveRemoteAs, remoteAsOverridden, editServiceValue, normalizeInterfaceAddress, combinedTemplate, combinedRows, prefixRows, renderCombined, serviceFields, decodeTemplates, encodeTemplates, templateFields, templateStorageKey, type CombinedSections, type ConfigRow, type ConfigTemplate } from "./config-templates";
+import { builtinRows, builtinTemplates, templateNotes } from "./vendor-config-templates";
 
 export function TemplateGenerator() {
   const [initial] = useState(() => {
@@ -10,15 +10,17 @@ export function TemplateGenerator() {
     catch { return { templates: [] as ConfigTemplate[], error: "Could not load saved templates. Existing storage will be preserved until you save." }; }
   });
   const [templates, setTemplates] = useState(initial.templates);
-  const [text, setText] = useState(combinedTemplate.text);
-  const [combined, setCombined] = useState<CombinedSections | undefined>(combinedTemplate.combined);
+  const [rawText, setText] = useState(combinedTemplate.text);
+  const [rawCombined, setCombined] = useState<CombinedSections | undefined>(combinedTemplate.combined);
   const [rows, setRows] = useState<ConfigRow[]>(combinedRows);
   const [prefixes, setPrefixes] = useState<ConfigRow[]>(prefixRows);
   const [selected, setSelected] = useState(combinedTemplate.id);
   const [baseline, setBaseline] = useState(JSON.stringify([combinedTemplate.text, combinedTemplate.combined]));
   const [notice, setNotice] = useState(initial.error);
   const editor = useRef<HTMLTextAreaElement>(null);
-  const current: ConfigTemplate = { id: selected, name: "", text, fields: templateFields(text), ...(combined ? { combined } : {}) };
+  const current = normalizeConfigTemplate({ id: selected, name: "", text: rawText, fields: templateFields(rawText), ...(rawCombined ? { combined: rawCombined } : {}) });
+  const { text, combined } = current;
+  const sectionInputs = useRef(new Map<string, HTMLTextAreaElement>());
   const fieldOrder = ["interface", "logical_system", "vlan", "vpn", "ip", "mask", "peer_ip", "peer_as", "import_policy", "export_policy", "advertise_default"];
   const fields = serviceFields(current).sort((a, b) => (fieldOrder.includes(a) ? fieldOrder.indexOf(a) : 99) - (fieldOrder.includes(b) ? fieldOrder.indexOf(b) : 99));
   const result = renderCombined(current, rows, prefixes);
@@ -61,11 +63,12 @@ export function TemplateGenerator() {
     if (!await confirmAction("Delete this saved template? Current commands and rows will remain in the editor.")) return;
     if (persist(templates.filter(item => item.id !== selected))) { setSelected(""); setNotice("Template deleted."); }
   }
-  function insert(field: string) {
-    const input = editor.current;
+  function insert(field: string, section: "interface" | "prefixes" | "policy" | "header" | "peer" = "interface") {
+    const input = section === "interface" ? editor.current : sectionInputs.current.get(section);
     if (!input) return;
     const token = `{{${field}}}`, at = input.selectionStart;
-    setText(text.slice(0, at) + token + text.slice(input.selectionEnd));
+    const next = input.value.slice(0, at) + token + input.value.slice(input.selectionEnd);
+    if (section === "interface") setText(next); else updateSection(section, next);
     requestAnimationFrame(() => { input.focus(); input.setSelectionRange(at + token.length, at + token.length); });
   }
   async function copy() {
@@ -115,7 +118,7 @@ export function TemplateGenerator() {
       <button className="outline-button" disabled={!templates.some(item => item.id === selected)} onClick={() => void remove()}>Delete</button>
     </div>
     {notice && <p role="status">{notice}</p>}
-    {combined?.platform && <details className="template-notes"><summary>Template notes</summary><p role="note">{combined.platform === "iosxe" ? "Cisco IOS XE / VRF Lite. Configure the parent Port-channel and referenced CLIENT export route-maps on the router." : "Juniper Junos set commands / virtual-router instances. Configure the parent ae interface and referenced CLIENT export policies. Default advertisement creates a discard static default with no-install and an export policy ahead of the service export policy."} Commands are generated for review; they are not applied to a device.</p></details>}
+    {combined?.platform && <details className="template-notes"><summary>Template notes</summary><p role="note">{templateNotes(combined.platform)} Commands are generated for review; they are not applied to a device.</p></details>}
     {combined?.logicalSystems && <details className="template-notes"><summary>Logical-system setup</summary><p role="note">Set logical_system for each service (initially LS-IPBW, LS-GGC, LS-FNA, LS-CDN and LS-BDIX). Prefix filters, policies, routing options and BGP are generated inside each logical system. Shared logical-system names reuse one policy definition. Physical interface tagging stays at the master level; configure ae members there. Referenced CLIENT export policies must exist in the corresponding logical system.</p></details>}
     <div className="generator-columns"><div className="generator-builder">
       <section className="generator-card generator-services"><h3>Interface and service variables</h3>
@@ -141,7 +144,13 @@ export function TemplateGenerator() {
       {combined && <section className="generator-card"><h3>Policy and BGP commands</h3>
 
 
-        {([ ["prefixes", "Prefix command · per prefix"], ["policy", "Import route-policy · once"], ["header", "BGP header · once"], ["peer", "VPN peer commands · per service"] ] as const).map(([key, label]) => <label className="generator-section-editor" key={key}>{label}<textarea className="generator-simple-editor" aria-label={label} value={combined[key]} maxLength={10000} spellCheck={false} onChange={event => updateSection(key, event.target.value)} /></label>)}
+        <p>Shared variables: <code>{"{{local_as}}"}</code> = Local BGP AS, <code>{"{{remote_as}}"}</code> = shared Remote BGP AS, <code>{"{{policy_name}}"}</code> = Prefix / policy name. Set these in Shared settings above.</p>
+        {([ ["prefixes", "Prefix command · per prefix"], ["policy", "Import route-policy · once"], ["header", "BGP header · once"], ["peer", "VPN peer commands · per service"] ] as const).map(([key, label]) => <div className="generator-section-editor" key={key}>
+          <label htmlFor={`generator-section-${key}`}>{label}</label>
+          <textarea id={`generator-section-${key}`} ref={node => { if (node) sectionInputs.current.set(key, node); else sectionInputs.current.delete(key); }} className="generator-simple-editor" aria-label={label} value={combined[key]} maxLength={10000} spellCheck={false} onChange={event => updateSection(key, event.target.value)} />
+          <div className="generator-number-buttons" role="group" aria-label={`${label} variables`}>{templateSectionVariables(current, key).map(field => <button key={field} className="generator-number" onClick={() => insert(field, key)} title={`Insert {{${field}}} at the cursor`}>{`{{${field}}}`}</button>)}</div>
+          <p>{key === "prefixes" ? "Prefix values come from Prefix entries above. IOS XR combines permitted entries into one prefix set." : key === "peer" ? "Peer values come from Interface and service variables / BGP peers and policies. peer_as uses the shared ASN unless overridden." : key === "policy" && combined.platform === "iosxr" ? "prefix_rules is generated from Prefix entries; it is not a separate value to fill in." : "Values come from Shared settings above."}</p>
+        </div>)}
         <p>Wrap optional peer commands in <code>{"{{#advertise_default}}…{{/advertise_default}}"}</code>. Prefix ge and le fields use the same conditional syntax.</p>
       </section>}
       </div></details>

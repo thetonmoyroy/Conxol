@@ -420,6 +420,7 @@ fn preview(archive: &Archive, token: String) -> Preview {
         key_files: archive.attachments.len(),
     }
 }
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn workspace_backup_export(
     app: tauri::AppHandle,
@@ -458,6 +459,7 @@ pub async fn workspace_backup_export(
         Ok(true)
     }).await.map_err(|_| error("Backup task did not complete."))?
 }
+#[cfg(not(target_os = "android"))]
 #[tauri::command]
 pub async fn workspace_backup_choose(
     app: tauri::AppHandle,
@@ -1023,4 +1025,17 @@ mod tests {
         assert!(!state.allows("vault_put"));
         assert!(state.allows("workspace_backup_restart"));
     }
+}
+
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn workspace_backup_export(app: tauri::AppHandle, request: ExportRequest) -> Result<bool, String> {
+    let _ = (app, request);
+    Err("Android workspace backup export is not available in this preview.".into())
+}
+#[cfg(target_os = "android")]
+#[tauri::command]
+pub async fn workspace_backup_choose(app: tauri::AppHandle) -> Result<Option<SelectedBackup>, String> {
+    let _ = app;
+    Err("Android workspace backup import is not available in this preview.".into())
 }

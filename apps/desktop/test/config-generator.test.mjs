@@ -1,9 +1,123 @@
 import assert from 'node:assert/strict';
-import { ciscoTemplate, juniperTemplate, juniperLogicalTemplate, builtinRows } from '../src/vendor-config-templates.ts';
-import { effectiveRemoteAs, remoteAsOverridden, automaticPeerIp, editServiceValue, normalizeInterfaceAddress, prefixToMask, combinedTemplate, combinedRows, prefixRows, renderCombined } from '../src/config-templates.ts';
+import { ciscoTemplate, iosxrTemplate, routerosTemplate, routerosMainTemplate, juniperTemplate, juniperLogicalTemplate, builtinRows, builtinTemplates } from '../src/vendor-config-templates.ts';
+import { normalizeConfigTemplate, templateSectionVariables, serviceFields, effectiveRemoteAs, remoteAsOverridden, automaticPeerIp, editServiceValue, normalizeInterfaceAddress, prefixToMask, combinedTemplate, combinedRows, prefixRows, renderCombined } from '../src/config-templates.ts';
 import { huaweiTemplate, huaweiRows, templateFields, renderTemplate, encodeTemplates, decodeTemplates } from '../src/config-templates.ts';
 
 const expectedHuawei = ['IPBW', 'GGC', 'FNA', 'CDN', 'BDIX'].map((vpn, index) => `interface Eth-Trunk1.${200 + index}\ndescription MGMT_RTR-${vpn}\nip binding vpn-instance ${vpn}\nip address 192.0.2.${1 + index * 4} 255.255.255.252\ndot1q termination vid ${200 + index}\nstatistics enable\n#`).join('\n');
+for (const template of builtinTemplates) {
+  assert.ok(!/check-first-as|enforce-first-as/.test(renderCombined(template,builtinRows(template.id),prefixRows()).text));
+}
+for (const [template,command] of [[combinedTemplate,'undo check-first-as'],[ciscoTemplate,'no bgp enforce-first-as'],[iosxrTemplate,'bgp enforce-first-as disable']]) {
+  const legacy = {...template,combined:{...template.combined,header:template.combined.header.replace('\n',`\n ${command}\n`)}};
+  assert.deepEqual(normalizeConfigTemplate(legacy),template);
+  assert.deepEqual(decodeTemplates(encodeTemplates([legacy])),[template]);
+  assert.equal(renderCombined(legacy,builtinRows(template.id),prefixRows()).text,renderCombined(template,builtinRows(template.id),prefixRows()).text);
+}
+for (const template of [iosxrTemplate, routerosTemplate, routerosMainTemplate]) {
+  const rows = builtinRows(template.id);
+  const result = renderCombined(template, rows, prefixRows());
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.count, 5);
+  assert.ok(!result.text.includes('{{'));
+  assert.deepEqual(decodeTemplates(encodeTemplates([template])), [template]);
+  const changedAs = {...template, combined: {...template.combined, remoteAs: '64498'}};
+  const inherited = renderCombined(changedAs, rows, prefixRows()).text;
+  assert.equal(inherited.match(template === iosxrTemplate ? /remote-as 64498/g : /remote.as=64498/g).length, 5);
+  const overridden = rows.map((row,index) => index === 0 ? editServiceValue(row,'peer_as','64499') : row);
+  assert.equal(renderCombined(changedAs, overridden, prefixRows()).text.match(template === iosxrTemplate ? /remote-as 64499/g : /remote.as=64499/g).length,1);
+  const cidr = rows.map(row => ({...row,ip: `${row.ip}/30`,mask:''}));
+  assert.equal(renderCombined(template,cidr,prefixRows()).text,result.text);
+  const noDefault = rows.map(row => ({...row,advertise_default:''}));
+  const without = renderCombined(template,noDefault,prefixRows()).text;
+  assert.ok(!without.includes(template === iosxrTemplate ? 'default-originate' : 'default-originate=always'));
+  const auto = editServiceValue(rows[0],'ip','198.51.100.1/30');
+  assert.equal(auto.peer_ip,'198.51.100.2');
+  assert.ok(renderCombined(template,[auto],prefixRows()).text.includes('198.51.100.2'));
+  assert.ok(!serviceFields(template).includes('prefix_rules'));
+  assert.ok(!serviceFields(template).includes('default_originate'));
+  assert.ok(!serviceFields(template).includes('prefix_length'));
+}
+const xr = renderCombined(iosxrTemplate,builtinRows(iosxrTemplate.id),prefixRows()).text;
+assert.ok(xr.startsWith('interface Bundle-Ether1.200'));
+assert.ok(!/^vrf /m.test(xr));
+assert.ok(!/^\s+rd /m.test(xr));
+assert.ok(xr.includes(' vrf IPBW\n  address-family ipv4 unicast'));
+assert.ok(xr.includes('interface Bundle-Ether1.200\n description MGMT_RTR-IPBW\n vrf IPBW\n ipv4 address 192.0.2.1 255.255.255.252\n encapsulation dot1q 200'));
+assert.equal(xr.match(/^prefix-set /gm).length, 1);
+assert.ok(xr.includes('prefix-set MGMT_RTR\n 192.0.2.0/28,\n 192.0.2.16/28 le 29,\n 198.51.100.0/24,\n 203.0.113.240/28,\n 203.0.113.32/29\nend-set'));
+assert.ok(xr.includes('route-policy MGMT_RTR\n if destination in MGMT_RTR then\n  pass\n else\n  drop\n endif\nend-policy'));
+assert.ok(!xr.includes('MGMT_RTR-10'));
+assert.ok(!xr.includes('0.0.0.0/0 le 32'));
+const orderedXr = renderCombined(iosxrTemplate,builtinRows(iosxrTemplate.id),[
+  {index:'1',action:'permit',network:'192.0.2.0',length:'28',ge:'',le:''},
+  {index:'2',action:'deny',network:'192.0.2.0',length:'24',ge:'',le:'32'},
+  {index:'3',action:'permit',network:'0.0.0.0',length:'0',ge:'',le:'32'},
+]);
+assert.deepEqual(orderedXr.errors,[]);
+assert.equal(orderedXr.text.match(/^prefix-set /gm).length,1);
+assert.ok(orderedXr.text.includes('if destination in (192.0.2.0/24 le 32) and not destination in (192.0.2.0/28) then\n  drop'));
+const denyFirst = renderCombined(iosxrTemplate,builtinRows(iosxrTemplate.id),[
+  {index:'1',action:'deny',network:'192.0.2.0',length:'24',ge:'',le:'32'},
+  {index:'2',action:'permit',network:'0.0.0.0',length:'0',ge:'',le:'32'},
+]).text;
+assert.ok(denyFirst.includes('if destination in (192.0.2.0/24 le 32) then\n  drop'));
+const legacyXr = {...iosxrTemplate,combined:{...iosxrTemplate.combined,
+  prefixes:'prefix-set {{policy_name}}-{{index}}\n {{network}}/{{length}}{{#ge}} ge {{ge}}{{/ge}}{{#le}} le {{le}}{{/le}}\nend-set\n!',
+  policy:'route-policy {{policy_name}}\n{{prefix_rules}}\n drop\nend-policy\n!\nroute-policy deny-all\n drop\nend-policy\n!',
+}};
+assert.equal(renderCombined(legacyXr,builtinRows(iosxrTemplate.id),prefixRows()).text,xr);
+assert.deepEqual(decodeTemplates(encodeTemplates([legacyXr])),[iosxrTemplate]);
+const oldCreationText = 'vrf {{vpn}}\n address-family ipv4 unicast\n exit\nexit\n' + iosxrTemplate.text;
+const oldCreationTemplate = {...legacyXr,text:oldCreationText,fields:templateFields(oldCreationText),combined:{...legacyXr.combined,peer:legacyXr.combined.peer.replace(' vrf {{vpn}}\n',' vrf {{vpn}}\n  rd {{local_as}}:{{vlan}}\n')}};
+assert.equal(renderCombined(oldCreationTemplate,builtinRows(iosxrTemplate.id),prefixRows()).text,xr);
+assert.deepEqual(decodeTemplates(encodeTemplates([oldCreationTemplate])),[iosxrTemplate]);
+assert.deepEqual(normalizeConfigTemplate(oldCreationTemplate),iosxrTemplate);
+for (const section of ['prefixes','policy','header','peer']) {
+  const variables = templateSectionVariables(iosxrTemplate,section);
+  assert.ok(['local_as','remote_as','policy_name'].every(field => variables.includes(field)));
+  assert.equal(new Set(variables).size,variables.length);
+}
+assert.ok(templateSectionVariables(iosxrTemplate,'prefixes').includes('network'));
+assert.ok(templateSectionVariables(iosxrTemplate,'policy').includes('prefix_rules'));
+assert.ok(templateSectionVariables(iosxrTemplate,'peer').includes('peer_as'));
+assert.ok(templateSectionVariables(iosxrTemplate,'peer').includes('peer_ip'));
+const sharedRemoteHeader = {...iosxrTemplate,combined:{...iosxrTemplate.combined,remoteAs:'64498',header:'! shared remote {{remote_as}}\n'+iosxrTemplate.combined.header}};
+const withSharedRemote = renderCombined(sharedRemoteHeader,builtinRows(iosxrTemplate.id),prefixRows());
+assert.deepEqual(withSharedRemote.errors,[]);
+assert.ok(withSharedRemote.text.includes('! shared remote 64498'));
+assert.ok(!serviceFields(sharedRemoteHeader).includes('remote_as'));
+assert.equal(xr.match(/^router bgp 64496$/gm).length,1);
+assert.equal(xr.match(/default-originate/g).length,1);
+assert.ok(xr.includes('route-policy deny-all out'));
+assert.ok(!xr.includes('route-map'));
+assert.ok(renderCombined(iosxrTemplate,builtinRows(iosxrTemplate.id),[prefixRows()[0],prefixRows()[0]]).errors.length);
+const ros = renderCombined(routerosTemplate,builtinRows(routerosTemplate.id),prefixRows()).text;
+assert.ok(ros.includes('/interface/vlan add name="vlan200-IPBW" interface="ether1" vlan-id=200'));
+assert.ok(ros.includes('/ip/vrf add name="IPBW" interfaces="vlan200-IPBW" place-before=[find where name="main"]'));
+assert.ok(ros.includes('/ip/address add address=192.0.2.1/30 interface="vlan200-IPBW"'));
+assert.ok(ros.includes('if (dst in 192.0.2.16/28 && dst-len in 28-29) { accept; }'));
+assert.ok(ros.includes('if (dst in 0.0.0.0/0 && dst-len in 0-32) { reject; }'));
+assert.equal(ros.match(/\/routing\/bgp\/instance add /g).length,5);
+assert.equal(ros.match(/\/routing\/bgp\/connection add /g).length,5);
+assert.equal(ros.match(/output.default-originate=always/g).length,1);
+assert.equal(ros.match(/output.default-originate=never/g).length,4);
+assert.ok(ros.includes('chain="MGMT-OUT-IPBW" rule="if (dst == 0.0.0.0/0) { accept; }"'));
+assert.ok(ros.includes('chain="MGMT-OUT-IPBW" rule="jump deny-all;"'));
+assert.ok(ros.includes('name="BGP-IPBW" as=64496 router-id=192.0.2.1 routing-table="IPBW" vrf="IPBW"'));
+const mainRos = renderCombined(routerosMainTemplate,builtinRows(routerosMainTemplate.id),prefixRows());
+assert.deepEqual(mainRos.errors,[]);
+assert.ok(builtinTemplates.includes(routerosMainTemplate));
+assert.ok(!mainRos.text.includes('/ip/vrf'));
+assert.ok(!/\bvrf=|routing-table=/.test(mainRos.text));
+assert.equal(mainRos.text.match(/\/routing\/bgp\/instance add /g).length,1);
+assert.equal(mainRos.text.match(/\/routing\/bgp\/connection add .*instance="BGP-MAIN"/g).length,5);
+assert.ok(mainRos.text.includes('/routing/bgp/instance add name="BGP-MAIN" as=64496'));
+assert.ok(mainRos.text.includes('/ip/address add address=192.0.2.1/30 interface="vlan200-IPBW"'));
+assert.equal(mainRos.text.match(/output.default-originate=always/g).length,1);
+assert.equal(mainRos.text.match(/output.default-originate=never/g).length,4);
+assert.ok([routerosTemplate,routerosMainTemplate].every(template => template.name.includes('v7') && !template.name.includes('7.20')));
+assert.ok(renderCombined(routerosTemplate,[{...builtinRows(routerosTemplate.id)[0],export_policy:'bad name'}],prefixRows()).errors.length);
+assert.ok(renderCombined(routerosTemplate,builtinRows(routerosTemplate.id),[{...prefixRows()[0],network:'192.0.2.1'}]).errors.length);
 for (let length = 0; length <= 32; length++) {
   const bits = prefixToMask(String(length)).split('.').map(part => Number(part).toString(2).padStart(8, '0')).join('');
   assert.equal(bits, '1'.repeat(length) + '0'.repeat(32 - length));
@@ -68,7 +182,7 @@ ip ip-prefix MGMT_RTR index 255 deny 0.0.0.0 0 less-equal 32
 route-policy MGMT_RTR permit node 10
  if-match ip-prefix MGMT_RTR
 #`;
-const expectedBgp = `bgp 64496\n undo check-first-as\n #\n ipv4-family unicast\n #\n` + ['IPBW', 'GGC', 'FNA', 'CDN', 'BDIX'].map((vpn, index) => ` ipv4-family vpn-instance ${vpn}\n  peer 192.0.2.${2 + index * 4} as-number 64497\n  peer 192.0.2.${2 + index * 4} route-policy MGMT_RTR import\n  peer 192.0.2.${2 + index * 4} route-policy ${index === 0 ? 'deny-all' : `CLIENT-${vpn}-OUT`} export\n${index === 0 ? '  peer 192.0.2.2 default-route-advertise\n' : ''} #`).join('\n');
+const expectedBgp = `bgp 64496\n #\n ipv4-family unicast\n #\n` + ['IPBW', 'GGC', 'FNA', 'CDN', 'BDIX'].map((vpn, index) => ` ipv4-family vpn-instance ${vpn}\n  peer 192.0.2.${2 + index * 4} as-number 64497\n  peer 192.0.2.${2 + index * 4} route-policy MGMT_RTR import\n  peer 192.0.2.${2 + index * 4} route-policy ${index === 0 ? 'deny-all' : `CLIENT-${vpn}-OUT`} export\n${index === 0 ? '  peer 192.0.2.2 default-route-advertise\n' : ''} #`).join('\n');
 assert.equal(combined.text, [expectedHuawei, expectedPrefixes, expectedBgp].join('\n'));
 assert.equal(combined.text.match(/^bgp /gm).length, 1);
 const changedRows = combinedRows();

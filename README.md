@@ -90,7 +90,7 @@ Conxol keeps settings and saved connection data locally. Rust handles connection
 <details>
 <summary>Platform and protocol limits</summary>
 
-- Native Ping/MTR currently support IPv4 on Windows and macOS. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
+- Native Ping/MTR currently support IPv4 on Windows, macOS, and the Android preview. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
 - RDP is experimental and excluded from normal release bundles. VNC uses the packaged native helper; VNC TCP and Telnet are unencrypted.
 - RSA private-key authentication is unsupported. RSA-SHA2 server host-signature verification is supported.
 - FTP/FTPS client support depends on the system curl build. External X11 forwarding requires an X server.

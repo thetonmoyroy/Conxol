@@ -8,8 +8,13 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(target_os = "macos", target_os = "android", test))]
 mod packet;
+#[cfg(any(target_os = "android", test))]
+mod android_packet;
+#[cfg(target_os = "android")]
+#[path = "platform/android.rs"]
+mod platform;
 #[cfg(target_os = "macos")]
 #[path = "platform/macos.rs"]
 mod platform;
@@ -23,7 +28,7 @@ pub enum Error {
     InvalidOptions,
     #[error("native ICMP requires an explicit unicast IPv4 destination")]
     InvalidTarget,
-    #[error("native ICMP currently supports Windows and macOS")]
+    #[error("native ICMP currently supports Windows, macOS and Android")]
     UnsupportedPlatform,
     #[error("native ICMP was cancelled")]
     Cancelled,
@@ -59,7 +64,7 @@ pub trait Probe {
 
 /// Owns the native ICMP resource; payload size excludes IP and ICMP headers.
 pub struct Session {
-    #[cfg(any(windows, target_os = "macos"))]
+    #[cfg(any(windows, target_os = "macos", target_os = "android"))]
     inner: platform::NativeProbe,
 }
 impl Session {
@@ -67,13 +72,13 @@ impl Session {
         if payload_size > 65500 {
             return Err(Error::InvalidOptions);
         }
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "android"))]
         {
             Ok(Self {
                 inner: platform::NativeProbe::new(payload_size)?,
             })
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
         {
             Err(Error::UnsupportedPlatform)
         }
@@ -92,13 +97,13 @@ impl Probe for Session {
         if ttl == 0 || !(Duration::from_millis(1)..=Duration::from_secs(60)).contains(&timeout) {
             return Err(Error::InvalidOptions);
         }
-        #[cfg(any(windows, target_os = "macos"))]
+        #[cfg(any(windows, target_os = "macos", target_os = "android"))]
         {
             let result = self.inner.probe(target, ttl, timeout, cancel)?;
             check_cancel(cancel)?;
             Ok(result)
         }
-        #[cfg(not(any(windows, target_os = "macos")))]
+        #[cfg(not(any(windows, target_os = "macos", target_os = "android")))]
         {
             Err(Error::UnsupportedPlatform)
         }

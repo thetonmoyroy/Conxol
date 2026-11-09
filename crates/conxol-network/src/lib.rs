@@ -56,9 +56,9 @@ pub enum NetworkDiagnosticError {
     Process,
     #[error("Native MTR could not run. Check that ICMP packet probes are permitted.")]
     MtrUnavailable,
-    #[error("Native MTR currently supports IPv4 targets on Windows and macOS")]
+    #[error("Native MTR currently supports IPv4 targets on Windows, macOS and Android")]
     MtrUnsupported,
-    #[error("Native Ping currently supports IPv4 targets on Windows and macOS")]
+    #[error("Native Ping currently supports IPv4 targets on Windows, macOS and Android")]
     PingUnsupported,
     #[error("Native Ping could not run. Check that ICMP packet probes are permitted.")]
     PingUnavailable,

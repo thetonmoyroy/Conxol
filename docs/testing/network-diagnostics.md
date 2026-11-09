@@ -10,7 +10,7 @@ UDP sends one empty datagram using a connected socket: reply = open,
 connection refusal/reset = closed, silence = open-or-filtered, other errors =
 failed. Empty probes do not identify services and many UDP services ignore them.
 
-MTR uses the in-process `conxol-mtr` Rust engine on Windows and macOS.
+MTR uses the in-process `conxol-mtr` Rust engine on Windows, macOS, and Android.
 No third-party MTR executable, system traceroute, shell invocation or helper
 payload is used. The current native backend supports IPv4 addresses and
 hostnames with an IPv4 result. IPv6 and Linux return an explicit unsupported
@@ -58,7 +58,7 @@ the task also signals cancellation. Windows uses synchronous ICMP calls, so an
 in-flight Stop can wait up to the configured timeout (60 seconds maximum).
 macOS polls cancellation every 20 ms; between probes both check every 20 ms.
 
-This version supports IPv4 on Windows and macOS. The desktop resolves hostnames
+This version supports IPv4 on Windows, macOS, and the Android preview. The desktop resolves hostnames
 to IPv4 with a deadline and cancellation. IPv6 and Linux are explicitly
 unsupported; no external fallback is used. The CLI accepts numeric IPv4 only.
 MTR reuses conxol-ping's native ICMP transport with per-hop TTL settings, avoiding

@@ -9,6 +9,10 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "conxol_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2.4", features = [] }
 
@@ -27,7 +31,6 @@ conxol-remote-desktop = { path = "../../../crates/conxol-remote-desktop" }
 conxol-store = { path = "../../../crates/conxol-store" }
 conxol-vault = { path = "../../../crates/conxol-vault" }
 portable-pty = "0.9"
-rfd = "0.15.4"
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -49,3 +52,6 @@ windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 [dev-dependencies]
 russh.workspace = true
 russh-sftp.workspace = true
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+rfd = "0.15.4"

@@ -29,6 +29,7 @@ pub(crate) fn echo_sized(
     packet
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn ipv4(packet: &[u8]) -> Option<(usize, Ipv4Addr, Ipv4Addr)> {
     let header = usize::from(*packet.first()? & 15) * 4;
     if packet[0] >> 4 != 4
@@ -46,6 +47,7 @@ fn ipv4(packet: &[u8]) -> Option<(usize, Ipv4Addr, Ipv4Addr)> {
     ))
 }
 
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn reply(
     packet: &[u8],
     target: Ipv4Addr,
@@ -88,6 +90,7 @@ pub(crate) fn reply(
 
 /// XNU delivers the outer fragment field and ICMP errors' quoted total length
 /// in host order. Restore wire order before checking the ICMP checksum.
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn darwin_reply(
     packet: &mut [u8],
     target: Ipv4Addr,

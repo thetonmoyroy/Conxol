@@ -384,6 +384,7 @@ function createWorkspaceTerminal(config: Partial<Omit<WorkspaceTerminal, "id" | 
 }
 
 const IS_TAURI = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
 
 
 type SessionListItem = {
@@ -2425,8 +2426,9 @@ function App() {
     if (!IS_TAURI) return;
     void invoke<SavedSession[]>("session_list")
       .then((sessions) => {
-        setSavedSessions(sessions);
-        setSessionRows(sessions.map(toSessionListItem));
+        const available = IS_ANDROID ? sessions.filter(session => session.protocol !== "RDP" && session.protocol !== "VNC") : sessions;
+        setSavedSessions(available);
+        setSessionRows(available.map(toSessionListItem));
         setSessionListError(null);
       })
       .catch((error) => setSessionListError(`Saved sessions could not be loaded: ${String(error)}`));
@@ -2944,6 +2946,10 @@ function App() {
   }, [recordAudit, requestTerminalFocus, setQuickConnectOpen]);
 
   const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string) => {
+    if (IS_ANDROID) {
+      setConnectionError("Remote desktop connections are not supported on Android.");
+      return;
+    }
     if (request.protocol === "vnc" && request.allowInsecureVnc && !await confirmAction("VNC over TCP is unencrypted. Continue only if this target is trusted or protected by an external tunnel?")) {
       return;
     }
@@ -4538,9 +4544,32 @@ function App() {
 
   const filteredSessions = sessionRows.filter((session) => {
     const matchesSearch = `${session.name} ${session.folder} ${session.detail} ${session.type} ${session.tags.join(" ")}`.toLowerCase().includes(search.trim().toLowerCase());
-    return matchesSearch && (!favoritesOnly || session.favorite) && (!recentOnly || session.lastUsedAt != null);
-  }).sort((first, second) => first.name.localeCompare(second.name, undefined, { numeric: true, sensitivity: "base" }));
-  const sessionGroups: Array<[string, SessionListItem[]]> = favoritesOnly
+    return matchesSearch && (!favoritesOnly || session.favorite) && (!recentOnly || (session.type !== "LOCAL" && Number.isFinite(session.lastUsedAt) && (session.lastUsedAt ?? 0) > 0));
+  }).sort((first, second) => (recentOnly ? (second.lastUsedAt ?? 0) - (first.lastUsedAt ?? 0) : 0) || first.name.localeCompare(second.name, undefined, { numeric: true, sensitivity: "base" }));
+  function selectSessionSidebar(section: "all" | "favorites" | "recent") {
+    const sameSection = sidebarMode === "sessions" && favoritesOnly === (section === "favorites") && recentOnly === (section === "recent");
+    setSidebarOpen(open => document.documentElement.classList.contains("android") && sameSection ? !open : true);
+    setSidebarMode("sessions");
+    setFavoritesOnly(section === "favorites");
+    setRecentOnly(section === "recent");
+  }
+  function selectSidebarPanel(mode: "notes" | "shortcuts" | "files") {
+    setSidebarOpen(open => IS_ANDROID && sidebarMode === mode ? !open : true);
+    setSidebarMode(mode);
+  }
+  function renderSidebarSession(session: SessionListItem) {
+    return (<SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
+                    const saved = savedSessions.find((item) => item.id === session.id);
+                    if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); }
+                  }} onEdit={session.id ? () => {
+                    const saved = savedSessions.find((item) => item.id === session.id);
+                    if (saved) setEditingSession(saved);
+                  } : undefined} onDelete={session.id ? () => {
+                    const saved = savedSessions.find((item) => item.id === session.id);
+                    if (saved) void deleteSavedSession(saved);
+                  } : undefined} onToggleFavorite={() => void toggleFavorite(session)} />);
+  }
+  const sessionGroups: Array<[string, SessionListItem[]]> = favoritesOnly || recentOnly
     ? [["", filteredSessions]]
     : groupSessionsByFolder(filteredSessions, createdSessionFolders);
   const firstMatchingSession = sessionGroups.find(([, sessions]) => sessions.length > 0)?.[1][0];
@@ -4595,15 +4624,17 @@ function App() {
 
       <div className="app-body">
         <nav className="session-activity-strip" aria-label="Sidebar tools">
-          <button className="activity-sessions" title="User sessions" aria-label="User sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && !favoritesOnly && !recentOnly} onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(false); setRecentOnly(false); }}><List size={16} strokeWidth={1.5} /></button>
-          <button className="activity-favorites" title="Favorite sessions" aria-label="Favorite sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} aria-controls="session-sidebar" onClick={() => { setSidebarOpen(true); setSidebarMode("sessions"); setFavoritesOnly(true); setRecentOnly(false); }}><Star size={16} strokeWidth={1.5} /></button>
-          <button className="activity-shortcuts" title="Device shortcuts" aria-label="Device shortcuts" aria-pressed={sidebarOpen && sidebarMode === "shortcuts"} aria-controls="session-sidebar" onClick={() => { setShortcutSelectionDraft(null); setShortcutsOpen(true); }}><Command size={16} strokeWidth={1.5} /></button>
+          <button className="activity-sessions" title="User sessions" aria-label="User sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && !favoritesOnly && !recentOnly} aria-controls="session-sidebar" aria-expanded={sidebarOpen && sidebarMode === "sessions" && !favoritesOnly && !recentOnly} onClick={() => selectSessionSidebar("all")}><List size={16} strokeWidth={1.5} /></button>
+          <button className="activity-favorites" title="Favorite sessions" aria-label="Favorite sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} aria-controls="session-sidebar" aria-expanded={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} onClick={() => selectSessionSidebar("favorites")}><Star size={16} strokeWidth={1.5} /></button>
+          <button className="activity-recent" title="Recent devices" aria-label="Recent devices" aria-pressed={sidebarOpen && sidebarMode === "sessions" && recentOnly} aria-controls="session-sidebar" aria-expanded={sidebarOpen && sidebarMode === "sessions" && recentOnly} onClick={() => selectSessionSidebar("recent")}><History size={16} strokeWidth={1.5} /></button>
+          <button className="activity-shortcuts" title="Device shortcuts" aria-label="Device shortcuts" aria-pressed={sidebarOpen && sidebarMode === "shortcuts"} aria-expanded={sidebarOpen && sidebarMode === "shortcuts"} aria-controls="session-sidebar" onClick={() => { setShortcutSelectionDraft(null); selectSidebarPanel("shortcuts"); }}><Command size={16} strokeWidth={1.5} /></button>
           <button className="activity-network" title="Network diagnostics" aria-label="Network diagnostics" aria-pressed={diagnosticsOpen} onClick={() => setDiagnosticsOpen(true)}><Activity size={16} strokeWidth={1.5} /></button>
-          <button className="activity-notes" title="Notes" aria-label="Notes" aria-pressed={notesOpen} onClick={() => setNotesOpen(true)}><FileText size={16} strokeWidth={1.5} /></button>
-          {remoteSessionId && remoteProtocol === "ssh" && terminalStatus === "connected" && sftpAvailabilityRef.current.get(remoteSessionId) === true && <button className="activity-files" title="Remote files" aria-label="Remote files" aria-pressed={sidebarOpen && sidebarMode === "files"} onClick={() => { setSidebarOpen(true); setSidebarMode(remoteSessionId && remoteProtocol === "ssh" && sftpAvailabilityRef.current.get(remoteSessionId) !== false ? "files" : "sessions"); }}><FolderInput size={16} strokeWidth={1.5} /></button>}
+          <button className="activity-notes" title="Notes" aria-label="Notes" aria-pressed={notesOpen} aria-expanded={notesOpen} aria-controls="session-sidebar" onClick={() => selectSidebarPanel("notes")}><FileText size={16} strokeWidth={1.5} /></button>
+          {remoteSessionId && remoteProtocol === "ssh" && terminalStatus === "connected" && sftpAvailabilityRef.current.get(remoteSessionId) === true && <button className="activity-files" title="Remote files" aria-label="Remote files" aria-pressed={sidebarOpen && sidebarMode === "files"} aria-expanded={sidebarOpen && sidebarMode === "files"} aria-controls="session-sidebar" onClick={() => selectSidebarPanel("files")}><FolderInput size={16} strokeWidth={1.5} /></button>}
           <button className="activity-collapse" title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarOpen} aria-controls="session-sidebar" onClick={() => setSidebarOpen((open) => !open)}>{sidebarOpen ? <ChevronLeft size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}</button>
           <button className="activity-settings" title="Settings" aria-label="Settings" aria-pressed={settingsOpen} onClick={openSettings}><Settings2 size={16} strokeWidth={1.5} /></button>
         </nav>
+        {IS_ANDROID && sidebarOpen && <button type="button" className="android-sidebar-backdrop" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} />}
         <aside className="sidebar" id="session-sidebar" style={{ flexBasis: sidebarOpen ? sidebarSize : 0 }}>
           <div className="sidebar-toolbar">
             <button className="sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Collapse sidebar">
@@ -4648,25 +4679,14 @@ function App() {
             </> : <div className="sidebar-file-empty"><Folder size={22} /><p>Open an SSH session to browse remote files.</p><button className="outline-button" onClick={() => setQuickConnectOpen(true)}>New session</button></div>}
           </div> : <>
           <div className={`session-list ${sessionDropTarget === "" ? "session-drop-target" : ""}`} data-session-folder="">
-            <div className="list-heading"><span>{recentOnly ? "Recent sessions" : favoritesOnly ? "Favorite sessions" : "User sessions"}</span><span className="list-actions"><button aria-label="Import OpenSSH config" title="Import OpenSSH config" onClick={importOpenSshConfig}><Upload size={14} /></button><button aria-label="Import Conxol session export" title="Import Conxol session export" onClick={importSessions}><ArrowDownToLine size={14} /></button><button aria-label="Export Conxol sessions" title="Export secret-free session definitions" onClick={exportSessions}><ArrowUpFromLine size={14} /></button></span></div>
+            <div className="list-heading"><span>{recentOnly ? "Recent devices" : favoritesOnly ? "Favorite sessions" : "User sessions"}</span><span className="list-actions"><button aria-label="Import OpenSSH config" title="Import OpenSSH config" onClick={importOpenSshConfig}><Upload size={14} /></button><button aria-label="Import Conxol session export" title="Import Conxol session export" onClick={importSessions}><ArrowDownToLine size={14} /></button><button aria-label="Export Conxol sessions" title="Export secret-free session definitions" onClick={exportSessions}><ArrowUpFromLine size={14} /></button></span></div>
             {sessionListError && <div className="connect-error" role="alert"><span>{sessionListError}</span><button type="button" className="outline-button" onClick={refreshSavedSessions}>Retry</button></div>}
-            {!favoritesOnly && <div className="session-folder-controls"><button type="button" title="Expand all folders" aria-label="Expand all folders" onClick={() => expandSessionFolders(true)}><ChevronsUpDown size={14} /></button><button type="button" title="Collapse all folders" aria-label="Collapse all folders" onClick={() => expandSessionFolders(false)}><ChevronsDownUp size={14} /></button><button type="button" title="Create folder" aria-label="Create folder" onClick={() => void createSessionFolder()}><FolderPlus size={14} /></button></div>}
+            {!favoritesOnly && !recentOnly && <div className="session-folder-controls"><button type="button" title="Expand all folders" aria-label="Expand all folders" onClick={() => expandSessionFolders(true)}><ChevronsUpDown size={14} /></button><button type="button" title="Collapse all folders" aria-label="Collapse all folders" onClick={() => expandSessionFolders(false)}><ChevronsDownUp size={14} /></button><button type="button" title="Create folder" aria-label="Create folder" onClick={() => void createSessionFolder()}><FolderPlus size={14} /></button></div>}
             {(() => {
               const renderGroup = ([folder, sessions]: [string, SessionListItem[]]): ReactNode => {
               const children = folder ? sessionGroups.filter(([path]) => path && sessionFolderParent(path) === folder) : [];
               const folderHasHosts = sessionRows.some(session => sessionFolderWithin(session.folder.trim(), folder)) || createdSessionFolders.some(path => path !== folder && sessionFolderWithin(path, folder));
-              const rows = sessions.map((session) => (
-                  <SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
-                    const saved = savedSessions.find((item) => item.id === session.id);
-                    if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); }
-                  }} onEdit={session.id ? () => {
-                    const saved = savedSessions.find((item) => item.id === session.id);
-                    if (saved) setEditingSession(saved);
-                  } : undefined} onDelete={session.id ? () => {
-                    const saved = savedSessions.find((item) => item.id === session.id);
-                    if (saved) void deleteSavedSession(saved);
-                  } : undefined} onToggleFavorite={() => void toggleFavorite(session)} />
-                ));
+              const rows = sessions.map(renderSidebarSession);
               return folder ? (
                 <details key={folder} className={`session-folder-group ${sessionDropTarget === folder ? "session-drop-target" : ""}`} data-session-folder={folder} open={search.trim() ? true : (sessionFolderState[`folder:${folder}`] ?? true)} onToggle={event => { if (event.target === event.currentTarget && !search.trim()) changeSessionFolder(`folder:${folder}`, event.currentTarget.open); }}>
                   <summary className="folder-heading session-folder-heading" title={`${folder} · Drag onto a folder to nest, or onto User sessions to move to the root`}
@@ -6333,6 +6353,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const applyUri = () => {
     try {
       const parsed = parseQuickConnectUri(uri);
+      if (IS_ANDROID && (parsed.protocol === "rdp" || parsed.protocol === "vnc")) throw Error("This connection type is not supported on Android.");
       setProtocol(parsed.protocol);
       setHost(parsed.host);
       setPort(String(parsed.port));
@@ -6564,7 +6585,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
         <div className="quick-connect-uri">
           <label htmlFor="quick-connect-uri-input">Connection link</label>
           <div className="quick-connect-uri-row"><input id="quick-connect-uri-input" value={uri} onChange={(event) => { setUri(event.target.value); setUriError(null); }} placeholder="ssh://ops@example.com:22" autoComplete="off" /><button type="button" className="outline-button" onClick={applyUri} disabled={!uri.trim()}>Apply</button></div>
-          <small>Supported: ssh://, telnet://, rdp://, and vnc://. Passwords and query options are never accepted in a URI.</small>
+          <small>{IS_ANDROID ? "Supported: ssh:// and telnet://." : "Supported: ssh://, telnet://, rdp://, and vnc://."} Passwords and query options are never accepted in a URI.</small>
         </div>
         </details>}
         {uriError && <div className="connect-error-inline" role="alert">{uriError}</div>}
@@ -6576,7 +6597,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
             { value: "serial", label: "Console", icon: Cable },
             { value: "rdp", label: "RDP", icon: Monitor },
             { value: "vnc", label: "VNC", icon: Monitor },
-          ].map(item => <button key={item.value} type="button" disabled={!!initialSession && protocol !== item.value} aria-pressed={protocol === item.value} className={protocol === item.value ? "selected" : ""} onClick={() => {
+          ].filter(item => !IS_ANDROID || (item.value !== "rdp" && item.value !== "vnc")).map(item => <button key={item.value} type="button" disabled={!!initialSession && protocol !== item.value} aria-pressed={protocol === item.value} className={protocol === item.value ? "selected" : ""} onClick={() => {
             const next = item.value as typeof protocol;
             setProtocol(next);
             setAllowInsecureVnc(false);
