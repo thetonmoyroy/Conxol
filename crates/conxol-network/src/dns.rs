@@ -205,12 +205,10 @@ async fn exchange(
     }
 }
 
-async fn lookup_at(
+fn make_query(
     host: &str,
     kind: DnsRecordType,
-    server: std::net::SocketAddr,
-    timeout: Duration,
-) -> Result<DnsLookupResult, NetworkDiagnosticError> {
+) -> Result<hickory_proto::op::Message, NetworkDiagnosticError> {
     use hickory_proto::{
         op::{Edns, Message, Query},
         rr::Name,
@@ -225,11 +223,96 @@ async fn lookup_at(
     let mut edns = Edns::new();
     edns.set_version(0).set_max_payload(1232);
     query.set_edns(edns);
+    Ok(query)
+}
+
+/// DNS/TCP over an explicitly supplied transport; never consult system resolvers.
+pub async fn lookup_dns_stream<S>(
+    host: &str,
+    kind: DnsRecordType,
+    server: &str,
+    timeout: Duration,
+    mut stream: S,
+) -> Result<DnsLookupResult, NetworkDiagnosticError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let query = make_query(host, kind)?;
+    let started = std::time::Instant::now();
+    let (response, len) = tokio::time::timeout(timeout, async {
+        let wire = query
+            .to_vec()
+            .map_err(|_| NetworkDiagnosticError::InvalidTarget)?;
+        stream
+            .write_u16(wire.len() as u16)
+            .await
+            .map_err(|_| NetworkDiagnosticError::Resolution)?;
+        stream
+            .write_all(&wire)
+            .await
+            .map_err(|_| NetworkDiagnosticError::Resolution)?;
+        let len = stream
+            .read_u16()
+            .await
+            .map_err(|_| NetworkDiagnosticError::Resolution)? as usize;
+        if len < 12 {
+            return Err(NetworkDiagnosticError::Resolution);
+        }
+        let mut bytes = vec![0; len];
+        stream
+            .read_exact(&mut bytes)
+            .await
+            .map_err(|_| NetworkDiagnosticError::Resolution)?;
+        let response = hickory_proto::op::Message::from_vec(&bytes)
+            .map_err(|_| NetworkDiagnosticError::Resolution)?;
+        if !matches_query(&response, &query) || response.metadata.truncation {
+            return Err(NetworkDiagnosticError::Resolution);
+        }
+        Ok((response, len))
+    })
+    .await
+    .map_err(|_| NetworkDiagnosticError::Timeout)??;
+    format_report(
+        kind,
+        server,
+        started.elapsed().as_millis(),
+        response,
+        len,
+        "TCP / private PPTP",
+    )
+}
+
+async fn lookup_at(
+    host: &str,
+    kind: DnsRecordType,
+    server: std::net::SocketAddr,
+    timeout: Duration,
+) -> Result<DnsLookupResult, NetworkDiagnosticError> {
+    let query = make_query(host, kind)?;
     let started = std::time::Instant::now();
     let (response, len, transport) = tokio::time::timeout(timeout, exchange(&query, server))
         .await
         .map_err(|_| NetworkDiagnosticError::Timeout)??;
     let elapsed_ms = started.elapsed().as_millis();
+    format_report(
+        kind,
+        &server.to_string(),
+        elapsed_ms,
+        response,
+        len,
+        transport,
+    )
+}
+
+fn format_report(
+    kind: DnsRecordType,
+    server: &str,
+    elapsed_ms: u128,
+    response: hickory_proto::op::Message,
+    len: usize,
+    transport: &str,
+) -> Result<DnsLookupResult, NetworkDiagnosticError> {
     let header = &response.metadata;
     let mut output = format!(
         ";; Conxol DNS · {} query\n;; Got answer:\n;; ->>HEADER<<- opcode: {}, status: {}, id: {}\n;; flags: {}; QUERY: {}, ANSWER: {}, AUTHORITY: {}, ADDITIONAL: {}\n",
@@ -325,6 +408,42 @@ pub async fn lookup_dns(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[tokio::test]
+    async fn pptp_dns_supplied_stream_validates_response_and_uses_no_system_resolver() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        for invalid in [false, true] {
+            let (client, mut server) = tokio::io::duplex(4096);
+            let worker = tokio::spawn(async move {
+                let length = server.read_u16().await.unwrap() as usize;
+                let mut wire = vec![0; length];
+                server.read_exact(&mut wire).await.unwrap();
+                let mut response = hickory_proto::op::Message::from_vec(&wire).unwrap();
+                response.metadata.message_type = hickory_proto::op::MessageType::Response;
+                if invalid {
+                    response.metadata.id ^= 1;
+                }
+                let wire = response.to_vec().unwrap();
+                server.write_u16(wire.len() as u16).await.unwrap();
+                server.write_all(&wire).await.unwrap();
+            });
+            let report = lookup_dns_stream(
+                "fixture.invalid",
+                DnsRecordType::A,
+                "192.0.2.53",
+                Duration::from_secs(1),
+                client,
+            )
+            .await;
+            if invalid {
+                assert!(matches!(report, Err(NetworkDiagnosticError::Resolution)));
+            } else {
+                let report = report.unwrap();
+                assert!(report.output.contains("TCP / private PPTP"));
+                assert!(report.output.contains("fixture.invalid"));
+            }
+            worker.await.unwrap();
+        }
+    }
     #[test]
     fn dns_targets_and_reverse_queries_are_validated() {
         for host in [

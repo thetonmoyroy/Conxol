@@ -29,6 +29,7 @@ fn main() {
         "test-store-updates" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "store_updates::", "--", "--nocapture"], None),
         "test-settings" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "settings::tests", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
+        "test-pptp-diagnostics" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp_diagnostics::tests", "--", "--nocapture"], None),
         "test-pptp" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "--", "--nocapture"], None)
             .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp::tests", "--", "--nocapture"], None)),
         "test-pptp-attachments" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "-p", "conxol-ssh", "-p", "conxol-telnet", "-p", "conxol-store", "pptp", "--", "--nocapture"], None),

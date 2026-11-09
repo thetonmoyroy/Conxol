@@ -344,3 +344,10 @@ change atomically saves its new verifier and re-encrypted blob in one private
 file; failed writes preserve the previous in-memory state. Disabling protection
 requires deleting saved credentials first. Legacy portable-vault controls remain
 available explicitly, with no OS fallback.
+
+
+Network diagnostics can select a manager PPTP profile. The same private worker
+services bounded async TCP streams and ICMP/UDP probes; `pptp_diagnostics.rs`
+adapts these to existing cancellable diagnostic events. Private DNS uses an
+explicit IPv4 resolver over TCP. Selected-route failures never fall back to host
+networking; the ordinary direct diagnostic implementations remain available.

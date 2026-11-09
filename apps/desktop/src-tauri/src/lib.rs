@@ -5,6 +5,7 @@ mod backup;
 use backup::{workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences};
 mod notes;
 mod pptp;
+mod pptp_diagnostics;
 mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
 mod workspace_lock;
@@ -195,6 +196,8 @@ struct NetworkResolveRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkTcpCheckRequest {
+    #[serde(default)]
+    pptp_profile_id: Option<uuid::Uuid>,
     host: String,
     port: u16,
     timeout_ms: u64,
@@ -203,6 +206,8 @@ struct NetworkTcpCheckRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkPingRequest {
+    #[serde(default)]
+    pptp_profile_id: Option<uuid::Uuid>,
     host: String,
     timeout_ms: u64,
     interval_ms: u64,
@@ -212,6 +217,8 @@ struct NetworkPingRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkMtrRequest {
+    #[serde(default)]
+    pptp_profile_id: Option<uuid::Uuid>,
     host: String,
     timeout_ms: u64,
     max_hops: u8,
@@ -1295,6 +1302,8 @@ fn session_save_remote_desktop(
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkDnsRequest {
+    #[serde(default)]
+    pptp_profile_id: Option<uuid::Uuid>,
     host: String,
     timeout_ms: u64,
     #[serde(default)]
@@ -1304,9 +1313,20 @@ struct NetworkDnsRequest {
 
 #[tauri::command]
 async fn network_dns_lookup(
+    pptp: State<'_, pptp::PptpManager>,
+    vault: State<'_, NativeVault>,
     request: NetworkDnsRequest,
 ) -> Result<conxol_network::DnsLookupResult, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
+    if let Some(id) = request.pptp_profile_id {
+        let server = request.server.as_deref().filter(|s| !s.is_empty()).ok_or("Enter an explicit IPv4 DNS server for PPTP diagnostics.")?;
+        pptp_diagnostics::ipv4(server)?;
+        let connector = pptp.ensure_connected(id, &vault).await?;
+        return tokio::time::timeout(timeout, async {
+            let stream = connector.connect(server, 53).await.map_err(|e|e.to_string())?;
+            conxol_network::lookup_dns_stream(&request.host,request.record_type,server,timeout,stream).await.map_err(|e|e.to_string())
+        }).await.map_err(|_| "PPTP DNS lookup timed out.".to_string())?;
+    }
     conxol_network::lookup_dns(
         &request.host,
         request.record_type,
@@ -1333,9 +1353,16 @@ async fn network_resolve_host(request: NetworkResolveRequest) -> Result<Vec<Stri
 
 #[tauri::command]
 async fn network_check_tcp(
+    pptp: State<'_, pptp::PptpManager>,
+    vault: State<'_, NativeVault>,
     request: NetworkTcpCheckRequest,
 ) -> Result<conxol_network::TcpConnectReport, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
+    if let Some(id) = request.pptp_profile_id {
+        pptp_diagnostics::ipv4(&request.host)?;
+        let connector = pptp.ensure_connected(id, &vault).await?;
+        return pptp_diagnostics::tcp_report(connector, TcpCheckOptions {host:request.host,port:request.port,timeout}).await;
+    }
     check_tcp_report(TcpCheckOptions {
         host: request.host,
         port: request.port,
@@ -1368,36 +1395,58 @@ async fn ssh_inspect_host_key(
 
 #[tauri::command]
 async fn network_scan_start(
+    pptp: State<'_, pptp::PptpManager>,
+    vault: State<'_, NativeVault>,
     app: tauri::AppHandle,
     manager: State<'_, NetworkManager>,
     request: NetworkScanRequest,
 ) -> Result<network::NetworkScanResponse, String> {
+    conxol_network::PortScanOptions {host:request.host.clone(),start_port:request.start_port,end_port:request.end_port,concurrency:request.concurrency,timeout:diagnostic_timeout(request.timeout_ms)?}.validate().map_err(|e|e.to_string())?;
+    let probe = if let Some(id) = request.pptp_profile_id {
+        for host in conxol_network::scan_targets(&request.host).map_err(|e|e.to_string())? { pptp_diagnostics::ipv4(&host)?; }
+        Some(pptp_diagnostics::scan_probe(pptp.ensure_connected(id, &vault).await?))
+    } else {None};
     manager
-        .start_scan(app, request)
+        .start_scan(app, request, probe)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn network_ping_start(
+    pptp: State<'_, pptp::PptpManager>,
+    vault: State<'_, NativeVault>,
     app: tauri::AppHandle,
     manager: State<'_, NetworkManager>,
     request: NetworkPingRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
+    conxol_network::LivePingOptions {host:request.host.clone(),timeout:diagnostic_timeout(request.timeout_ms)?,interval:std::time::Duration::from_millis(request.interval_ms),packet_size:request.packet_size}.validate().map_err(|e|e.to_string())?;
+    if request.pptp_profile_id.is_some() && request.packet_size > 1332 { return Err("PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).".into()); }
+    let connector = if let Some(id) = request.pptp_profile_id {
+        pptp_diagnostics::ipv4(&request.host)?;
+        Some(pptp.ensure_connected(id, &vault).await?)
+    } else {None};
     manager
-        .start_ping(app, request.host, request.timeout_ms, request.interval_ms, request.packet_size)
+        .start_ping(app, request.host, request.timeout_ms, request.interval_ms, request.packet_size, connector)
         .await
         .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 async fn network_mtr_start(
+    pptp: State<'_, pptp::PptpManager>,
+    vault: State<'_, NativeVault>,
     app: tauri::AppHandle,
     manager: State<'_, NetworkManager>,
     request: NetworkMtrRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
+    conxol_network::TracerouteOptions {host:request.host.clone(),timeout:diagnostic_timeout(request.timeout_ms)?,max_hops:request.max_hops}.validate().map_err(|e|e.to_string())?;
+    let connector = if let Some(id) = request.pptp_profile_id {
+        pptp_diagnostics::ipv4(&request.host)?;
+        Some(pptp.ensure_connected(id, &vault).await?)
+    } else {None};
     manager
-        .start_mtr(app, request.host, request.timeout_ms, request.max_hops)
+        .start_mtr(app, request.host, request.timeout_ms, request.max_hops, connector)
         .await
         .map_err(|error| error.to_string())
 }

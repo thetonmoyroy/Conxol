@@ -9,7 +9,7 @@ mod tcp_report;
 pub use tcp_report::{TcpConnectReport, check_tcp_report};
 mod mtr;
 mod ping;
-pub use dns::{DnsLookupResult, DnsRecordType, lookup_dns};
+pub use dns::{DnsLookupResult, DnsRecordType, lookup_dns, lookup_dns_stream};
 pub use mtr::{mtr_live, mtr_report};
 pub use ping::{ping, ping_live};
 
@@ -38,6 +38,8 @@ const MAX_DIAGNOSTIC_OUTPUT_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Error)]
 pub enum NetworkDiagnosticError {
+    #[error("private diagnostic transport: {0}")]
+    PrivateTransport(String),
     #[error("network diagnostic target is invalid")]
     InvalidTarget,
     #[error("port range is invalid or exceeds the bounded diagnostic limit")]
@@ -216,7 +218,7 @@ impl PortScanOptions {
 }
 
 /// Expand a small explicit network without DNS or allocating an unbounded range.
-fn scan_targets(target: &str) -> Result<Vec<String>, NetworkDiagnosticError> {
+pub fn scan_targets(target: &str) -> Result<Vec<String>, NetworkDiagnosticError> {
     let Some((address, prefix)) = target.split_once('/') else {
         validate_host(target)?;
         return Ok(vec![target.to_owned()]);
@@ -289,7 +291,32 @@ pub async fn scan_ports_with_progress<F>(
     options: PortScanOptions,
     protocol: ScanProtocol,
     cancellation: &mut watch::Receiver<bool>,
+    on_progress: F,
+) -> Result<Vec<TcpCheckResult>, NetworkDiagnosticError>
+where
+    F: FnMut(&TcpCheckResult, usize, usize),
+{
+    scan_ports_with_probe(options, protocol, cancellation, on_progress, None).await
+}
+
+pub type PortProbe = std::sync::Arc<
+    dyn Fn(
+            TcpCheckOptions,
+            ScanProtocol,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<TcpCheckResult, NetworkDiagnosticError>>
+                    + Send,
+            >,
+        > + Send
+        + Sync,
+>;
+pub async fn scan_ports_with_probe<F>(
+    options: PortScanOptions,
+    protocol: ScanProtocol,
+    cancellation: &mut watch::Receiver<bool>,
     mut on_progress: F,
+    probe: Option<PortProbe>,
 ) -> Result<Vec<TcpCheckResult>, NetworkDiagnosticError>
 where
     F: FnMut(&TcpCheckResult, usize, usize),
@@ -306,14 +333,28 @@ where
     let mut cancellation_closed = false;
     let total = options.total_checks()?;
 
-    schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
+    schedule_ports(
+        &mut tasks,
+        &options,
+        &targets,
+        protocol,
+        &mut next_check,
+        &probe,
+    );
     while !tasks.is_empty() {
         if cancellation_closed {
             if let Some(result) = tasks.join_next().await {
                 let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                 on_progress(&result, results.len() + 1, total);
                 results.push(result);
-                schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
+                schedule_ports(
+                    &mut tasks,
+                    &options,
+                    &targets,
+                    protocol,
+                    &mut next_check,
+                    &probe,
+                );
             }
             continue;
         }
@@ -335,7 +376,7 @@ where
                     let result = result.map_err(|_| NetworkDiagnosticError::Worker)??;
                     on_progress(&result, results.len() + 1, total);
                     results.push(result);
-                    schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check);
+                    schedule_ports(&mut tasks, &options, &targets, protocol, &mut next_check, &probe);
                 }
             }
         }
@@ -350,6 +391,7 @@ fn schedule_ports(
     targets: &[String],
     protocol: ScanProtocol,
     next_check: &mut usize,
+    probe: &Option<PortProbe>,
 ) {
     let ports = usize::from(options.end_port - options.start_port) + 1;
     while tasks.len() < options.concurrency && *next_check < targets.len() * ports {
@@ -359,7 +401,11 @@ fn schedule_ports(
             timeout: options.timeout,
         };
         *next_check += 1;
+        let probe = probe.clone();
         tasks.spawn(async move {
+            if let Some(probe) = probe {
+                return probe(check, protocol).await;
+            }
             match protocol {
                 ScanProtocol::Tcp => check_tcp(check).await,
                 ScanProtocol::Udp => check_udp(check).await,
@@ -645,6 +691,66 @@ fn validate_host(host: &str) -> Result<(), NetworkDiagnosticError> {
 mod tests {
     use super::*;
     use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn pptp_injected_scan_probe_preserves_cidr_progress_and_cancel() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let count = calls.clone();
+        let probe: PortProbe = Arc::new(move |options, protocol| {
+            let count = count.clone();
+            Box::pin(async move {
+                assert!(matches!(protocol, ScanProtocol::Udp));
+                assert!(options.host.starts_with("192.0.2."));
+                count.fetch_add(1, Ordering::SeqCst);
+                Ok(TcpCheckResult {
+                    host: options.host,
+                    port: options.port,
+                    status: TcpPortStatus::OpenOrFiltered,
+                })
+            })
+        });
+        let options = PortScanOptions {
+            host: "192.0.2.0/31".into(),
+            start_port: 20,
+            end_port: 22,
+            concurrency: 2,
+            timeout: Duration::from_millis(50),
+        };
+        let (_sender, mut cancel) = watch::channel(false);
+        let mut progress = 0;
+        let results = scan_ports_with_probe(
+            options.clone(),
+            ScanProtocol::Udp,
+            &mut cancel,
+            |_, scanned, total| {
+                assert_eq!(total, 6);
+                progress = scanned;
+            },
+            Some(probe.clone()),
+        )
+        .await
+        .unwrap();
+        assert_eq!(results.len(), 6);
+        assert_eq!(progress, 6);
+        assert_eq!(calls.load(Ordering::SeqCst), 6);
+        let (_sender, mut cancel) = watch::channel(true);
+        assert!(matches!(
+            scan_ports_with_probe(
+                options,
+                ScanProtocol::Udp,
+                &mut cancel,
+                |_, _, _| {},
+                Some(probe)
+            )
+            .await,
+            Err(NetworkDiagnosticError::Cancelled)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 6);
+    }
 
     #[test]
     fn diagnostic_host_validation_rejects_process_options_and_edge_whitespace() {

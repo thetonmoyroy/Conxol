@@ -1,7 +1,6 @@
 use conxol_network::{
     LivePingOptions, LivePingResult, NetworkDiagnosticError, PortScanOptions, ScanProtocol,
     TcpCheckResult, TracerouteOptions, TracerouteResult, mtr_live, ping_live,
-    scan_ports_with_progress,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -22,6 +21,8 @@ const SCAN_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct NetworkScanRequest {
+    #[serde(default)]
+    pub pptp_profile_id: Option<Uuid>,
     #[serde(default)]
     pub protocol: ScanProtocol,
     pub host: String,
@@ -115,11 +116,12 @@ impl NetworkManager {
         &self,
         app: AppHandle,
         request: NetworkScanRequest,
+        probe: Option<conxol_network::PortProbe>,
     ) -> Result<NetworkScanResponse, NetworkManagerError> {
         if !(MIN_TIMEOUT_MS..=MAX_TIMEOUT_MS).contains(&request.timeout_ms) {
             return Err(NetworkManagerError::InvalidTimeout);
         }
-        let options = PortScanOptions {
+        let mut options = PortScanOptions {
             host: request.host,
             start_port: request.start_port,
             end_port: request.end_port,
@@ -127,6 +129,7 @@ impl NetworkManager {
             timeout: Duration::from_millis(request.timeout_ms),
         };
         options.validate()?;
+        if probe.is_some() { options.concurrency = options.concurrency.min(16); }
         let total = options.total_checks()?;
         let scan_id = Uuid::new_v4().to_string();
         let (cancel_sender, mut cancellation) = watch::channel(false);
@@ -156,7 +159,7 @@ impl NetworkManager {
                 SCAN_PROGRESS_INTERVAL,
                 Instant::now(),
             );
-            let result = scan_ports_with_progress(
+            let result = conxol_network::scan_ports_with_probe(
                 options,
                 request.protocol,
                 &mut cancellation,
@@ -178,6 +181,7 @@ impl NetworkManager {
                         },
                     );
                 },
+                probe,
             )
             .await;
 
@@ -246,6 +250,7 @@ impl NetworkManager {
         timeout_ms: u64,
         interval_ms: u64,
         packet_size: u16,
+        connector: Option<conxol_pptp::transport::Connector>,
     ) -> Result<NetworkDiagnosticResponse, NetworkManagerError> {
         let options = LivePingOptions {
             interval: Duration::from_millis(interval_ms),
@@ -271,7 +276,7 @@ impl NetworkManager {
         let manager = self.clone();
         let id_for_task = operation_id.clone();
         tauri::async_runtime::spawn(async move {
-            match ping_live(options, &mut cancellation, |snapshot| {
+            let progress = |snapshot| {
                 emit_diagnostic_event(
                     &app,
                     NetworkDiagnosticEvent {
@@ -283,8 +288,11 @@ impl NetworkManager {
                         error: None,
                     },
                 );
-            })
-            .await
+            };
+            let outcome = if let Some(connector) = connector {
+                crate::pptp_diagnostics::ping_live(connector, options, &mut cancellation, progress).await
+            } else { ping_live(options, &mut cancellation, progress).await };
+            match outcome
             {
                 Ok(result) => emit_diagnostic_event(
                     &app,
@@ -331,6 +339,7 @@ impl NetworkManager {
         host: String,
         timeout_ms: u64,
         max_hops: u8,
+        connector: Option<conxol_pptp::transport::Connector>,
     ) -> Result<NetworkDiagnosticResponse, NetworkManagerError> {
         let kind = NetworkDiagnosticKind::Mtr;
         let options = TracerouteOptions {
@@ -356,7 +365,7 @@ impl NetworkManager {
         let manager = self.clone();
         let id_for_task = operation_id.clone();
         tauri::async_runtime::spawn(async move {
-            let result = mtr_live(options, &mut cancellation, |snapshot| {
+            let progress = |snapshot| {
                 emit_diagnostic_event(
                     &app,
                     NetworkDiagnosticEvent {
@@ -368,8 +377,10 @@ impl NetworkManager {
                         error: None,
                     },
                 );
-            })
-            .await;
+            };
+            let result = if let Some(connector) = connector {
+                crate::pptp_diagnostics::mtr_live(connector, options, &mut cancellation, progress).await
+            } else { mtr_live(options, &mut cancellation, progress).await };
             match result {
                 Ok(result) => emit_diagnostic_event(
                     &app,

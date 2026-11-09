@@ -55,6 +55,8 @@ impl Device for IpDevice {
     }
 }
 pub struct Stack {
+    pub local_ip: Ipv4Addr,
+    pub mtu: usize,
     pub interface: Interface,
     pub sockets: SocketSet<'static>,
     device: IpDevice,
@@ -82,6 +84,8 @@ impl Stack {
         let mut sockets = SocketSet::new(vec![]);
         let icmp = sockets.add(icmp);
         Self {
+            local_ip: local,
+            mtu,
             interface,
             sockets,
             device,

@@ -326,3 +326,43 @@ Auto-connect regressions in `cargo xtask test-pptp` use an injected synthetic
 worker: saved-password retrieval, sharing one pending/connected worker, explicit
 cancellation, shutdown, missing-password refusal and negotiation failure. No UAC
 or real networking is used for these regressions.
+
+
+## Network diagnostics over PPTP
+
+Network diagnostics has a searchable Network route selector, shared with SSH
+and Telnet attachment settings. Select by profile name/folder; status labels are
+omitted. Direct connection remains the default. Refresh PPTP reloads the profile
+list. Changing routes clears the prior results, and route changes are disabled
+while a tool is active. Each displayed/exported report identifies its route.
+
+All six tools support the selected private tunnel and auto-connect it using its
+saved PIN-vault password. Ping, TCP check and SSH key inspection require literal
+IPv4 destinations. Port scan accepts IPv4/CIDR within the existing 256-host,
+4096-port and 65536-check bounds, with at most 16 workers per private scan to
+leave room for attached sessions. TCP refusal is distinct from timeout; UDP
+silence remains open-or-filtered and only confirmed open ports are listed.
+
+DNS accepts domain names and record types, requires an explicit IPv4 resolver,
+and uses length-prefixed DNS/TCP over the private transport. It validates reply
+IDs/questions and bounds message/output sizes; it never consults system DNS for
+a selected PPTP route. A resolver that blocks TCP/53 cannot service this mode.
+The ordinary direct DNS mode retains its native UDP and truncated-response TCP
+fallback.
+
+Ping and MTR use bounded in-memory raw IPv4 sockets in the existing smoltcp
+stack. They create no host raw sockets, adapters or routes. Echo IDs, sequences,
+random payloads, checksums, endpoints and quoted errors are correlated before
+accepting replies. MTR varies the inner TTL and reports cumulative per-hop
+latency/loss; this observes hops beyond the PPTP endpoint, not the outer Internet
+path to that endpoint. Devices may suppress ICMP time-exceeded/echo replies.
+Ping payloads must fit the negotiated MTU, at most 1332 bytes; fragmentation is
+not enabled. Tunnel loss fails the tool without direct-network fallback, and
+Stop cancels queued/pending work. Stopping a tool leaves the shared tunnel alive.
+
+Verification: `cargo xtask test-pptp` covers encrypted in-memory echo/UDP probes,
+closed TCP, correlated TTL errors, malformed packets and cancellation;
+`cargo xtask test-network` covers supplied-stream DNS validation and injected
+CIDR scan scheduling/cancellation plus direct-network loopback regressions;
+`cargo xtask test-pptp-diagnostics` covers native route failure/cancellation.
+All are synthetic and do not use a live PPTP endpoint or real credentials.

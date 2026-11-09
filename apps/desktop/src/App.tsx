@@ -1510,6 +1510,7 @@ function TerminalLayoutView({
   terminals,
   renderPane,
   onFocus,
+  dropTarget,
   onStartResize,
   onAdjustResize,
   onResetResize,
@@ -1517,6 +1518,7 @@ function TerminalLayoutView({
   node: TerminalLayoutNode;
   terminals: WorkspaceTerminal[];
   renderPane: (terminal: WorkspaceTerminal) => ReactNode;
+  dropTarget?: string | null;
   onFocus: (terminalId: string) => void;
   onStartResize: (event: ReactMouseEvent<HTMLDivElement>, path: SplitPath, direction: Exclude<SplitDirection, "none">) => void;
   onAdjustResize: (event: ReactKeyboardEvent<HTMLDivElement>, path: SplitPath, direction: Exclude<SplitDirection, "none">) => void;
@@ -1574,7 +1576,7 @@ function TerminalLayoutView({
         width: `${bounds.width}%`,
         height: `${bounds.height}%`,
       } : undefined;
-      return <div key={`pane-${terminal.id}`} className={`terminal-pane terminal-layout-pane ${bounds ? "active" : "terminal-pane-hidden"}`} style={style} aria-hidden={!bounds} onMouseDown={() => onFocus(terminal.id)} onFocusCapture={() => onFocus(terminal.id)}>{renderPane(terminal)}</div>;
+      return <div key={`pane-${terminal.id}`} data-split-drop-pane={bounds ? terminal.id : undefined} className={`terminal-pane terminal-layout-pane ${bounds ? "active" : "terminal-pane-hidden"}`} style={style} aria-hidden={!bounds} onMouseDown={() => onFocus(terminal.id)} onFocusCapture={() => onFocus(terminal.id)}>{renderPane(terminal)}{dropTarget === terminal.id && <div className="session-split-drop-preview">Open session in right split</div>}</div>;
     })}
     {node.kind === "split" && <div className="terminal-layout-guides">{renderGuides(node, [])}</div>}
   </div>;
@@ -1706,6 +1708,7 @@ function App() {
   const folderMoveInProgress = useRef(false);
   const folderDrag = useRef<{ folder: string; x: number; y: number; active: boolean } | null>(null);
   const suppressFolderClick = useRef(false);
+  const [splitDropTarget, setSplitDropTarget] = useState<string | null>(null);
   const [sessionDropTarget, setSessionDropTarget] = useState<string | null>(null);
   const createSessionFolder = async (parent = "") => {
     const name = (await promptText("New session folder (use / for nesting)", parent ? `${parent}/` : ""))?.trim();
@@ -1776,6 +1779,7 @@ function App() {
   const remoteDirectoryRequestRef = useRef(0);
   const remoteFileOpenRequestRef = useRef(0);
   const remoteSessionIdRef = useRef<string | null>(null);
+  const [networkPptpProfileId, setNetworkPptpProfileId] = useState("");
   const [networkHost, setNetworkHost] = useState("");
   const [networkPort, setNetworkPort] = useState("22");
   const [networkTcpPort, setNetworkTcpPort] = useState("80");
@@ -1925,7 +1929,7 @@ function App() {
     return () => window.removeEventListener("conxol:workspace-locked", stopActivity);
   }, []);
 
-  const startNewTerminal = useCallback((target: LocalTerminalTarget = { type: "default" }, label?: string, shortcutDeviceId?: string) => {
+  const startNewTerminal = useCallback((target: LocalTerminalTarget = { type: "default" }, label?: string, shortcutDeviceId?: string, branchParentId?: string) => {
     const shellLabel = target.type === "default" && target.shell && target.shell !== "default"
       ? target.shell === "powershell" ? "PowerShell" : target.shell
       : "local shell";
@@ -1936,7 +1940,7 @@ function App() {
     });
     setTerminalTabs((current) => [...current, terminal]);
     setActiveTerminalId(terminal.id);
-    setTerminalLayout({ kind: "pane", terminalId: terminal.id });
+    setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
     setConnectionError(null);
     setSessionNotice(null);
     setActiveView("terminal");
@@ -2869,7 +2873,7 @@ function App() {
     });
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
-  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string) => {
+  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string, branchParentId?: string) => {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2890,7 +2894,7 @@ function App() {
       });
       setTerminalTabs((current) => [...current, terminal]);
       setActiveTerminalId(terminal.id);
-      setTerminalLayout({ kind: "pane", terminalId: terminal.id });
+      setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
       setActiveView("terminal");
       setQuickConnectOpen(false);
       if (offerSave) {
@@ -2914,7 +2918,7 @@ function App() {
     }
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
-  const connectSerial = useCallback(async (request: SerialConnectRequest, shortcutDeviceId?: string) => {
+  const connectSerial = useCallback(async (request: SerialConnectRequest, shortcutDeviceId?: string, branchParentId?: string) => {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2933,7 +2937,7 @@ function App() {
       });
       setTerminalTabs((current) => [...current, terminal]);
       setActiveTerminalId(terminal.id);
-      setTerminalLayout({ kind: "pane", terminalId: terminal.id });
+      setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
       setActiveView("terminal");
       setQuickConnectOpen(false);
       requestTerminalFocus(terminal.id);
@@ -2943,7 +2947,7 @@ function App() {
     }
   }, [recordAudit, requestTerminalFocus, setQuickConnectOpen]);
 
-  const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string) => {
+  const connectRemoteDesktop = useCallback(async (request: RemoteDesktopConnectRequest, offerSave = true, displayName?: string, branchParentId?: string) => {
     if (IS_ANDROID) {
       setConnectionError("Remote desktop connections are not supported on Android.");
       return;
@@ -2963,7 +2967,7 @@ function App() {
     });
     setTerminalTabs((current) => [...current, terminal]);
     setActiveTerminalId(terminal.id);
-    setTerminalLayout({ kind: "pane", terminalId: terminal.id });
+    setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
     setActiveView("terminal");
     setQuickConnectOpen(false);
     if (offerSave && IS_TAURI) {
@@ -3057,7 +3061,7 @@ function App() {
       .catch(() => undefined);
   }, [refreshSavedSessions]);
 
-  const openSavedLocalSession = useCallback(async (session: SavedSession) => {
+  const openSavedLocalSession = useCallback(async (session: SavedSession, branchParentId?: string) => {
     const startupCommand = session.startup_command?.trim();
     const macroAtApproval = macroRunRef.current;
     const stillAllowed = () => !macroAtApproval || (!macroCancelRef.current && macroRunRef.current === macroAtApproval);
@@ -3069,7 +3073,7 @@ function App() {
       cwd: session.startup_directory?.trim() ? session.startup_directory : undefined,
       environment: session.environment?.length ? session.environment : undefined,
       startupCommand: startupCommand || undefined,
-    }, session.name, session.id);
+    }, session.name, session.id, branchParentId);
   }, [recordAudit, startNewTerminal, touchSavedSession]);
 
   const saveEditedSession = useCallback(async (session: SavedSession) => {
@@ -3185,9 +3189,9 @@ function App() {
     }
   }, [editingSession?.id, refreshSavedSessions]);
 
-  const connectSavedSessionRequest = useCallback(async (session: SavedSession) => {
+  const connectSavedSessionRequest = useCallback(async (session: SavedSession, branchParentId?: string) => {
     if (session.protocol === "LOCAL") {
-      return openSavedLocalSession(session);
+      return openSavedLocalSession(session, branchParentId);
     }
     recordAudit("sessionOpened", session.protocol, session.id);
     touchSavedSession(session.id);
@@ -3207,7 +3211,7 @@ function App() {
         encoding: profile.encoding,
         columns: profile.columns,
         rows: profile.rows,
-      }, false, session.name, session.id);
+      }, false, session.name, session.id, branchParentId);
     }
     if (session.protocol === "SERIAL") {
       const profile = session.serial_profile;
@@ -3223,7 +3227,7 @@ function App() {
         parity: profile.parity,
         flowControl: profile.flow_control,
         lineEnding: profile.line_ending,
-      }, session.id);
+      }, session.id, branchParentId);
     }
     if (session.protocol === "RDP" || session.protocol === "VNC") {
       const profile = session.remote_desktop_profile;
@@ -3256,14 +3260,14 @@ function App() {
         allowInsecureVnc: profile.allow_insecure_vnc ?? false,
         reconnectEnabled: profile.reconnect_enabled ?? true,
         reconnectAttempts: profile.reconnect_attempts ?? 3,
-      }, false, session.name);
+      }, false, session.name, branchParentId);
     }
     const request = requestFromSavedSession(session, savedSessions);
     if (!request) {
       setConnectionError("This SSH profile has incomplete authentication or an unresolved, cyclic, or oversized jump chain (maximum 8 hosts).");
       return;
     }
-    return connectSsh(request, false, session.name, undefined, session.id);
+    return connectSsh(request, false, session.name, undefined, session.id, branchParentId);
   }, [connectRemoteDesktop, connectSerial, connectSsh, connectTelnet, openSavedLocalSession, recordAudit, savedSessions, touchSavedSession]);
 
   const branchingSessions = useRef(new Set<string>());
@@ -3311,12 +3315,12 @@ function App() {
     }
   }, [connectSsh, recordAudit, savedSessions]);
 
-  const connectSavedSession = useCallback(async (session: SavedSession) => {
-    if (session.protocol === "LOCAL") return openSavedLocalSession(session);
+  const connectSavedSession = useCallback(async (session: SavedSession, branchParentId?: string) => {
+    if (session.protocol === "LOCAL") return openSavedLocalSession(session, branchParentId);
     await savedSessionAttempt.current.run(async () => {
       setPendingSavedSession({ id: session.id, name: session.name });
       try {
-        await connectSavedSessionRequest(session);
+        await connectSavedSessionRequest(session, branchParentId);
       } finally {
         setPendingSavedSession(null);
       }
@@ -3961,7 +3965,7 @@ function App() {
     setNetworkStatus("running");
     setNetworkError(null);
     try {
-      const report = await invoke<{ tool: string; output: string; elapsedMs: number }>("network_dns_lookup", { request: { host, timeoutMs, recordType: dnsRecordType, server: dnsServer.trim() || null } });
+      const report = await invoke<{ tool: string; output: string; elapsedMs: number }>("network_dns_lookup", { request: { pptpProfileId: networkPptpProfileId || undefined, host, timeoutMs, recordType: dnsRecordType, server: dnsServer.trim() || null } });
       setDnsReport(report);
       setNetworkStatus("ready");
     } catch (error) {
@@ -3969,7 +3973,7 @@ function App() {
       setNetworkError(String(error));
       setNetworkStatus("error");
     }
-  }, [networkHost, networkTimeout, dnsRecordType, dnsServer]);
+  }, [networkPptpProfileId, networkHost, networkTimeout, dnsRecordType, dnsServer]);
 
   const checkNetworkTcp = useCallback(async () => {
     setNetworkResult(null);
@@ -3999,7 +4003,7 @@ function App() {
     setNetworkStatus("running");
     setNetworkError(null);
     try {
-      const result = await invoke<TcpConnectReport>("network_check_tcp", { request: { host, port, timeoutMs } });
+      const result = await invoke<TcpConnectReport>("network_check_tcp", { request: { pptpProfileId: networkPptpProfileId || undefined, host, port, timeoutMs } });
       setNetworkResult(result);
       setNetworkStatus("ready");
     } catch (error) {
@@ -4007,7 +4011,7 @@ function App() {
       setNetworkError(String(error));
       setNetworkStatus("error");
     }
-  }, [networkHost, networkTcpPort, networkTimeout]);
+  }, [networkPptpProfileId, networkHost, networkTcpPort, networkTimeout]);
 
   const inspectNetworkHostKey = useCallback(async () => {
     const host = networkHost.trim();
@@ -4037,7 +4041,7 @@ function App() {
     setNetworkFingerprint(null);
     setNetworkError(null);
     try {
-      const result = await invoke<SshHostKeyInspection>("ssh_inspect_host_key", { request: { host, port, timeoutMs } });
+      const result = await invoke<SshHostKeyInspection>("ssh_inspect_host_key", { request: { pptpProfileId: networkPptpProfileId || undefined, host, port, timeoutMs } });
       setNetworkFingerprint(result);
       setNetworkStatus("ready");
     } catch (error) {
@@ -4045,7 +4049,7 @@ function App() {
       setNetworkStatus("error");
       setNetworkError(String(error));
     }
-  }, [networkHost, networkPort, networkTimeout]);
+  }, [networkPptpProfileId, networkHost, networkPort, networkTimeout]);
 
   const cancelNetworkDiagnosticId = useCallback(async (operationId: string) => {
     try {
@@ -4089,7 +4093,7 @@ function App() {
     setNetworkPingResult(null);
     setNetworkError(null);
     try {
-      const response = await invoke<{ operationId: string }>("network_ping_start", { request: { host, timeoutMs, intervalMs, packetSize } });
+      const response = await invoke<{ operationId: string }>("network_ping_start", { request: { pptpProfileId: networkPptpProfileId || undefined, host, timeoutMs, intervalMs, packetSize } });
       if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
         const cancelId = takePendingNetworkDiagnosticCancel(run);
         if (cancelId) void cancelNetworkDiagnosticId(cancelId);
@@ -4100,7 +4104,7 @@ function App() {
         setNetworkError(String(error));
       }
     }
-  }, [cancelNetworkDiagnosticId, networkHost, networkTimeout, pingInterval, pingPacketSize]);
+  }, [networkPptpProfileId, cancelNetworkDiagnosticId, networkHost, networkTimeout, pingInterval, pingPacketSize]);
 
   const startNetworkMtr = useCallback(async () => {
     const host = networkHost.trim();
@@ -4131,7 +4135,7 @@ function App() {
     setNetworkMtrResult(null);
     setNetworkError(null);
     try {
-      const response = await invoke<{ operationId: string }>("network_mtr_start", { request: { host, timeoutMs: 60000, maxHops } });
+      const response = await invoke<{ operationId: string }>("network_mtr_start", { request: { pptpProfileId: networkPptpProfileId || undefined, host, timeoutMs: 60000, maxHops } });
       if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
         const cancelId = takePendingNetworkDiagnosticCancel(run);
         if (cancelId) void cancelNetworkDiagnosticId(cancelId);
@@ -4142,7 +4146,7 @@ function App() {
         setNetworkError(String(error));
       }
     }
-  }, [cancelNetworkDiagnosticId, networkHost, networkTimeout, networkTraceMaxHops]);
+  }, [networkPptpProfileId, cancelNetworkDiagnosticId, networkHost, networkTimeout, networkTraceMaxHops]);
 
   const cancelNetworkDiagnostic = useCallback(async () => {
     if (!IS_TAURI) return;
@@ -4190,7 +4194,7 @@ function App() {
     setNetworkError(null);
     try {
       const response = await invoke<{ scanId: string }>("network_scan_start", {
-        request: { host, startPort, endPort, concurrency, timeoutMs, protocol: networkScanProtocol },
+        request: { pptpProfileId: networkPptpProfileId || undefined, host, startPort, endPort, concurrency, timeoutMs, protocol: networkScanProtocol },
       });
       if (!networkScanIdRef.current) {
         networkScanIdRef.current = response.scanId;
@@ -4202,7 +4206,7 @@ function App() {
       setNetworkScanStatus("failed");
       setNetworkError(String(error));
     }
-  }, [networkHost, networkScanConcurrency, networkScanEnd, networkScanStart, networkTimeout, networkScanProtocol]);
+  }, [networkPptpProfileId, networkHost, networkScanConcurrency, networkScanEnd, networkScanStart, networkTimeout, networkScanProtocol]);
 
   const cancelNetworkScan = useCallback(async () => {
     const scanId = networkScanIdRef.current ?? networkScanId;
@@ -4557,7 +4561,13 @@ function App() {
     setSidebarMode(mode);
   }
   function renderSidebarSession(session: SessionListItem) {
-    return (<SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); }} onDragMove={setSessionDropTarget} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
+    return (<SessionRow key={session.id ?? session.name} {...session} appearance={session.id ? hostStyles[session.id] : undefined} onCustomize={session.id ? () => { const saved = savedSessions.find(item => item.id === session.id); if (saved) setCustomizingHost(saved); } : undefined} onDragStart={session.id ? () => draggedSessionId.current = session.id! : undefined} onDragEnd={() => { draggedSessionId.current = null; setSessionDropTarget(null); setSplitDropTarget(null); }} onDragMove={(folder, x, y) => {
+      setSessionDropTarget(folder);
+      setSplitDropTarget(document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-split-drop-pane]")?.dataset.splitDropPane ?? (document.elementFromPoint(x, y)?.closest("[data-session-workspace]") ? "new-session" : null));
+    }} onTerminalDrop={parentId => {
+      const saved = savedSessions.find(item => item.id === draggedSessionId.current);
+      if (saved && !isWorkspaceLocked()) void connectSavedSession(saved, parentId === "new-session" ? undefined : parentId);
+    }} onDrop={folder => void dropSessionInFolder(folder)} connecting={pendingSavedSession?.id === session.id} disabled={session.type !== "LOCAL" && pendingSavedSession !== null} onSelect={() => {
                     const saved = savedSessions.find((item) => item.id === session.id);
                     if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); }
                   }} onEdit={session.id ? () => {
@@ -4761,7 +4771,8 @@ function App() {
           onLostPointerCapture={() => { sidebarDrag.current = null; }} onPointerCancel={() => { sidebarDrag.current = null; }}
           onDoubleClick={() => setSidebarSize(DEFAULT_SIDEBAR_WIDTH)}
           onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setSidebarSize((width) => sidebarWidth(width + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 50 : 10), window.innerWidth)); } else if (event.key === "Home") { event.preventDefault(); setSidebarSize(DEFAULT_SIDEBAR_WIDTH); } }} />}
-        <section className="workspace">
+        <section className="workspace" data-session-workspace="true">
+          {splitDropTarget === "new-session" && <div className="session-new-drop-preview">Drop to start a new session</div>}
           {!sidebarOpen && <button className="floating-sidebar-button" onClick={() => setSidebarOpen(true)} aria-label="Expand sidebar"><PanelLeftClose size={16} /></button>}
           <div className="workspace-heading">
             <div>
@@ -4826,7 +4837,7 @@ function App() {
                   {macroRecording && <div className="macro-recording-banner" role="alert"><Radio size={15} /><div><strong>RECORDING INPUT · {macroRecording.terminalLabel}</strong><span>Only terminal input is captured locally. Do not type passwords, tokens, or private keys.</span></div><button type="button" className="danger-button" onClick={stopMacroRecording}><Square size={13} /> Stop recording</button></div>}
                   {broadcastEnabled && <div className="broadcast-banner" role="alert"><ShieldAlert size={15} /><div><strong>BROADCAST INPUT ACTIVE</strong><span>{broadcastTargetIds.length} explicitly selected terminal{broadcastTargetIds.length === 1 ? "" : "s"} · every keystroke is fanned out</span></div><button type="button" className="danger-button" onClick={() => { setBroadcastEnabled(false); setBroadcastOpen(false); setSessionNotice("Broadcast mode disabled. No further input will fan out."); }}><Square size={13} /> Emergency disable <kbd>Esc</kbd></button></div>}
                   {macroRun && <div className="macro-run-banner" role="status"><LoaderCircle className="spin" size={15} /><div><strong>MACRO RUNNING · {macroRun.title}</strong><span>Step {macroRun.step}/{macroRun.total} · {macroRun.targets.join(", ")}</span></div><button type="button" className="danger-button" onClick={cancelMacro}><Square size={13} /> Cancel macro <kbd>Esc</kbd></button></div>}
-                  <div className={`terminal-frame terminal-tabs-frame ${terminalLayout.kind === "split" ? "terminal-frame-has-layout" : "terminal-frame-single"}`}><TerminalLayoutView node={terminalLayout} terminals={terminalTabs} renderPane={renderTerminalPane} onFocus={setActiveTerminalId} onStartResize={beginSplitResize} onAdjustResize={adjustSplitRatio} onResetResize={resetSplitRatio} /></div>
+                  <div className={`terminal-frame terminal-tabs-frame ${terminalLayout.kind === "split" ? "terminal-frame-has-layout" : "terminal-frame-single"}`}><TerminalLayoutView node={terminalLayout} terminals={terminalTabs} renderPane={renderTerminalPane} onFocus={setActiveTerminalId} dropTarget={splitDropTarget} onStartResize={beginSplitResize} onAdjustResize={adjustSplitRatio} onResetResize={resetSplitRatio} /></div>
                   {IS_ANDROID && <div className="android-terminal-keys" role="group" aria-label="Terminal keys">
                     {[["←", "D"], ["↓", "B"], ["↑", "A"], ["→", "C"], ["Tab", "\t"]].map(([label, key]) => <button
                       key={label} type="button" aria-label={label === "Tab" ? "Tab" : `Arrow ${key === "D" ? "left" : key === "B" ? "down" : key === "A" ? "up" : "right"}`}
@@ -4905,7 +4916,7 @@ function App() {
         setDiagnosticsOpen(false);
         requestTerminalFocus(selectedTerminalId);
       }}>
-        <NetworkDiagnosticsView pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
+        <NetworkDiagnosticsView pptpProfileId={networkPptpProfileId} onPptpProfileChange={value => { setNetworkPptpProfileId(value); setDnsReport(null); setNetworkResult(null); setNetworkFingerprint(null); setNetworkPingResult(null); setNetworkMtrResult(null); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkDiagnosticStatus("idle"); setNetworkStatus("idle"); setNetworkError(null); }} pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
       </FloatingDiagnostics>
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
       {helpOpen && <HelpModal mode="help" onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
@@ -5076,13 +5087,13 @@ function SessionFolderMenu({ folder, x, y, disabled, onClose, onDelete, onCustom
   </div>;
 }
 
-function SessionRow({ appearance, onCustomize, name, detail, type, active, favorite, connecting = false, disabled = false, onSelect, onEdit, onDelete, onToggleFavorite, onDragStart, onDragEnd, onDragMove, onDrop }: SessionListItem & { appearance?: FolderStyle; onCustomize?: () => void; connecting?: boolean; disabled?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragMove?: (folder: string | null) => void; onDrop?: (folder: string) => void; onSelect: () => void; onEdit?: () => void; onDelete?: () => void; onToggleFavorite: () => void }) {
+function SessionRow({ appearance, onCustomize, name, detail, type, active, favorite, connecting = false, disabled = false, onSelect, onEdit, onDelete, onToggleFavorite, onDragStart, onDragEnd, onDragMove, onTerminalDrop, onDrop }: SessionListItem & { appearance?: FolderStyle; onCustomize?: () => void; connecting?: boolean; disabled?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragMove?: (folder: string | null, x: number, y: number) => void; onTerminalDrop?: (parentId: string) => void; onDrop?: (folder: string) => void; onSelect: () => void; onEdit?: () => void; onDelete?: () => void; onToggleFavorite: () => void }) {
   const drag = useRef<{ x: number; y: number; active: boolean } | null>(null);
   const suppressClick = useRef(false);
   const folderAt = (x: number, y: number) => document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-session-folder]")?.dataset.sessionFolder ?? null;
   return <div className={`session-row ${active ? "active" : ""}`} data-draggable={!!onDragStart}
     onPointerDown={event => {
-      if (!onDragStart || event.button !== 0 || (event.target as HTMLElement).closest(".session-row-actions")) return;
+      if (disabled || !onDragStart || event.button !== 0 || (event.target as HTMLElement).closest(".session-row-actions")) return;
       suppressClick.current = false;
       drag.current = { x: event.clientX, y: event.clientY, active: false };
     }}
@@ -5094,19 +5105,23 @@ function SessionRow({ appearance, onCustomize, name, detail, type, active, favor
         event.currentTarget.setPointerCapture(event.pointerId);
         onDragStart?.();
       }
-      if (current.active) { event.preventDefault(); onDragMove?.(folderAt(event.clientX, event.clientY)); }
+      if (current.active) { event.preventDefault(); onDragMove?.(folderAt(event.clientX, event.clientY), event.clientX, event.clientY); }
     }}
     onPointerUp={event => {
       if (drag.current?.active) {
         suppressClick.current = true;
         const folder = folderAt(event.clientX, event.clientY);
-        if (folder !== null) onDrop?.(folder);
+        const pane = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>("[data-split-drop-pane]")?.dataset.splitDropPane;
+        if (pane) onTerminalDrop?.(pane);
+        else if (document.elementFromPoint(event.clientX, event.clientY)?.closest("[data-session-workspace]")) onTerminalDrop?.("new-session");
+        else if (folder !== null) onDrop?.(folder);
         onDragEnd?.();
         if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
       }
       drag.current = null;
     }}
     onPointerCancel={() => { drag.current = null; onDragEnd?.(); }}
+    onLostPointerCapture={() => { drag.current = null; onDragEnd?.(); }}
     onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}><button className="session-row-main" title={`${name} · ${detail}${onEdit ? " · Right-click or F2 to rename and organize" : ""}`} onContextMenu={onEdit ? event => { event.preventDefault(); onEdit(); } : undefined} onKeyDown={event => { if (event.key === "F2" && onEdit) { event.preventDefault(); onEdit(); } }} disabled={disabled} aria-busy={connecting} onClick={onSelect}><span className={`session-icon ${type === "LOCAL" ? "local" : "remote"}`}>{appearance ? <SessionFolderIcon appearance={appearance} /> : type === "LOCAL" ? <TerminalIcon size={14} /> : <Server size={14} />}</span><span className="session-copy"><strong>{name}</strong><small>{detail}</small></span><span className={`session-type ${type === "LOCAL" ? "local-type" : ""}`}>{type}</span></button><SessionRowActions name={name} favorite={favorite} onCustomize={onCustomize} onEdit={onEdit} onDelete={onDelete} onToggleFavorite={onToggleFavorite} /></div>;
 }
 
@@ -5402,7 +5417,9 @@ function MonitorMetric({ label, value, detail }: { label: string; value: string;
   return <article className="remote-monitor-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function NetworkDiagnosticsView({ tcpPort, onTcpPortChange, pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, onTcpPortChange, pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+  pptpProfileId: string;
+  onPptpProfileChange: (id: string) => void;
   pingInterval: string;
   pingPacketSize: string;
   onPingIntervalChange: (value: string) => void;
@@ -5468,6 +5485,7 @@ function NetworkDiagnosticsView({ tcpPort, onTcpPortChange, pingInterval, pingPa
   const label = tools.find(item => item.id === tool)!.label;
   const selectedStatus = tool === "scan" ? scanStatus : ["ping", "mtr"].includes(tool) ? diagnosticKind === tool ? diagnosticStatus : "idle" : status;
   const lines: string[] = [];
+  lines.push(pptpProfileId ? "Route: private PPTP tunnel" : "Route: direct network", "");
   if (tool === "scan") {
     lines.push(`PORT SCAN  /  ${scanProtocol.toUpperCase()}`, "");
     if (scanStatus !== "idle" || scanResults.length) {
@@ -5532,6 +5550,7 @@ function NetworkDiagnosticsView({ tcpPort, onTcpPortChange, pingInterval, pingPa
   };
   return <section className="diagnostics-cli" aria-label="Network diagnostics">
     <nav className="diagnostics-cli-tools" aria-label="Diagnostic tool">{tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} disabled={busy && item.id !== tool} onClick={() => { setTool(item.id); setCopyNotice(""); setExportNotice(""); setFollow(true); }}>{item.label}</button>)}</nav>
+    <div className="diagnostics-cli-controls diagnostics-pptp-route"><PptpAttachment diagnostics value={pptpProfileId} onChange={onPptpProfileChange} disabled={busy} /></div>
     <form className="diagnostics-cli-controls" onSubmit={event => { event.preventDefault(); if (!busy) run(); }}>
       <label className="diagnostics-cli-host">Target<input required value={host} disabled={busy} onChange={event => onHostChange(event.target.value)} placeholder={tool === "scan" ? "IP, CIDR (192.0.2.0/24), or hostname" : "Hostname or IP address"} /></label>
       {tool === "scan" && <>
@@ -5542,12 +5561,12 @@ function NetworkDiagnosticsView({ tcpPort, onTcpPortChange, pingInterval, pingPa
       </>}
       {tool === "dns" && <>
         <label>Record<select value={dnsRecordType} disabled={busy} onChange={event => onDnsRecordTypeChange(event.target.value)}>{["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA", "PTR", "SRV", "CAA"].map(type => <option key={type}>{type}</option>)}</select></label>
-        <label className="diagnostics-dns-server">DNS server<input value={dnsServer} disabled={busy} onChange={event => onDnsServerChange(event.target.value)} placeholder="System default" title="Optional IPv4 or IPv6 resolver address" /></label>
+        <label className="diagnostics-dns-server">DNS server<input value={dnsServer} disabled={busy} onChange={event => onDnsServerChange(event.target.value)} placeholder={pptpProfileId ? "Required IPv4 resolver" : "System default"} required={!!pptpProfileId} title="Explicit IPv4 resolver required when using PPTP" /></label>
       </>}
       {(tool === "tcp" || tool === "ssh") && <label>Port<input type="number" min="1" max="65535" required value={tool === "tcp" ? tcpPort : port} disabled={busy} onChange={event => (tool === "tcp" ? onTcpPortChange : onPortChange)(event.target.value)} /></label>}
       {tool === "ping" && <>
         <label>Interval (ms)<input type="number" min="200" max="60000" required value={pingInterval} disabled={busy} onChange={event => onPingIntervalChange(event.target.value)} /></label>
-        <label>Packet (bytes)<input type="number" min="0" max="65500" required value={pingPacketSize} disabled={busy} onChange={event => onPingPacketSizeChange(event.target.value)} title="ICMP payload size, excluding headers" /></label>
+        <label>Packet (bytes)<input type="number" min="0" max={pptpProfileId ? "1332" : "65500"} required value={pingPacketSize} disabled={busy} onChange={event => onPingPacketSizeChange(event.target.value)} title="ICMP payload size, excluding headers" /></label>
       </>}
       {(tool === "mtr") && <label>Max hops<input type="number" min="1" max="32" required value={traceMaxHops} disabled={busy} onChange={event => onTraceMaxHopsChange(event.target.value)} /></label>}
       {tool !== "mtr" && <label>Timeout (ms)<input type="number" min="50" max="60000" required value={timeout} disabled={busy} onChange={event => onTimeoutChange(event.target.value)} /></label>}
@@ -6922,7 +6941,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     </label>
                     <small className="quick-connect-wide">Leave blank to log in manually. Telnet sends credentials unencrypted.</small>
                   </>}
-                  <details className="quick-connect-wide" open={!!pptpProfileId}>
+                  <details className="quick-connect-wide session-network-options" open={!!pptpProfileId}>
                     <summary>Network</summary>
                     <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
                   </details>

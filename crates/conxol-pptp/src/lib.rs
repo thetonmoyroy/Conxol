@@ -13,3 +13,5 @@ mod mppe;
 pub mod ppp;
 pub mod stack;
 pub mod transport;
+
+pub mod diagnostic;
