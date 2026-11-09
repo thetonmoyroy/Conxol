@@ -3,7 +3,8 @@
 Conxol uses Tauri Android with the existing React interface and native Rust
 SSH/SFTP, Telnet, networking, session storage, and workspace PIN commands.
 The desktop binary calls the same library entry point as the Android shell.
-The version remains 0.1.60; this is an initial preview, not a Play Store release.
+Android preview 1 uses version name `0.1.60-android-preview.1` and version code
+1061. The desktop version remains 0.1.60. This is not a Play Store release.
 
 ## Build on Windows
 
@@ -22,6 +23,25 @@ x86 Android emulator. Android builds use `target/android` to avoid locking the
 desktop development build. They skip desktop helper packaging and resources.
 The APK requires Android 7/API 24 or newer. It is intended for local testing;
 production signing and Play Store publication are separate steps.
+
+## Signed preview releases
+
+```powershell
+./tools/build-android.ps1 -Release
+```
+
+This builds an optimized, non-debuggable APK and signs it with the persistent
+Conxol Android preview key. The encrypted PKCS#12 keystore is kept outside Git
+at `%LOCALAPPDATA%/Conxol/signing/android-preview/conxol-android-preview.p12`.
+Its randomly generated password is stored alongside it using Windows DPAPI,
+bound to the signing Windows account. The directory grants access only to that
+account and SYSTEM. Keys and passwords are never published. Back up the signing
+material securely before moving to another machine; DPAPI files alone cannot
+be decrypted under a different Windows account.
+
+An earlier debug-signed APK cannot be upgraded directly to this release key.
+Android requires uninstalling that debug build first, which removes its local
+app data. Subsequent previews signed with this key can update in place.
 
 ## Current limits
 

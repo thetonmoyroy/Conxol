@@ -29,8 +29,11 @@ Conxol brings **SSH, SFTP/SCP, serial consoles, SSH tunnels and network diagnost
 | **macOS · Intel** | x64 | [Download Intel DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg) |
 | **Linux · Debian / Ubuntu** | x64 | [Download DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb) |
 | **Linux · AppImage** | x64 portable | [Download AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage) |
+| **Android preview · ARM64** | Signed APK · Android 7+ | [Download preview APK](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60-android-preview.1/Conxol-0.1.60-android-preview.1-aarch64.apk) |
 
 [Release notes & SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60) · [What changed in 0.1.60](docs/release/v0.1.60.md)
+
+[Android preview notes, limitations & signing information](docs/release/v0.1.60-android-preview.1.md). Older debug APKs use a different signing certificate; read the installation note before replacing one.
 
 <details>
 <summary>Installation notes</summary>

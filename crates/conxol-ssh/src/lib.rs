@@ -633,7 +633,7 @@ impl SshCredentials {
 }
 
 pub struct SshConnectOptions {
-    /// Explicit per-host opt-in to legacy RSA/SHA-1 host signatures.
+    /// Retained for API compatibility; legacy RSA is automatically offered last.
     pub legacy_rsa: bool,
     pub host: String,
     pub port: u16,
@@ -2039,7 +2039,7 @@ fn connection_parts_for(
     inspection_only: bool,
     keepalive_interval: Option<Duration>,
     x11_enabled: bool,
-    legacy_rsa: bool,
+    _legacy_rsa: bool,
 ) -> ConnectionParts {
     let observed_fingerprint = Arc::new(Mutex::new(None));
     let (forwarded_sender, forwarded_receiver) = mpsc::channel(MAX_QUEUED_FORWARDED_CHANNELS);
@@ -2072,7 +2072,7 @@ fn connection_parts_for(
         ],
     );
     preferred.kex = kex.into();
-    // SHA-1 is offered last, only for this explicitly opted-in host.
+    // Automatically negotiate legacy RSA only after all modern host signatures.
     preferred.key = preferred
         .key
         .iter()
@@ -2080,11 +2080,9 @@ fn connection_parts_for(
         .cloned()
         .collect::<Vec<_>>()
         .into();
-    if legacy_rsa {
-        let mut keys = preferred.key.to_vec();
-        keys.push(russh::keys::Algorithm::Rsa { hash: None });
-        preferred.key = keys.into();
-    }
+    let mut keys = preferred.key.to_vec();
+    keys.push(russh::keys::Algorithm::Rsa { hash: None });
+    preferred.key = keys.into();
     let config = Arc::new(client::Config {
         preferred,
         // Setup deadlines are enforced around connect/auth/channel operations;
@@ -4571,7 +4569,7 @@ mod tests {
             false,
         );
         assert!(
-            !parts
+            parts
                 .config
                 .preferred
                 .key
@@ -4587,20 +4585,21 @@ mod tests {
     }
 
     #[test]
-    fn legacy_rsa_is_per_host_last_and_preserves_other_algorithms() {
+    fn legacy_rsa_is_automatic_last_and_preserves_other_algorithms() {
         let options = |legacy_rsa| SshFingerprintOptions {
             host: "fixture.test".into(), port: 22, timeout: Duration::from_secs(5), legacy_rsa,
         };
         let modern = inspection_connection_parts(&options(false));
         let legacy = inspection_connection_parts(&options(true));
         let mut keys = modern.config.preferred.key.to_vec();
-        keys.push(russh::keys::Algorithm::Rsa { hash: None });
-        assert_eq!(legacy.config.preferred.key.as_ref(), keys.as_slice());
+        assert_eq!(keys.pop(), Some(russh::keys::Algorithm::Rsa { hash: None }));
+        assert!(!keys.contains(&russh::keys::Algorithm::Rsa { hash: None }));
+        assert_eq!(legacy.config.preferred.key.as_ref(), modern.config.preferred.key.as_ref());
         assert_eq!(legacy.config.preferred.kex, modern.config.preferred.kex);
         assert_eq!(legacy.config.preferred.cipher, modern.config.preferred.cipher);
         assert_eq!(legacy.config.preferred.mac, modern.config.preferred.mac);
         assert!(legacy.handler.inspection_only);
-        assert!(!inspection_connection_parts(&options(false)).config.preferred.key.contains(&russh::keys::Algorithm::Rsa { hash: None }));
+        assert!(inspection_connection_parts(&options(false)).config.preferred.key.contains(&russh::keys::Algorithm::Rsa { hash: None }));
     }
 
     #[test]

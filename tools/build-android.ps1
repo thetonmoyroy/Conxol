@@ -1,6 +1,7 @@
 param(
     [ValidateSet('aarch64', 'armv7', 'x86_64', 'i686')]
-    [string]$Target = 'aarch64'
+    [string]$Target = 'aarch64',
+    [switch]$Release
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,16 +54,28 @@ Get-ChildItem -Path "$desktopPath/src-tauri/gen/android/app/build/outputs/apk" -
 # Drop desktop helpers left by an earlier build using the desktop resources.
 Get-ChildItem -Path "$desktopPath/src-tauri/gen/android/app/src/main/assets" -Include '*.exe', '*.dll' -File -Recurse -ErrorAction SilentlyContinue |
     ForEach-Object { Remove-Item -LiteralPath $_.FullName }
-& pnpm --dir $desktopPath tauri android build --apk --target $Target --debug --ci
+if ($Release) {
+    & pnpm --dir $desktopPath tauri android build --apk --target $Target --ci
+} else {
+    & pnpm --dir $desktopPath tauri android build --apk --target $Target --debug --ci
+}
 if ($LASTEXITCODE -ne 0) { throw 'Android APK build failed.' }
 
-$apk = Get-ChildItem -Path "$desktopPath/src-tauri/gen/android/app/build/outputs/apk" -Filter '*debug*.apk' -Recurse |
+$pattern = if ($Release) { '*release-unsigned.apk' } else { '*debug*.apk' }
+$apk = Get-ChildItem -Path "$desktopPath/src-tauri/gen/android/app/build/outputs/apk" -Filter $pattern -Recurse |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
 if (!$apk) { throw 'The build finished without an APK.' }
 $version = (Get-Content -LiteralPath "$desktopPath/src-tauri/tauri.conf.json" -Raw | ConvertFrom-Json).version
+$androidConfig = Get-Content -LiteralPath "$desktopPath/src-tauri/tauri.android.conf.json" -Raw | ConvertFrom-Json
+if ($androidConfig.version) { $version = $androidConfig.version }
 $destination = Join-Path $projectRoot "artifacts/android/conxol-$version-android-$Target-preview.apk"
 New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
-Copy-Item -LiteralPath $apk.FullName -Destination $destination
+if ($Release) {
+    $destination = Join-Path $projectRoot "artifacts/android/Conxol-$version-$Target.apk"
+    & "$PSScriptRoot/android/sign-apk.ps1" -InputApk $apk.FullName -OutputApk $destination
+} else {
+    Copy-Item -LiteralPath $apk.FullName -Destination $destination
+}
 $hash = (Get-FileHash -LiteralPath $destination -Algorithm SHA256).Hash.ToLowerInvariant()
 Set-Content -LiteralPath "$destination.sha256" -Value "$hash  $(Split-Path -Leaf $destination)" -Encoding ascii
 Write-Output "Android preview APK: $destination"

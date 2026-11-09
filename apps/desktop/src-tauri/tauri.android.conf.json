@@ -1,4 +1,5 @@
 {
+  "version": "0.1.60-android-preview.1",
   "build": {
     "beforeBuildCommand": "pnpm build"
   },
@@ -13,6 +14,7 @@
     }]
   },
   "bundle": {
-    "resources": []
+    "resources": [],
+    "android": { "versionCode": 1061 }
   }
 }

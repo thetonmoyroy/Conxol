@@ -2787,7 +2787,7 @@ function App() {
           if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
           const authentication = new TerminalAuthentication();
           const pendingTerminal = createWorkspaceTerminal({
-            label: `${displayName ?? request.username}@${request.host}${request.legacyRsa || request.jumpHosts?.some(hop => hop.legacyRsa) ? " [legacy RSA]" : ""}`,
+            label: `${displayName ?? request.username}@${request.host}`,
             customName: displayName,
             remoteProtocol: "ssh", remoteHost: request.host,
             authentication, connecting: true,
@@ -2824,7 +2824,7 @@ function App() {
           recordAudit("sessionOpened", "SSH");
           const terminal: WorkspaceTerminal = {
             ...pendingTerminal,
-            label: `${displayName ?? request.username}@${response.host}${request.legacyRsa || request.jumpHosts?.some(hop => hop.legacyRsa) ? " [legacy RSA]" : ""}`,
+            label: `${displayName ?? request.username}@${response.host}`,
             remoteSessionId: response.terminalId,
             remoteProtocol: "ssh",
             remoteHost: response.host,
@@ -4904,7 +4904,7 @@ function App() {
       {tunnelDraft && <TunnelDialog kind={tunnelDraft.kind} onClose={() => setTunnelDraft(null)} onStart={startTunnel} />}
       {wslTerminalOpen && <WslTerminalDialog onClose={() => setWslTerminalOpen(false)} onSelect={startWslTerminal} />}
       {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onConnectRemoteDesktop={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
-      {settingsOpen && <SettingsModal canRestore={terminalTabs.length === 0 && pendingSavedSession === null} settings={settings} error={settingsError} portableVaultStatus={portableVaultStatus} onClose={() => setSettingsOpen(false)} onSave={saveSettings} onReset={resetSettings} onExport={exportSettings} onImport={importSettings} onPortableCreate={createPortableVault} onPortableUnlock={unlockPortableVault} onPortableLock={lockPortableVault} />}
+      {settingsOpen && <SettingsModal systemDark={systemDark} canRestore={terminalTabs.length === 0 && pendingSavedSession === null} settings={settings} error={settingsError} portableVaultStatus={portableVaultStatus} onClose={() => setSettingsOpen(false)} onSave={saveSettings} onReset={resetSettings} onExport={exportSettings} onImport={importSettings} onPortableCreate={createPortableVault} onPortableUnlock={unlockPortableVault} onPortableLock={lockPortableVault} />}
       {credentialsOpen && <CredentialVaultModal portableVaultStatus={portableVaultStatus} onClose={() => setCredentialsOpen(false)} onSave={saveCredential} onDelete={deleteCredential} onPortableSave={savePortableCredential} onPortableDelete={deletePortableCredential} />}
       {editingRemoteFile && <RemoteEditorModal key={`${editingRemoteFile.sessionId}:${editingRemoteFile.document.path}:${editingRemoteFile.document.revision}`} document={editingRemoteFile.document} onClose={() => setEditingRemoteFile(null)} onReload={reloadRemoteTextFile} onSave={saveRemoteTextFile} onSaveAs={saveRemoteTextFileAs} />}
       {snippetsOpen && <SnippetsModal snippets={snippets.filter(record => !isCommandShortcut(record))} onClose={() => setSnippetsOpen(false)} onSave={saveSnippet} onDelete={deleteSnippet} onCopy={copySnippet} />}
@@ -6070,7 +6070,7 @@ function SnippetForm({ snippet, isNew, onSave, onDelete, onCopy }: { snippet: Sn
   </form>;
 }
 
-function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClose, onSave, onReset, onExport, onImport, onPortableCreate, onPortableUnlock, onPortableLock }: { canRestore: boolean; settings: AppSettings; error: string | null; portableVaultStatus: PortableVaultStatus | null; onClose: () => void; onSave: (settings: AppSettings) => void; onReset: () => void; onExport: () => Promise<void>; onImport: () => Promise<void>; onPortableCreate: (passphrase: string) => Promise<void>; onPortableUnlock: (passphrase: string) => Promise<void>; onPortableLock: () => Promise<void> }) {
+function SettingsModal({ systemDark, canRestore, settings, error, portableVaultStatus, onClose, onSave, onReset, onExport, onImport, onPortableCreate, onPortableUnlock, onPortableLock }: { systemDark: boolean; canRestore: boolean; settings: AppSettings; error: string | null; portableVaultStatus: PortableVaultStatus | null; onClose: () => void; onSave: (settings: AppSettings) => void; onReset: () => void; onExport: () => Promise<void>; onImport: () => Promise<void>; onPortableCreate: (passphrase: string) => Promise<void>; onPortableUnlock: (passphrase: string) => Promise<void>; onPortableLock: () => Promise<void> }) {
   const settingsTabs = [
     { id: "general", label: "General", icon: Settings2 },
     { id: "terminal", label: "Terminal", icon: TerminalIcon },
@@ -6083,6 +6083,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
   type SettingsTab = typeof settingsTabs[number]["id"];
   const [activeSettingsTab, setActiveSettingsTab] = useState<SettingsTab>("general");
   const [theme, setTheme] = useState(settings.general.theme);
+  const previewTheme: ColorTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme;
   const [tabPlusSavedSessions, setTabPlusSavedSessions] = useState(settings.general.tabPlusSavedSessions ?? false);
   const [confirmMultilinePaste, setConfirmMultilinePaste] = useState(settings.general.confirmMultilinePaste);
   const [pastePreview, setPastePreview] = useState(settings.general.pastePreview);
@@ -6126,7 +6127,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
     onSave({
       general: { theme, confirmMultilinePaste, pastePreview, alwaysShowTerminalSearch, rightClickToPaste, tabPlusSavedSessions },
       appearance: { fontSize: Number(fontSize) },
-      terminal: { ...terminalAppearance, scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
+      terminal: { ...terminalAppearance, colorTheme: "", scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
       keyboard,
       ssh: { reconnectEnabled, reconnectAttempts: Number(reconnectAttempts), connectTimeoutMs: Number(connectTimeoutMs) },
       network: { diagnosticTimeoutMs: Number(diagnosticTimeoutMs), scanConcurrency: Number(scanConcurrency) },
@@ -6172,7 +6173,7 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
           <span className="settings-section-label">General & appearance</span>
           <div className="settings-grid settings-appearance-grid">
             <label>Tab + button opens<select value={tabPlusSavedSessions ? "saved" : "new"} onChange={event => setTabPlusSavedSessions(event.target.value === "saved")}><option value="new">New session</option><option value="saved">Saved sessions (with search)</option></select></label>
-            <label>Theme<select value={theme} onChange={(event) => setTheme(event.target.value as AppSettings["general"]["theme"])}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select></label>
+            <label>Theme<select value={theme} onChange={(event) => setTheme(event.target.value as AppSettings["general"]["theme"])}><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select><small>Applies to the app and terminals.</small></label>
           </div>
         </div>
         <div className="settings-section">
@@ -6201,17 +6202,17 @@ function SettingsModal({ canRestore, settings, error, portableVaultStatus, onClo
           <section id="settings-panel-terminal" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-terminal" data-settings-panel="terminal" hidden={activeSettingsTab !== "terminal"}>
             <div className="settings-section">
               <span className="settings-section-label">Terminal appearance</span>
+              <p>Uses the theme selected in General. Custom colors override the terminal background and text.</p>
               <div className="settings-grid">
-                <label>Color theme<select value={terminalAppearance.colorTheme} onChange={event => setTerminalAppearance(current => ({ ...current, colorTheme: event.target.value, background: "", foreground: "" }))}><option value="">Follow app theme</option><option value="dark">Conxol dark</option><option value="light">Light</option><option value="midnight">Midnight</option></select></label>
-                <label>Background<input type="color" value={resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).background} onChange={event => setTerminalAppearance(current => ({ ...current, background: event.target.value }))} /></label>
-                <label>Text color<input type="color" value={resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).foreground} onChange={event => setTerminalAppearance(current => ({ ...current, foreground: event.target.value }))} /><small>Device ANSI colors and syntax highlights keep their own colors.</small></label>
+                <label>Background<input type="color" value={resolveTerminalTheme(previewTheme, terminalAppearance).background} onChange={event => setTerminalAppearance(current => ({ ...current, background: event.target.value }))} /></label>
+                <label>Text color<input type="color" value={resolveTerminalTheme(previewTheme, terminalAppearance).foreground} onChange={event => setTerminalAppearance(current => ({ ...current, foreground: event.target.value }))} /><small>Device ANSI colors and syntax highlights keep their own colors.</small></label>
             <label>Font size<input type="number" min="8" max="32" value={fontSize} onChange={(event) => setFontSize(event.target.value)} /><small>8–32 px.</small></label>
             <label>Scrollback lines<input type="number" min="100" max="100000" value={scrollbackLines} onChange={(event) => setScrollbackLines(event.target.value)} /><small>100–100,000 lines.</small></label>
 
                 <div className="terminal-color-reset"><button type="button" className="outline-button" onClick={() => setTerminalAppearance(current => ({ ...current, background: "", foreground: "" }))}>Reset colors to theme</button></div>
               </div>
             </div>
-            <pre className="terminal-appearance-preview" style={{ background: resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).background, color: resolveTerminalTheme(theme === "light" ? "light" : "dark", terminalAppearance).foreground, fontSize: `${Math.max(8, Math.min(32, Number(fontSize) || 14))}px` }}>router&gt; show interfaces brief{"\n"}GigabitEthernet0/0/1  192.0.2.1  UP</pre>
+            <pre className="terminal-appearance-preview" style={{ background: resolveTerminalTheme(previewTheme, terminalAppearance).background, color: resolveTerminalTheme(previewTheme, terminalAppearance).foreground, fontSize: `${Math.max(8, Math.min(32, Number(fontSize) || 14))}px` }}>router&gt; show interfaces brief{"\n"}GigabitEthernet0/0/1  192.0.2.1  UP</pre>
           </section>
           <section id="settings-panel-shortcuts" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-shortcuts" data-settings-panel="shortcuts" hidden={activeSettingsTab !== "shortcuts"}>
         <div className="settings-section">
@@ -6320,7 +6321,6 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [desktopClipboardEnabled, setDesktopClipboardEnabled] = useState(initialSession?.remote_desktop_profile?.clipboard_enabled ?? false);
   const [desktopReconnectEnabled, setDesktopReconnectEnabled] = useState(initialSession?.remote_desktop_profile?.reconnect_enabled ?? true);
   const [desktopReconnectAttempts, setDesktopReconnectAttempts] = useState(String(initialSession?.remote_desktop_profile?.reconnect_attempts ?? 3));
-  const [legacyRsa, setLegacyRsa] = useState(initialSession?.legacy_rsa ?? false);
   const [knownHostsPath, setKnownHostsPath] = useState(initialSession?.known_hosts_path ?? "");
   const [pinnedFingerprint, setPinnedFingerprint] = useState(initialSession?.pinned_fingerprint ?? "");
   const [x11Enabled, setX11Enabled] = useState(!!initialSession?.x11_display);
@@ -6328,7 +6328,6 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [x11SingleConnection, setX11SingleConnection] = useState(initialSession?.x11_single_connection ?? false);
   const [serverAliveInterval, setServerAliveInterval] = useState(String(initialSession?.server_alive_interval ?? 0));
   const [environmentText, setEnvironmentText] = useState(formatSessionEnvironment(initialSession?.environment ?? []));
-  const [jumpLegacyRsa, setJumpLegacyRsa] = useState(initialSession?.jump_host_profiles?.[0]?.legacy_rsa ?? false);
   const [jumpHost, setJumpHost] = useState(initialSession?.jump_host_profiles?.[0]?.host ?? "");
   const [jumpPort, setJumpPort] = useState(String(initialSession?.jump_host_profiles?.[0]?.port ?? 22));
   const [jumpUsername, setJumpUsername] = useState(initialSession?.jump_host_profiles?.[0]?.username ?? "");
@@ -6421,7 +6420,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           desktopProfile = { ...initialSession.remote_desktop_profile, ...parsed.profile, audio_enabled: initialSession.remote_desktop_profile?.audio_enabled ?? false };
         }
         const originalJump = initialSession.jump_host_profiles?.[0];
-        const jumps = jumpHost.trim() ? [{ ...originalJump, legacy_rsa: jumpLegacyRsa, host: jumpHost.trim(), port: Number(jumpPort), username: jumpUsername.trim() || username.trim(), auth: originalJump?.auth ?? { kind: "keyboardInteractivePrompt" as const } }, ...(initialSession.jump_host_profiles?.slice(1) ?? [])] : [];
+        const jumps = jumpHost.trim() ? [{ ...originalJump, host: jumpHost.trim(), port: Number(jumpPort), username: jumpUsername.trim() || username.trim(), auth: originalJump?.auth ?? { kind: "keyboardInteractivePrompt" as const } }, ...(initialSession.jump_host_profiles?.slice(1) ?? [])] : [];
         onSave({
           ...initialSession, name: sessionName.trim(), folder: sessionFolder.trim() || null,
           hostname: protocol === "local" ? initialSession.hostname : protocol === "serial" ? serialDevice.trim() : host.trim(),
@@ -6431,7 +6430,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           startup_directory: startupDirectory.trim() || null, startup_command: startupCommand.trim() || null,
           environment: protocol === "ssh" || protocol === "local" ? parseSessionEnvironment(environmentText) : initialSession.environment,
           ...(protocol === "ssh" ? {
-            legacy_rsa: legacyRsa, known_hosts_path: knownHostsPath.trim() || null, pinned_fingerprint: pinnedFingerprint.trim() || null,
+            known_hosts_path: knownHostsPath.trim() || null, pinned_fingerprint: pinnedFingerprint.trim() || null,
             x11_display: x11Enabled ? x11Display.trim() : null, x11_single_connection: x11SingleConnection,
             server_alive_interval: keepalive || null,
             // Preserve legacy host chains until explicitly edited in this form.
@@ -6529,14 +6528,13 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       return;
     }
     const jumpHosts = jumpHost.trim() && Number.isInteger(parsedJumpPort) && parsedJumpPort > 0 && parsedJumpPort <= 65535
-      ? [{ legacyRsa: jumpLegacyRsa, host: jumpHost.trim(), port: parsedJumpPort, username: jumpUsername.trim() || username.trim(), auth: { method: "keyboardInteractivePrompt" as const } }]
+      ? [{ host: jumpHost.trim(), port: parsedJumpPort, username: jumpUsername.trim() || username.trim(), auth: { method: "keyboardInteractivePrompt" as const } }]
       : undefined;
     onConnectSsh({
       host: host.trim(),
       port: Number(port),
       username: username.trim(),
       auth,
-      legacyRsa,
       knownHostsPath: knownHostsPath.trim() || undefined,
       pinnedFingerprint: pinnedFingerprint.trim() || undefined,
       x11: x11Enabled ? { display: x11Display.trim(), singleConnection: x11SingleConnection } : undefined,
@@ -6766,18 +6764,8 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                         Jump username
                         <input {...literalInputProps} required value={jumpUsername} onChange={(event) => setJumpUsername(event.target.value)} placeholder={username || "ops"} />
                       </label>
-                      <label className="quick-connect-wide">
-                        <input type="checkbox" checked={jumpLegacyRsa} onChange={event => setJumpLegacyRsa(event.target.checked)} />
-                        Legacy RSA host signatures for this jump host
-                        <small>Allows weaker SHA-1 signatures on this hop only; fingerprint verification remains required.</small>
-                      </label>
                     </>
                   )}
-                  <label className="quick-connect-wide">
-                    <input type="checkbox" checked={legacyRsa} onChange={event => setLegacyRsa(event.target.checked)} />
-                    Legacy RSA host signatures (ssh-rsa / SHA-1)
-                    <small>For this host only. SHA-1 is weaker; modern algorithms stay preferred. Fingerprint approval and changed-key rejection remain enforced.</small>
-                  </label>
                   <label className="quick-connect-wide">
                     Known hosts path <span className="optional">optional · explicit only</span>
                     <input value={knownHostsPath} onChange={(event) => setKnownHostsPath(event.target.value)} placeholder="/path/to/known_hosts" />
