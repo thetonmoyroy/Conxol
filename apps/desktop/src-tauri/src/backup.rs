@@ -1,8 +1,8 @@
 //! Encrypted, bounded workspace snapshots. Tests use only temporary files and a fake vault.
-use crate::{PortableVaultState, WorkspaceLock};
+use crate::{NativeVault, PortableVaultState, WorkspaceLock};
 use conxol_store::{AuditStore, MacroStore, SessionStore, SettingsStore, SnippetStore};
 use conxol_vault::{
-    CredentialId, MAX_BACKUP_BYTES, PlatformVault, SecretMaterial, decrypt_workspace_backup,
+    CredentialId, MAX_BACKUP_BYTES, SecretMaterial, decrypt_workspace_backup,
     encrypt_workspace_backup,
 };
 use serde::{Deserialize, Serialize};
@@ -444,7 +444,7 @@ pub async fn workspace_backup_export(
         let audit = app.state::<Mutex<AuditStore>>(); let _audit = audit.lock().map_err(|_| "Audit is busy.")?;
         let portable = app.state::<PortableVaultState>(); let portable = portable.vault.lock().map_err(|_| "Vault is busy.")?;
         if app.state::<PortableVaultState>().path.exists() && portable.is_none() { return Err(error("Unlock the encrypted vault before making a full backup.")); }
-        let platform = app.state::<PlatformVault>();
+        let platform = app.state::<NativeVault>();
         let mut ids = platform.list_ids().map_err(|_| error("Could not enumerate saved credentials. Backup was not created."))?;
         if let Some(vault) = portable.as_ref() { ids.extend(vault.list_ids()); }
         let archive = snapshot(&state.active, request.preferences, ids, |id| {
@@ -535,14 +535,16 @@ pub fn workspace_backup_cancel(state: State<'_, BackupState>) -> Result<(), Stri
 trait RestoreVault {
     fn put(&self, id: &str, secret: &str) -> Result<(), String>;
     fn delete(&self, id: &str);
+    fn stage_policy(&self, _directory: &Path, _ids: &[String]) -> Result<(), String> { Ok(()) }
 }
-impl RestoreVault for PlatformVault {
+impl RestoreVault for NativeVault {
+    fn stage_policy(&self, directory: &Path, ids: &[String]) -> Result<(), String> { NativeVault::stage_policy(self, directory, ids) }
     fn put(&self, id: &str, secret: &str) -> Result<(), String> {
         self.put(
             &CredentialId::new(id).map_err(|_| error("Invalid restored credential reference."))?,
             &SecretMaterial::new(secret),
         )
-        .map_err(|_| error("Could not restore a saved password to the system vault."))
+        .map_err(|_| error("Set up or unlock the workspace PIN before restoring saved passwords."))
     }
     fn delete(&self, id: &str) {
         if let Ok(id) = CredentialId::new(id) {
@@ -625,6 +627,7 @@ fn apply_archive(
             vault.put(new, &archive.credentials[old])?;
             created.push(new.clone());
         }
+        if !remap.is_empty() { vault.stage_policy(stage.path(), &remap.values().cloned().collect::<Vec<_>>())?; }
         fs::rename(stage.path(), &final_path)
             .map_err(|_| error("Could not finish restored workspace."))?;
         atomic_write(
@@ -666,7 +669,7 @@ pub async fn workspace_backup_restore(
         let preferences = apply_archive(
             &state.base,
             &candidate.archive,
-            app.state::<PlatformVault>().inner(),
+            app.state::<NativeVault>().inner(),
         )?;
         *pending = None;
         state.committed.store(true, Ordering::Release);
@@ -774,6 +777,29 @@ mod tests {
             |id| Ok(SecretMaterial::new(format!("synthetic-secret-{id}"))),
         )
         .unwrap()
+    }
+    #[test]
+    fn native_restore_stages_only_restored_credentials_under_current_screen_pin() {
+        let src = tempfile::tempdir().unwrap();
+        source(src.path());
+        let archive = make_archive(src.path());
+        let dst = tempfile::tempdir().unwrap();
+        let lock = WorkspaceLock::open(dst.path().join("workspace-lock.json")).unwrap();
+        lock.configure(serde_json::from_value(serde_json::json!({
+            "enabled": true, "currentPin": "", "newPin": "5678", "idleMinutes": 5
+        })).unwrap()).unwrap();
+        let vault = NativeVault(lock);
+        vault.put(&CredentialId::new("original-workspace-only").unwrap(), &SecretMaterial::new("original-secret")).unwrap();
+        apply_archive(dst.path(), &archive, &vault).unwrap();
+        let active = resolve_workspace(dst.path()).unwrap();
+        let policy: serde_json::Value = serde_json::from_slice(&fs::read(active.join("workspace-lock.json")).unwrap()).unwrap();
+        let sealed: Vec<u8> = serde_json::from_value(policy["vault"].clone()).unwrap();
+        let restored = conxol_vault::EncryptedCredentials::open(&sealed, &SecretMaterial::new("5678")).unwrap();
+        assert_eq!(restored.list_ids().len(), archive.credentials.len());
+        assert!(!restored.list_ids().contains(&"original-workspace-only".to_owned()));
+        let index: Vec<String> = serde_json::from_slice(&fs::read(active.join("credential-index.json")).unwrap()).unwrap();
+        for id in index { assert!(restored.get(&CredentialId::new(id).unwrap()).unwrap().as_str().starts_with("synthetic-secret-")); }
+        assert!(conxol_vault::EncryptedCredentials::open(&sealed, &SecretMaterial::new("1234")).is_err());
     }
     #[test]
     fn encrypted_full_workspace_roundtrip_preserves_data_and_password_bindings() {

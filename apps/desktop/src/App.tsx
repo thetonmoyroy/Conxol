@@ -1,4 +1,6 @@
-import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalHorizontalPan } from "./terminal-mobile-layout";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { attachTerminalGpuRenderer } from "./terminal-gpu-renderer";
+import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalTouchPan } from "./terminal-mobile-layout";
 import { useStoreUpdates } from "./StoreUpdates";
 import { literalInputProps } from "./literal-input";
 import { ApplicationMenuBar } from "./ApplicationMenuBar";
@@ -205,7 +207,6 @@ type PortableVaultStatus = {
   path: string;
 };
 
-type VaultBackend = "platform" | "portable";
 
 const defaultSettings: AppSettings = {
   general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false, tabPlusSavedSessions: false },
@@ -886,6 +887,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     const searchAddon = new SearchAddon({ highlightLimit: 1000 });
     terminal.loadAddon(searchAddon);
     terminal.open(host);
+    const gpuRenderer = IS_ANDROID ? attachTerminalGpuRenderer(terminal, () => new WebglAddon()) : null;
     // Terminal commands and credentials must not use browser writing assistance.
     const terminalInput = terminal.textarea;
     if (terminalInput) {
@@ -896,7 +898,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       terminalInput.setAttribute("writingsuggestions", "false");
       terminalInput.setAttribute("textprediction", "false");
     }
-    const networkHighlighting = attachNetworkHighlighting(terminal);
+    const networkHighlighting = attachNetworkHighlighting(terminal, IS_ANDROID);
     networkHighlightingRef.current = networkHighlighting;
     const title = terminal.onTitleChange((value) => onTitleChange(workspaceId, value));
     const selectionCopy = terminal.onSelectionChange(() => {
@@ -937,7 +939,12 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     resizeObserver.observe(host);
     if (IS_ANDROID && host.parentElement) resizeObserver.observe(host.parentElement);
     const disposeHorizontalPan = IS_ANDROID && host.parentElement
-      ? attachTerminalHorizontalPan(host.parentElement, () => !disposed && !isWorkspaceLocked() && host.getClientRects().length > 0)
+      ? attachTerminalTouchPan(host.parentElement, () => !disposed && !isWorkspaceLocked() && host.isConnected && !host.closest('[hidden], [aria-hidden="true"]'), {
+        rowHeight: () => (host.querySelector<HTMLElement>(".xterm-screen")?.clientHeight ?? host.clientHeight) / terminal.rows,
+        scrollLines: lines => terminal.scrollLines(lines),
+        viewportY: () => terminal.buffer.active.viewportY,
+        normalBuffer: () => terminal.buffer.active.type === "normal",
+      })
       : () => {};
     const initialFitFrame = window.requestAnimationFrame(fit);
     // A fallback font has different cell metrics. Re-measure after the bundled
@@ -1136,6 +1143,7 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
       terminalIdRef.current = null;
       terminalRef.current = null;
       onTerminalDisposed(workspaceId);
+      gpuRenderer?.dispose();
       terminal.dispose();
     };
   }, [instanceKey, localTarget, onTerminalPaste, onInput, onNativeTerminalId, onSearchResults, onStatusChange, onTerminalDisposed, onTerminalReady, onTitleChange, remoteProtocol, remoteSessionId, workspaceId]);
@@ -1853,6 +1861,12 @@ function App() {
 
   const activeTerminal = terminalTabs.find((terminal) => terminal.id === activeTerminalId) ?? terminalTabs[0];
   const selectedTerminalId = activeTerminal?.id ?? "";
+
+  useEffect(() => {
+    if (!IS_ANDROID || activeView !== "terminal") return;
+    document.querySelector(".desktop-session-tabs .terminal-tab.selected")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [selectedTerminalId, activeView]);
+
   selectedTerminalIdRef.current = selectedTerminalId;
   const remoteSessionId = activeTerminal?.remoteSessionId ?? null;
   remoteSessionIdRef.current = remoteSessionId;
@@ -2732,40 +2746,6 @@ function App() {
       setConnectionError(null);
     } catch (error) {
       setConnectionError(`Credential could not be deleted: ${String(error)}`);
-    }
-  }, [setCredentialsOpen]);
-
-  const savePortableCredential = useCallback(async (credentialId: string, secret: string) => {
-    if (!IS_TAURI) {
-      setConnectionError("Credential vault operations require the desktop runtime.");
-      return;
-    }
-    try {
-      const savedId = await invoke<string>("portable_vault_put", {
-        payload: { credentialId: credentialId.trim(), secret },
-      });
-      setCredentialsOpen(false);
-      setSessionNotice(`Saved credential reference “${savedId}” in the encrypted portable vault.`);
-      setConnectionError(null);
-    } catch (error) {
-      setConnectionError(`Portable credential could not be saved: ${String(error)}`);
-    }
-  }, [setCredentialsOpen]);
-
-  const deletePortableCredential = useCallback(async (credentialId: string) => {
-    if (!IS_TAURI) {
-      setConnectionError("Credential vault operations require the desktop runtime.");
-      return;
-    }
-    try {
-      const deletedId = await invoke<string>("portable_vault_delete", {
-        payload: { credentialId: credentialId.trim() },
-      });
-      setCredentialsOpen(false);
-      setSessionNotice(`Deleted credential reference “${deletedId}” from the encrypted portable vault.`);
-      setConnectionError(null);
-    } catch (error) {
-      setConnectionError(`Portable credential could not be deleted: ${String(error)}`);
     }
   }, [setCredentialsOpen]);
 
@@ -4792,11 +4772,17 @@ function App() {
             <button className={`desktop-home-tab ${activeView === "home" ? "selected" : ""}`} aria-label="Home" aria-pressed={activeView === "home"} title="Home" onClick={() => setActiveView("home")}><Home size={15} /></button>
                     <div className="terminal-tab-strip" role="group" aria-label="Terminal sessions">{terminalTabs.map((terminal) => {
                       const selected = terminal.id === selectedTerminalId;
+                      const bookmark = savedSessions.find(session => session.id === terminal.shortcutDeviceId);
+                      const host = terminal.remoteHost;
+                      const bookmarkName = (bookmark?.name ?? terminal.customName)?.trim();
+                      const defaultNames = new Set(host ? [host, `Telnet · ${host}`, `SSH · ${host}`, `RDP · ${host}`, `VNC · ${host}`, ...(bookmark?.username ? [`${bookmark.username}@${host}`] : [])] : []);
+                      const mobileTitle = host ? (bookmarkName && !defaultNames.has(bookmarkName) ? bookmarkName : host) : terminal.label;
+
                       return (
                         <div key={terminal.id} className={`terminal-tab ${selected && activeView === "terminal" ? "selected" : ""}`}>
                           <button type="button" className="terminal-tab-select" aria-pressed={selected && activeView === "terminal"} onClick={() => { setActiveTerminalId(terminal.id); setTerminalLayout(current => selectTerminalLayout(current, rememberedTerminalLayouts.current, terminal.id, new Set(terminalTabs.map(item => item.id)))); setActiveView("terminal"); }}>
                             <span className={`terminal-tab-dot terminal-tab-dot-${terminal.status}`} />
-                            <span>{terminal.label}</span>
+                            <span>{IS_ANDROID ? mobileTitle : terminal.label}</span>
                             <span className="terminal-tab-meta">{terminal.status === "connected" ? (terminal.remoteHost ? terminal.remoteProtocol : "local") : terminal.status}</span>
                           </button>
                           <button type="button" className="terminal-tab-close" aria-label={`Close ${terminal.label}`} title={`Close ${terminal.label}`} onClick={() => { closeTerminal(terminal.id); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".terminal-tab.selected .terminal-tab-select")?.focus()); }}><X size={13} /></button>
@@ -4832,6 +4818,20 @@ function App() {
                   {broadcastEnabled && <div className="broadcast-banner" role="alert"><ShieldAlert size={15} /><div><strong>BROADCAST INPUT ACTIVE</strong><span>{broadcastTargetIds.length} explicitly selected terminal{broadcastTargetIds.length === 1 ? "" : "s"} · every keystroke is fanned out</span></div><button type="button" className="danger-button" onClick={() => { setBroadcastEnabled(false); setBroadcastOpen(false); setSessionNotice("Broadcast mode disabled. No further input will fan out."); }}><Square size={13} /> Emergency disable <kbd>Esc</kbd></button></div>}
                   {macroRun && <div className="macro-run-banner" role="status"><LoaderCircle className="spin" size={15} /><div><strong>MACRO RUNNING · {macroRun.title}</strong><span>Step {macroRun.step}/{macroRun.total} · {macroRun.targets.join(", ")}</span></div><button type="button" className="danger-button" onClick={cancelMacro}><Square size={13} /> Cancel macro <kbd>Esc</kbd></button></div>}
                   <div className={`terminal-frame terminal-tabs-frame ${terminalLayout.kind === "split" ? "terminal-frame-has-layout" : "terminal-frame-single"}`}><TerminalLayoutView node={terminalLayout} terminals={terminalTabs} renderPane={renderTerminalPane} onFocus={setActiveTerminalId} onStartResize={beginSplitResize} onAdjustResize={adjustSplitRatio} onResetResize={resetSplitRatio} /></div>
+                  {IS_ANDROID && <div className="android-terminal-keys" role="group" aria-label="Terminal keys">
+                    {[["←", "D"], ["↓", "B"], ["↑", "A"], ["→", "C"], ["Tab", "\t"]].map(([label, key]) => <button
+                      key={label} type="button" aria-label={label === "Tab" ? "Tab" : `Arrow ${key === "D" ? "left" : key === "B" ? "down" : key === "A" ? "up" : "right"}`}
+                      disabled={terminalStatus !== "connected"}
+                      onPointerDown={event => event.preventDefault()}
+                      onClick={() => {
+                        if (isWorkspaceLocked() || document.querySelector('[role="dialog"], dialog[open]')) return;
+                        const terminal = terminalInstancesRef.current.get(selectedTerminalIdRef.current)?.terminal;
+                        if (!terminal || !terminal.element?.getClientRects().length) return;
+                        terminal.focus();
+                        terminal.input(key === "\t" ? key : `\x1b${terminal.modes.applicationCursorKeysMode ? "O" : "["}${key}`, true);
+                      }}
+                    >{label}</button>)}
+                  </div>}
                   <div className="terminal-statusbar"><span><span className="status-square" /> {terminalStatus === "connected" ? "connected" : terminalStatus}</span><span>{remoteProtocol ? `${remoteProtocol} transport` : "local process"}</span><span>scrollback {settings.terminal.scrollbackLines.toLocaleString()}</span><span>{settings.appearance.fontSize}px · Mod +/- zoom</span><span className="terminal-status-spacer" />{canReconnectTerminal(remoteProtocol, terminalStatus, activeTerminal?.connecting) && <button type="button" className="terminal-status-action" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal()}><RefreshCw size={12} /> {reconnectBusy ? "Reconnecting…" : "Disconnected · Reconnect (R)"}</button>}<span>{formatShortcut(settings.keyboard.quickConnect)} for quick connect</span></div>
               </section>
               <div hidden={activeView !== "generator"}><ConfigGenerator /></div>
@@ -4923,7 +4923,7 @@ function App() {
       {wslTerminalOpen && <WslTerminalDialog onClose={() => setWslTerminalOpen(false)} onSelect={startWslTerminal} />}
       {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onConnectRemoteDesktop={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
       {settingsOpen && <SettingsModal systemDark={systemDark} canRestore={terminalTabs.length === 0 && pendingSavedSession === null} settings={settings} error={settingsError} portableVaultStatus={portableVaultStatus} onClose={() => setSettingsOpen(false)} onSave={saveSettings} onReset={resetSettings} onExport={exportSettings} onImport={importSettings} onPortableCreate={createPortableVault} onPortableUnlock={unlockPortableVault} onPortableLock={lockPortableVault} />}
-      {credentialsOpen && <CredentialVaultModal portableVaultStatus={portableVaultStatus} onClose={() => setCredentialsOpen(false)} onSave={saveCredential} onDelete={deleteCredential} onPortableSave={savePortableCredential} onPortableDelete={deletePortableCredential} />}
+      {credentialsOpen && <CredentialVaultModal onClose={() => setCredentialsOpen(false)} onSave={saveCredential} onDelete={deleteCredential} />}
       {editingRemoteFile && <RemoteEditorModal key={`${editingRemoteFile.sessionId}:${editingRemoteFile.document.path}:${editingRemoteFile.document.revision}`} document={editingRemoteFile.document} onClose={() => setEditingRemoteFile(null)} onReload={reloadRemoteTextFile} onSave={saveRemoteTextFile} onSaveAs={saveRemoteTextFileAs} />}
       {snippetsOpen && <SnippetsModal snippets={snippets.filter(record => !isCommandShortcut(record))} onClose={() => setSnippetsOpen(false)} onSave={saveSnippet} onDelete={deleteSnippet} onCopy={copySnippet} />}
 
@@ -5874,12 +5874,10 @@ function WslTerminalDialog({ onClose, onSelect }: { onClose: () => void; onSelec
   </div>;
 }
 
-function CredentialVaultModal({ portableVaultStatus, onClose, onSave, onDelete, onPortableSave, onPortableDelete }: { portableVaultStatus: PortableVaultStatus | null; onClose: () => void; onSave: (credentialId: string, secret: string) => Promise<void>; onDelete: (credentialId: string) => Promise<void>; onPortableSave: (credentialId: string, secret: string) => Promise<void>; onPortableDelete: (credentialId: string) => Promise<void> }) {
+function CredentialVaultModal({ onClose, onSave, onDelete }: { onClose: () => void; onSave: (credentialId: string, secret: string) => Promise<void>; onDelete: (credentialId: string) => Promise<void> }) {
   const [credentialId, setCredentialId] = useState("");
   const [secret, setSecret] = useState("");
-  const [backend, setBackend] = useState<VaultBackend>("platform");
   const [busy, setBusy] = useState(false);
-  const portableReady = portableVaultStatus?.enabled && portableVaultStatus.unlocked;
 
   const close = () => {
     setSecret("");
@@ -5891,8 +5889,7 @@ function CredentialVaultModal({ portableVaultStatus, onClose, onSave, onDelete, 
     if (!credentialId.trim() || !secret) return;
     setBusy(true);
     try {
-      if (backend === "portable") await onPortableSave(credentialId, secret);
-      else await onSave(credentialId, secret);
+      await onSave(credentialId, secret);
     } finally {
       setSecret("");
       setBusy(false);
@@ -5900,12 +5897,11 @@ function CredentialVaultModal({ portableVaultStatus, onClose, onSave, onDelete, 
   };
 
   const remove = async () => {
-    const backendLabel = backend === "portable" ? "encrypted portable vault" : "platform vault";
+    const backendLabel = "encrypted workspace vault";
     if (!credentialId.trim() || !await confirmAction(`Delete credential “${credentialId.trim()}” from the ${backendLabel}?`)) return;
     setBusy(true);
     try {
-      if (backend === "portable") await onPortableDelete(credentialId);
-      else await onDelete(credentialId);
+      await onDelete(credentialId);
     } finally {
       setSecret("");
       setBusy(false);
@@ -5917,10 +5913,9 @@ function CredentialVaultModal({ portableVaultStatus, onClose, onSave, onDelete, 
     <div className="credential-modal-body">
       <label>Credential reference<input {...literalInputProps} required autoFocus value={credentialId} onChange={(event) => setCredentialId(event.target.value)} placeholder="prod-bastion-password" autoComplete="off" /><small>Letters, numbers, dots, dashes, and underscores only.</small></label>
       <label>Secret<input {...literalInputProps} required type="password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder="Enter only for this explicit save" autoComplete="new-password" /><small>The field is cleared after the native operation. It is not persisted in app state.</small></label>
-      <label>Storage backend<select value={backend} onChange={(event) => setBackend(event.target.value as VaultBackend)}><option value="platform">Platform secure store</option><option value="portable" disabled={!portableReady}>Encrypted portable vault{portableReady ? "" : " (unlock in Settings)"}</option></select></label>
     </div>
-    <div className="credential-modal-note"><KeyRound size={14} /><span>{backend === "portable" ? "Encrypted portable storage uses the explicit unlock passphrase and is kept separate from the platform keyring." : "Uses macOS Keychain, Windows Credential Manager, or Linux Secret Service through Rust."} No vault operation runs until you confirm.</span></div>
-    <div className="session-editor-footer"><button type="button" className="outline-button danger-button" onClick={() => void remove()} disabled={busy || !credentialId.trim() || (backend === "portable" && !portableReady)}><Trash2 size={14} /> Delete reference</button><div><button type="button" className="outline-button" onClick={close} disabled={busy}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !credentialId.trim() || !secret || (backend === "portable" && !portableReady)}>{busy ? "Saving…" : "Save secret"}</button></div></div>
+    <div className="credential-modal-note"><KeyRound size={14} /><span>Saved passwords are encrypted with your workspace PIN. Set up the PIN in Settings &gt; Security; unlocking the screen also unlocks this vault. No vault operation runs until you confirm.</span></div>
+    <div className="session-editor-footer"><button type="button" className="outline-button danger-button" onClick={() => void remove()} disabled={busy || !credentialId.trim()}><Trash2 size={14} /> Delete reference</button><div><button type="button" className="outline-button" onClick={close} disabled={busy}>Cancel</button><button type="submit" className="primary-button" disabled={busy || !credentialId.trim() || !secret}>{busy ? "Saving…" : "Save secret"}</button></div></div>
   </form></div>;
 }
 
@@ -6279,12 +6274,15 @@ function SettingsModal({ systemDark, canRestore, settings, error, portableVaultS
           </section>
           <section id="settings-panel-vault" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-vault" data-settings-panel="vault" hidden={activeSettingsTab !== "vault"}>
         <div className="settings-section">
-          <span className="settings-section-label">Portable encrypted vault</span>
+          <span className="settings-section-label">Encrypted workspace vault</span>
+          <p>Saved passwords use your workspace screen-lock PIN. Set up or change the PIN in Security. Locking the workspace clears the vault key from memory.</p>
+          <details><summary>Legacy portable vault</summary>
           <div className="settings-grid settings-vault-grid">
             <div className="settings-vault-status"><strong>{portableVaultStatus?.enabled ? portableVaultStatus.unlocked ? "Unlocked" : portableVaultStatus.exists ? "Locked" : "Not created" : "Unavailable"}</strong><small>{portableVaultStatus?.enabled ? `File: ${portableVaultStatus.path}` : "Portable mode activates only when portable.flag is beside the executable."}</small></div>
             <label>Unlock passphrase<input {...literalInputProps} type="password" value={portablePassphrase} onChange={(event) => setPortablePassphrase(event.target.value)} autoComplete="new-password" placeholder="Vault passphrase" /><small>Cleared after each vault action.</small></label>
             <div className="settings-vault-actions">{portableVaultStatus?.enabled && !portableVaultStatus.unlocked && portableVaultStatus.exists ? <button type="button" className="outline-button" onClick={() => void runPortableAction(onPortableUnlock)} disabled={portableBusy || !portablePassphrase}>Unlock</button> : null}{portableVaultStatus?.enabled && !portableVaultStatus.unlocked && !portableVaultStatus.exists ? <button type="button" className="outline-button" onClick={() => void runPortableAction(onPortableCreate)} disabled={portableBusy || !portablePassphrase}>Create encrypted vault</button> : null}{portableVaultStatus?.unlocked && <button type="button" className="outline-button danger-button" onClick={() => void onPortableLock()} disabled={portableBusy}>Lock vault</button>}</div>
           </div>
+          </details>
         </div>
 
           </section>

@@ -177,8 +177,12 @@ export function networkCellRanges(line: IBufferLine): Array<NetworkHighlight & {
 }
 
 /** Decorations never alter output bytes, copy/search text, input, or ANSI parser state. */
-export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { refresh: () => void } {
+export function attachNetworkHighlighting(terminal: Terminal, frameBudgeted = false): IDisposable & { refresh: () => void } {
   let queued = false;
+  let frame: number | undefined;
+  let nextLine: number | undefined;
+  let passGeneration = 0;
+  let renderedPalette = "";
   let disposed = false;
   let generation = 0;
   let renderedViewport = -1;
@@ -186,13 +190,11 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
   type Entry = { marker: ReturnType<Terminal["registerMarker"]>; signature: string; generation: number; paletteKey: string; items: IDisposable[] };
   let entries: Entry[] = [];
   const release = (entry: Entry) => { entry.items.forEach(item => item.dispose()); entry.marker.dispose(); };
-  const clear = () => { entries.forEach(release); entries = []; };
+  const clear = () => { entries.forEach(release); entries = []; nextLine = undefined; };
   const render = () => {
     queued = false;
     const buffer = terminal.buffer.active;
     if (disposed || buffer.type !== "normal") { clear(); return; }
-    renderedViewport = buffer.viewportY;
-    renderedBuffer = buffer;
     const theme = terminal.options.theme ?? {};
     const palette: Record<NetworkHighlightKind, string> = {
       good: theme.green ?? "#9bc48a", bad: theme.red ?? "#ee8d78", warning: theme.yellow ?? "#e8b45c",
@@ -200,21 +202,34 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       command: theme.cyan ?? "#77c4bb", comment: theme.blue ?? "#86a9cc",
     };
     const paletteKey = JSON.stringify(palette);
+    if (buffer !== renderedBuffer || buffer.viewportY !== renderedViewport || paletteKey !== renderedPalette) nextLine = undefined;
+    renderedViewport = buffer.viewportY;
+    renderedBuffer = buffer;
+    renderedPalette = paletteKey;
+    if (nextLine === undefined) passGeneration = generation;
+    const started = frameBudgeted ? performance.now() : 0;
+    let scanned = 0;
+    const endLine = Math.min(buffer.length, buffer.viewportY + terminal.rows);
+    let y = nextLine ?? buffer.viewportY;
     // Markers track history as the buffer scrolls/trims. Keep previously visited
     // rows colored and reuse unchanged decorations instead of clearing each frame.
     entries = entries.filter(entry => { if (entry.marker.isDisposed) { release(entry); return false; } return true; });
     const byLine = new Map(entries.map(entry => [entry.marker.line, entry]));
     const touched = new Set<Entry>();
     const current: Entry[] = [];
-    for (let y = buffer.viewportY; y < Math.min(buffer.length, buffer.viewportY + terminal.rows); y++) {
+    for (; y < endLine; y++) {
       const previous = byLine.get(y);
-      if (previous) touched.add(previous);
       // Scrolling alone cannot change terminal cells. Markers track line movement;
       // parsed output invalidates the cache, including ANSI-only color changes.
       if (previous?.generation === generation && previous.paletteKey === paletteKey) {
+        touched.add(previous);
         current.push(previous);
         continue;
       }
+      // Cached lines are free to reuse. Bound new scans/decoration work per
+      // frame, and always resume against the latest visible viewport.
+      if (frameBudgeted && (scanned >= 4 || (scanned > 0 && performance.now() - started >= 2))) break;
+      scanned++;
       const line = buffer.getLine(y);
       if (!line) continue;
       const ranges = networkCellRanges(line);
@@ -222,11 +237,13 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       if (previous?.signature === signature) {
         previous.generation = generation;
         previous.paletteKey = paletteKey;
+        touched.add(previous);
         current.push(previous);
         continue;
       }
-      if (previous) release(previous);
-      if (!ranges.length) continue;
+      if (previous) { touched.add(previous); release(previous); }
+      // Cache plain lines too on mobile, so scrolling past them is scan-free.
+      if (!ranges.length && !frameBudgeted) continue;
       const marker = terminal.registerMarker(y - buffer.baseY - buffer.cursorY);
       if (!marker) continue;
       const entry: Entry = { marker, signature, generation, paletteKey, items: [] };
@@ -245,10 +262,16 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
       count -= entry.items.length;
       release(entry);
     }
+    nextLine = y < endLine ? y : undefined;
+    if (frameBudgeted && (nextLine !== undefined || passGeneration !== generation)) refresh();
   };
   const refresh = () => {
     if (disposed || queued) return;
     queued = true;
+    if (frameBudgeted) {
+      frame = requestAnimationFrame(() => { frame = undefined; if (!disposed) render(); });
+      return;
+    }
     // Coalesce a whole parser/scroll burst, but finish before xterm's next
     // animation frame so history never paints once with plain foreground.
     queueMicrotask(() => { if (!disposed) render(); });
@@ -264,5 +287,5 @@ export function attachNetworkHighlighting(terminal: Terminal): IDisposable & { r
   const rulesChanged = () => { generation++; clear(); refresh(); };
   ruleListeners.add(rulesChanged);
   refresh();
-  return { refresh, dispose: () => { disposed = true; ruleListeners.delete(rulesChanged); subscriptions.forEach(item => item.dispose()); clear(); } };
+  return { refresh, dispose: () => { disposed = true; if (frame !== undefined) cancelAnimationFrame(frame); ruleListeners.delete(rulesChanged); subscriptions.forEach(item => item.dispose()); clear(); } };
 }

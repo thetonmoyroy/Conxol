@@ -116,14 +116,14 @@ export function WorkspaceLockSettings() {
     gate.current = true; setBusy(true); setMessage(null);
     try {
       await invoke("workspace_lock_configure", { request: { enabled, currentPin, newPin: enabled ? newPin : "", idleMinutes: Number(idle) } });
-      await refresh(); setOperation(null); setMessage(enabled ? "PIN lock saved. Cold starts will require your PIN." : "Workspace PIN lock is off.");
+      await refresh(); setOperation(null); setMessage(enabled ? "PIN lock saved. Cold starts will require your PIN." : "Workspace PIN lock is off. Set it up before saving passwords.");
     } catch (error) { setMessage(String(error)); await refresh(); }
     finally { currentPin = ""; newPin = ""; confirmation = ""; gate.current = false; setBusy(false); }
   };
   if (!native) return <p className="settings-section-note">Workspace PIN locking is available in the desktop app.</p>;
   return <div className="workspace-pin-settings">
     <div className="workspace-pin-status"><ShieldCheck size={15} /><strong>{status?.enabled ? "PIN lock enabled" : "PIN lock is off"}</strong></div>
-    <p className="settings-section-note">Protect your workspace with a 4–12 digit PIN. This is separate from your SSH password.</p>
+    <p className="settings-section-note">Protect your workspace and saved passwords with a 4–12 digit PIN. Longer PINs provide stronger protection. Changing the PIN re-encrypts saved passwords; locking clears the vault key from memory.</p>
     <div className="workspace-pin-actions">
       {(status?.enabled ? [ ["change", "Change PIN"], ["idle", "Change idle timeout"], ["disable", "Turn off lock"] ] : [["enable", "Set up PIN lock"]]).map(([value, label]) => <button key={value} type="button" className="outline-button" disabled={busy} aria-pressed={operation === value} onClick={() => { clearPins(); setMessage(null); setIdle(String(status?.idleMinutes ?? 5)); setOperation(value as typeof operation); }}>{label}</button>)}
       {status?.enabled && <button type="button" className="outline-button" disabled={busy} onClick={() => void lock()}>Lock now</button>}

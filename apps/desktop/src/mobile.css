@@ -48,3 +48,24 @@ html.android, html.android body, html.android #root {
 .android .terminal-scroll-frame { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; }
 .android .terminal-scroll-frame > .terminal-host { width: max-content; min-width: 100%; }
 .android .terminal-scroll-frame .xterm { padding-right: 16px; }
+
+/* Keep the Android terminal full width; menus remain in the top bar. */
+.android .session-activity-strip,
+.android .desktop-home-tab,
+.android .desktop-session-tabs .terminal-toolbar,
+.android .desktop-session-options { display: none; }
+.android .app-shell .sidebar { left: 0; }
+.android-sidebar-backdrop { left: 0; }
+.android-terminal-keys { display: flex; flex: 0 0 auto; gap: 4px; padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); background: var(--panel); }
+.android-terminal-keys button { flex: 1; min-width: 0; min-height: 40px; padding: 4px; color: var(--text); background: transparent; border: 1px solid var(--line); border-radius: 4px; touch-action: manipulation; font-size: 18px; }
+.android-terminal-keys button:active { background: var(--line); }
+
+/* Use a small inset around terminal text on narrow screens. */
+.android .app-shell .terminal-frame { padding: 0; }
+.android .app-shell .terminal-layout-pane { padding: 2px 4px; }
+
+/* Swipe session tabs without shrinking them or moving the add button. */
+.android .desktop-session-tabs { min-width: 0; overflow: hidden; }
+.android .app-shell .desktop-session-tabs .terminal-tab-strip { flex: 1 1 0; width: auto; min-width: 0; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; touch-action: pan-x; scrollbar-width: none; }
+.android .terminal-tab-strip::-webkit-scrollbar { display: none; }
+.android .app-shell .terminal-tab { flex: 0 0 auto; }

@@ -209,3 +209,91 @@ for (const text of ['broken', 'offline', 'not ready']) assert.equal(findUsefulNe
 saveHighlightRules(defaults);
 assert.deepEqual(normalizeHighlightWords('up\ndown'), ['up down'], 'newlines do not separate words');
 console.log('Comma-only word lists and whitespace handling passed');
+
+// Mobile highlighting has a per-frame budget, with no pause/resume timer.
+const originalTimeout = globalThis.setTimeout;
+const originalPerformance = globalThis.performance;
+const originalRows = terminal.rows;
+const frames = new Map();
+let scheduledId = 0, clock = 0, clockStep = 0, timersCreated = 0;
+globalThis.requestAnimationFrame = callback => { const id = ++scheduledId; frames.set(id, callback); return id; };
+globalThis.cancelAnimationFrame = id => frames.delete(id);
+globalThis.setTimeout = () => { timersCreated++; assert.fail('mobile highlighting must not wait for a scroll-idle timer'); };
+globalThis.performance = { now: () => { clock += clockStep; return clock; } };
+const flushFrame = () => {
+  const before = reads;
+  const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback());
+  assert(reads - before <= 4, 'at most four new rows are scanned in a frame');
+  assert(frames.size <= 1, 'only one continuation may be queued');
+  return reads - before;
+};
+const drain = () => {
+  let count = 0;
+  while (frames.size) { assert(count++ < 100, 'highlighting must eventually settle'); flushFrame(); }
+};
+try {
+  terminal.rows = 12;
+  buffer.viewportY = 0;
+  contents.set(0, 'ordinary plain text');
+  const mobile = attachNetworkHighlighting(terminal, true);
+  const beforeInitial = reads;
+  assert.equal(flushFrame(), 4);
+  assert.equal(reads - beforeInitial, 4, 'a viewport is split across frames');
+  assert.equal(frames.size, 1, 'remaining rows continue next frame without waiting for idle');
+  drain();
+  assert.equal(reads - beforeInitial, terminal.rows);
+
+  const cachedReads = reads, cachedDecorations = decorationOptions.length;
+  buffer.viewportY = 1; callbacks.get('scroll')(); drain();
+  assert.equal(reads - cachedReads, 1, 'only the newly exposed row is scanned');
+  buffer.viewportY = 0; callbacks.get('scroll')(); drain();
+  assert.equal(reads - cachedReads, 1, 'plain and colored cached rows both survive revisits');
+  assert.equal(decorationOptions.length - cachedDecorations, 1);
+
+  const beforeBurst = reads;
+  for (let y = 0; y < 5000; y++) { buffer.viewportY = y % 25; callbacks.get('scroll')(); callbacks.get('render')(); }
+  assert.equal(reads, beforeBurst, 'scroll events never scan synchronously');
+  assert.equal(frames.size, 1, 'rapid scrolls coalesce to one pending frame');
+  buffer.viewportY = 20;
+  const beforeMarkers = markerOffsets.length;
+  callbacks.get('scroll')(); flushFrame();
+  assert(markerOffsets.slice(beforeMarkers).every(offset => offset + buffer.baseY + buffer.cursorY >= 20), 'work uses the latest viewport');
+  buffer.viewportY = 0; callbacks.get('scroll')(); drain();
+
+  for (let y = 0; y < 100; y++) {
+    buffer.viewportY = y % 25; callbacks.get('scroll')(); flushFrame();
+    assert(objectsLive <= terminal.rows * 4, 'visited history retains a bounded marker/decoration cache');
+  }
+  buffer.viewportY = 0; callbacks.get('scroll')(); drain();
+
+  clockStep = 1;
+  callbacks.get('write')();
+  assert.equal(flushFrame(), 2, 'the time budget yields before the row limit is reached');
+  callbacks.get('write')(); // Output arrives while a partial pass is pending.
+  drain();
+  clockStep = 0;
+  const afterUpdates = reads;
+  mobile.refresh(); drain();
+  assert.equal(reads, afterUpdates, 'all rows eventually reach the newest output generation');
+
+  const beforeDeviceColors = decorationOptions.length;
+  deviceColored = true; callbacks.get('write')(); drain();
+  assert.equal(decorationOptions.length, beforeDeviceColors, 'device ANSI colors retain precedence');
+  deviceColored = false;
+  callbacks.get('write')(); drain();
+  assert(decorationOptions.length > beforeDeviceColors, 'removing ANSI colors restores highlights');
+  buffer.type = 'alternate'; callbacks.get('buffer')(); drain();
+  assert.equal(objectsLive, 0, 'alternate buffers release the normal-buffer cache');
+  buffer.type = 'normal'; callbacks.get('buffer')(); flushFrame();
+  mobile.dispose();
+  assert.equal(frames.size, 0, 'closing a pane cancels partial work');
+  assert.equal(objectsLive, 0, 'closing a pane releases cached rows and decorations');
+  assert.equal(timersCreated, 0);
+} finally {
+  terminal.rows = originalRows;
+  globalThis.setTimeout = originalTimeout;
+  globalThis.performance = originalPerformance;
+  delete globalThis.requestAnimationFrame;
+  delete globalThis.cancelAnimationFrame;
+}
+console.log('Mobile highlighting: row/time budgets, cached plain rows, latest viewport, output invalidation and cleanup passed');

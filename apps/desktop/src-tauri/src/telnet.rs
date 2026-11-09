@@ -2,11 +2,12 @@ use conxol_core::{
     ConnectionState, TerminalInputError, Utf8OutputDecoder, validate_terminal_input,
 };
 use conxol_telnet::{TelnetConnection, TelnetEncoding, TelnetError, TelnetOptions};
-use conxol_vault::{CredentialId, PlatformVault, SecretMaterial};
+use conxol_vault::{CredentialId, SecretMaterial};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use crate::NativeVault;
 use thiserror::Error;
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -122,7 +123,7 @@ impl TelnetManager {
                 "invalid login username".into(),
             ));
         }
-        let vault = PlatformVault::default();
+        let vault = app.state::<NativeVault>();
         let mut credential_id = request.credential_id.clone();
         let password = if let Some(password) = request.password {
             Some(SecretMaterial::from_zeroizing(password))
@@ -170,7 +171,7 @@ impl TelnetManager {
                 if vault.put(&id, password).is_err() {
                     let _ = connection.close().await;
                     return Err(TelnetManagerError::InvalidRequest(
-                        "the system credential store could not save the Telnet password".into(),
+                        "Unlock or set up the workspace PIN in Settings > Security before saving a Telnet password".into(),
                     ));
                 }
                 credential_id = Some(id.to_string());

@@ -7,7 +7,7 @@ mod notes;
 mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
 mod workspace_lock;
-use workspace_lock::{WorkspaceLock, workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure};
+use workspace_lock::{NativeVault, WorkspaceLock, workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure};
 mod tftp_server;
 use tftp_server::{TftpServerManager, tftp_server_start, tftp_server_stop, tftp_server_status};
 mod file_transfer;
@@ -51,7 +51,7 @@ use conxol_store::{
     SnippetStore,
 };
 use conxol_vault::{
-    CredentialId, CredentialLookup, PlatformVault, PortableVault, SecretMaterial, VaultError,
+    CredentialId, CredentialLookup, PortableVault, SecretMaterial, VaultError,
 };
 use zeroize::Zeroizing;
 
@@ -277,7 +277,7 @@ struct PortableVaultState {
 
 #[derive(Clone)]
 struct CredentialResolver {
-    platform: PlatformVault,
+    native: NativeVault,
     portable: Arc<Mutex<Option<PortableVault>>>,
 }
 
@@ -298,7 +298,7 @@ impl CredentialLookup for CredentialResolver {
                 Err(error) => return Err(error),
             }
         }
-        self.platform.get(credential_id)
+        self.native.get(credential_id)
     }
 }
 
@@ -728,9 +728,9 @@ fn audit_clear(store: State<'_, Mutex<AuditStore>>) -> Result<(), String> {
 
 /// Store a secret only after an explicit user action. The secret is never
 /// returned to the renderer and is owned by a zeroizing native wrapper while
-/// the platform keyring call is in progress.
+/// the encrypted credential write is in progress.
 #[tauri::command]
-fn vault_put(vault: State<'_, PlatformVault>, backup: State<'_, backup::BackupState>, payload: VaultPutRequest) -> Result<String, String> {
+fn vault_put(vault: State<'_, NativeVault>, backup: State<'_, backup::BackupState>, payload: VaultPutRequest) -> Result<String, String> {
     let _operation = backup.operation()?;
     let credential_id =
         CredentialId::new(payload.credential_id).map_err(|error| error.to_string())?;
@@ -749,7 +749,7 @@ fn vault_put(vault: State<'_, PlatformVault>, backup: State<'_, backup::BackupSt
 /// opaque reference, never credential material.
 #[tauri::command]
 fn vault_delete(
-    vault: State<'_, PlatformVault>,
+    vault: State<'_, NativeVault>,
     backup: State<'_, backup::BackupState>,
     payload: VaultCredentialRequest,
 ) -> Result<String, String> {
@@ -2163,11 +2163,12 @@ pub fn run() {
             app.manage(Mutex::new(ssh_trust::SshTrustStore::new(
                 data_dir.join("ssh-trust.json"),
             )));
-            let platform_vault = PlatformVault::default();
+            let workspace_security = WorkspaceLock::open(data_dir.join("workspace-lock.json"))?;
+            let native_vault = NativeVault(workspace_security.clone());
             let portable_vault = Arc::new(Mutex::new(None));
-            app.manage(platform_vault.clone());
+            app.manage(native_vault.clone());
             app.manage(CredentialResolver {
-                platform: platform_vault,
+                native: native_vault,
                 portable: Arc::clone(&portable_vault),
             });
             app.manage(PortableVaultState {
@@ -2186,7 +2187,7 @@ pub fn run() {
                 .map_err(|error| error.to_string())?;
             let audit =
                 AuditStore::open(data_dir.join("audit.json")).map_err(|error| error.to_string())?;
-            app.manage(WorkspaceLock::open(data_dir.join("workspace-lock.json"))?);
+            app.manage(workspace_security);
             workspace_lock::start_idle_monitor(app.handle().clone());
             app.manage(Mutex::new(store));
             app.manage(Mutex::new(settings));

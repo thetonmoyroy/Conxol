@@ -19,8 +19,8 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-// Legacy OS keyring namespace intentionally remains stable across the Conxol rename.
-const DEFAULT_SERVICE: &str = "com.othmane.mobarust";
+// Conxol credentials use their own namespace without legacy lookup or migration.
+const DEFAULT_SERVICE: &str = "com.othmane.conxol";
 const PORTABLE_MAGIC: &[u8; 8] = b"MRPVLT01";
 const PORTABLE_SALT_BYTES: usize = 16;
 const PORTABLE_NONCE_BYTES: usize = 12;
@@ -402,6 +402,17 @@ impl PortableVault {
         let path = path.into();
         ensure_portable_path_is_safe(&path, false)?;
         let bytes = read_portable_file(&path)?;
+        Self::decode(path, &bytes, passphrase)
+    }
+
+    fn decode(
+        path: PathBuf,
+        bytes: &[u8],
+        passphrase: &SecretMaterial,
+    ) -> Result<Self, VaultError> {
+        if bytes.len() > PORTABLE_MAX_FILE_BYTES {
+            return Err(VaultError::PortableFileTooLarge);
+        }
         if bytes.len() < PORTABLE_HEADER_BYTES {
             return Err(VaultError::PortableFormat("header is truncated".into()));
         }
@@ -476,6 +487,10 @@ impl PortableVault {
     }
 
     fn persist(&self) -> Result<(), VaultError> {
+        atomic_write_private(&self.path, &self.encrypted_bytes()?)
+    }
+
+    fn encrypted_bytes(&self) -> Result<Vec<u8>, VaultError> {
         if self.entries.len() > PORTABLE_MAX_CREDENTIALS {
             return Err(VaultError::PortableCredentialLimit);
         }
@@ -513,7 +528,71 @@ impl PortableVault {
         file.extend_from_slice(&self.salt);
         file.extend_from_slice(&nonce);
         file.extend_from_slice(&ciphertext);
-        atomic_write_private(&self.path, &file)
+        Ok(file)
+    }
+}
+
+/// In-memory encrypted-store state. Callers atomically persist `seal()` with
+/// their access policy, so PIN changes cannot leave policy and data out of sync.
+/// The key uses its own random salt, independent of the stored PIN verifier.
+pub struct EncryptedCredentials(PortableVault);
+impl EncryptedCredentials {
+    pub fn create(pin: &SecretMaterial) -> Result<Self, VaultError> {
+        let salt = random_bytes::<PORTABLE_SALT_BYTES>()?;
+        Ok(Self(PortableVault {
+            path: PathBuf::new(),
+            salt,
+            key: derive_portable_key(pin, &salt)?,
+            entries: BTreeMap::new(),
+        }))
+    }
+    pub fn open(bytes: &[u8], pin: &SecretMaterial) -> Result<Self, VaultError> {
+        Ok(Self(PortableVault::decode(PathBuf::new(), bytes, pin)?))
+    }
+    pub fn seal(&self) -> Result<Vec<u8>, VaultError> {
+        self.0.encrypted_bytes()
+    }
+    pub fn list_ids(&self) -> Vec<String> {
+        self.0.list_ids()
+    }
+    pub fn get(&self, id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        self.0.get(id)
+    }
+    pub fn put(&mut self, id: &CredentialId, secret: SecretMaterial) -> Result<(), VaultError> {
+        validate_portable_secret(&secret)?;
+        if !self.0.entries.contains_key(id.as_str())
+            && self.0.entries.len() >= PORTABLE_MAX_CREDENTIALS
+        {
+            return Err(VaultError::PortableCredentialLimit);
+        }
+        self.0.entries.insert(id.to_string(), secret);
+        Ok(())
+    }
+    pub fn delete(&mut self, id: &CredentialId) {
+        self.0.entries.remove(id.as_str());
+    }
+    pub fn subset(&self, ids: &[String]) -> Result<Self, VaultError> {
+        let mut vault = PortableVault {
+            path: PathBuf::new(),
+            salt: self.0.salt,
+            key: Zeroizing::new(*self.0.key),
+            entries: BTreeMap::new(),
+        };
+        for id in ids {
+            let id = CredentialId::new(id.clone())?;
+            vault.entries.insert(id.to_string(), self.get(&id)?);
+        }
+        Ok(Self(vault))
+    }
+    pub fn with_pin(&self, pin: &SecretMaterial) -> Result<Self, VaultError> {
+        let mut next = Self::create(pin)?;
+        for (id, secret) in &self.0.entries {
+            next.put(
+                &CredentialId::new(id.clone())?,
+                SecretMaterial::new(secret.as_str()),
+            )?;
+        }
+        Ok(next)
     }
 }
 
@@ -927,10 +1006,10 @@ mod tests {
     }
 
     #[test]
-    fn default_vault_has_stable_service_namespace() {
+    fn default_vault_uses_conxol_service_namespace() {
         assert_eq!(
             format!("{:?}", PlatformVault::default()),
-            "PlatformVault { service: \"com.othmane.mobarust\" }"
+            "PlatformVault { service: \"com.othmane.conxol\" }"
         );
     }
 

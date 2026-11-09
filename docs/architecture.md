@@ -32,7 +32,7 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-core` | Secret-free session/settings/snippet/macro/audit models; connection/transfer state transitions; terminal batching |
 | `crates/conxol-ssh` | russh transport, per-hop trust/authentication, PTY channels, SFTP/SCP, forwarding, bounded remote editing/monitoring, X11 channels |
 | `crates/conxol-store` | Versioned atomic persistence; OpenSSH and profile import/export; validation and corruption refusal |
-| `crates/conxol-vault` | Native OS credential store and separate Argon2id/AES-GCM portable vault; zeroizing secret material |
+| `crates/conxol-vault` | PIN-encrypted native credentials and legacy portable vault using Argon2id/AES-GCM; zeroizing secret material |
 | `crates/conxol-network` | Bounded DNS/TCP/scan and async native Ping/MTR adapters |
 | `crates/conxol-ping` | Shared native IPv4 ICMP transport, Ping statistics/scheduler and CLI |
 | `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
@@ -160,12 +160,12 @@ Settings → Backup owns the create/restore workflow. Help → About owns saniti
 support diagnostics; the Vault tab contains credential-vault controls only.
 `backup.rs` captures saved sessions, settings, shortcuts/snippets, macros, notes,
 audit history, SSH trust, the workspace PIN policy, referenced SSH key/known-hosts
-files, and an allowlist of renderer layout preferences. Windows app-namespace
+files, and an allowlist of renderer layout preferences. PIN-encrypted native
 credentials, indexed credentials, session/jump/gateway password references, and
 unlocked portable-vault credentials are collected natively. Locked or missing
 required credentials cause export to fail rather than silently omit passwords.
 Neither credential values nor private key files are sent to React. Newly stored
-system credentials are indexed to support complete future exports.
+native credentials are indexed to support complete future exports.
 
 The `.cxb` envelope uses AES-256-GCM authenticated encryption, Argon2id with fixed
 64 MiB / three iterations, fresh salt and nonce, a versioned domain header, and a
@@ -176,13 +176,15 @@ allowlist can be staged. Backup files must be saved outside the workspace folder
 Restore first chooses a native file and returns an opaque selection token and
 filename. Password verification returns only a preview and a second opaque restore
 token. After explicit confirmation, a private sibling workspace is staged and
-validated; referenced keys are embedded, credentials get fresh system-vault IDs,
+validated; referenced keys are embedded, credentials get fresh native-vault IDs,
 and all session references are rebound. Credential/activation failure removes new
 secrets. A single atomic `active-workspace.json` pointer switches the workspace;
 original data remains in place. Further mutations are blocked until restart, when
 native stores load the selected workspace and allowlisted layout preferences are
-applied. The saved workspace PIN policy is also restored. Existing file-backed
-portable credentials are migrated into the target computer's system vault.
+applied. When restoring saved passwords, the current unlocked workspace PIN encrypts
+them in the staged workspace policy; after restart, use that current PIN.
+A restore without credentials keeps the archived PIN policy. Existing file-backed
+portable credentials in an explicitly restored backup also use the native vault.
 
 Run `cargo xtask test-backup` for synthetic round-trip, wrong-password, tamper,
 path, invalid-data, missing-secret, token, and rollback regressions. The tests use a
@@ -308,3 +310,27 @@ no application data is sent and open TCP is not treated as proof of HTTP/TLS hea
 Port scans retain their compact result format. Copy/export use the displayed
 report. `cargo xtask test-network` covers disposable loopback success/refusal,
 expired deadlines, and invalid requests without querying external targets.
+
+## PIN-encrypted native credential store
+
+The desktop uses `workspace_lock::NativeVault` for SSH auto-login, explicit saved
+credentials, Telnet, and backup restore. It does not access OS credential stores
+or migrate old Keychain/Credential Manager records. Configure the existing 4–12
+numeric-digit screen-lock PIN before saving passwords. Connections without saved
+passwords remain available without a PIN.
+
+`workspace-lock.json` contains the PIN verifier and an encrypted credential blob.
+The credential encryption key is derived separately with an independent random
+salt using Argon2id (64 MiB, three iterations); the stored verifier cannot decrypt
+it. AES-256-GCM uses a fresh nonce on each save. The existing portable file format
+and bounded decoder are reused through `EncryptedCredentials`. The PIN itself
+is never persisted. Longer PINs better resist offline guessing of a copied file;
+the unlock retry delay only limits attempts through the app.
+
+Unlock verifies the PIN and authenticates the blob before enabling access. Manual
+and idle locks drop decrypted credentials and their zeroizing key. Credential
+changes and PIN changes serialize through the same native operation lock. A PIN
+change atomically saves its new verifier and re-encrypted blob in one private
+file; failed writes preserve the previous in-memory state. Disabling protection
+requires deleting saved credentials first. Legacy portable-vault controls remain
+available explicitly, with no OS fallback.

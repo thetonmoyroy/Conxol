@@ -8,6 +8,22 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 
 class MainActivity : TauriActivity() {
+    override fun onResume() {
+        super.onResume()
+        window.decorView.post {
+            val display = window.decorView.display ?: return@post
+            val mode = display.mode
+            val available = display.supportedModes
+                .filter { it.physicalWidth == mode.physicalWidth && it.physicalHeight == mode.physicalHeight }
+                .maxOfOrNull { it.refreshRate } ?: mode.refreshRate
+            // Request up to 120Hz without changing resolution or system settings.
+            // Android still applies the device's battery and display policies.
+            window.attributes = window.attributes.apply {
+                preferredRefreshRate = minOf(120f, available)
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)

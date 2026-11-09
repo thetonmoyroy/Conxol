@@ -1,4 +1,7 @@
 use argon2::{Algorithm, Argon2, Params, Version};
+use conxol_vault::{
+    CredentialId, CredentialLookup, EncryptedCredentials, SecretMaterial, VaultError,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -23,10 +26,13 @@ struct Policy {
     idle_minutes: u32,
     failures: u32,
     retry_at: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vault: Option<Vec<u8>>,
 }
 struct Inner {
     policy: Option<Policy>,
     last_activity: Instant,
+    vault: Option<EncryptedCredentials>,
 }
 #[derive(Clone)]
 pub struct WorkspaceLock {
@@ -73,13 +79,14 @@ impl WorkspaceLock {
     pub fn open(path: PathBuf) -> Result<Self, String> {
         let policy = match fs::symlink_metadata(&path) {
             Ok(meta) => {
-                if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 8192 {
+                if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 40 * 1024 * 1024
+                {
                     return Err("Workspace lock configuration is invalid.".into());
                 }
                 let mut bytes = Vec::new();
                 fs::File::open(&path)
                     .map_err(|_| "Could not read workspace lock.")?
-                    .take(8193)
+                    .take(40 * 1024 * 1024 + 1)
                     .read_to_end(&mut bytes)
                     .map_err(|_| "Could not read workspace lock.")?;
                 let policy: Option<Policy> = serde_json::from_slice(&bytes)
@@ -101,6 +108,7 @@ impl WorkspaceLock {
             inner: Arc::new(Mutex::new(Inner {
                 policy,
                 last_activity: Instant::now(),
+                vault: None,
             })),
             operation: Arc::new(Mutex::new(())),
             locked: Arc::new(AtomicBool::new(locked)),
@@ -199,14 +207,29 @@ impl WorkspaceLock {
         {
             self.verify(pin)?;
         }
-        self.inner
+        let mut inner = self
+            .inner
             .lock()
-            .map_err(|_| "Workspace lock unavailable.")?
-            .last_activity = Instant::now();
+            .map_err(|_| "Workspace lock unavailable.")?;
+        if let Some(policy) = inner.policy.as_mut() {
+            let secret = SecretMaterial::new(pin);
+            let vault = match &policy.vault {
+                Some(bytes) => EncryptedCredentials::open(bytes, &secret),
+                None => EncryptedCredentials::create(&secret),
+            }
+            .map_err(|_| "Could not unlock encrypted credentials. Workspace remains locked.")?;
+            if policy.vault.is_none() {
+                policy.vault = Some(vault.seal().map_err(|_| "Could not encrypt credentials.")?);
+                self.persist(&Some(policy.clone()))?;
+            }
+            inner.vault = Some(vault);
+        }
+        inner.last_activity = Instant::now();
         self.locked.store(false, Ordering::Release);
+        drop(inner);
         self.status()
     }
-    fn configure(&self, request: ConfigureLock) -> Result<LockStatus, String> {
+    pub(crate) fn configure(&self, request: ConfigureLock) -> Result<LockStatus, String> {
         let _operation = self
             .operation
             .try_lock()
@@ -244,16 +267,44 @@ impl WorkspaceLock {
                     idle_minutes: request.idle_minutes,
                     failures: 0,
                     retry_at: 0,
+                    vault: None,
                 })
             }
         } else {
             None
         };
-        self.persist(&policy)?;
+        let mut policy = policy;
         let mut inner = self
             .inner
             .lock()
             .map_err(|_| "Workspace lock unavailable.")?;
+        if policy.is_none()
+            && inner
+                .vault
+                .as_ref()
+                .is_some_and(|v| !v.list_ids().is_empty())
+        {
+            return Err("Delete saved credentials before turning off the PIN lock. The PIN protects their encryption.".into());
+        }
+        let next_vault = if policy.is_some() {
+            let pin = SecretMaterial::new(if request.new_pin.is_empty() {
+                &*request.current_pin
+            } else {
+                &*request.new_pin
+            });
+            let vault = match &inner.vault {
+                Some(vault) => vault.with_pin(&pin),
+                None => EncryptedCredentials::create(&pin),
+            }
+            .map_err(|_| "Could not prepare encrypted credentials.")?;
+            policy.as_mut().unwrap().vault =
+                Some(vault.seal().map_err(|_| "Could not encrypt credentials.")?);
+            Some(vault)
+        } else {
+            None
+        };
+        self.persist(&policy)?;
+        inner.vault = next_vault;
         inner.policy = policy;
         inner.last_activity = Instant::now();
         drop(inner);
@@ -267,28 +318,140 @@ impl WorkspaceLock {
         }
     }
     fn lock_now(&self) -> bool {
-        if let Ok(inner) = self.inner.lock()
+        let Ok(_operation) = self.operation.lock() else {
+            return false;
+        };
+        if let Ok(mut inner) = self.inner.lock()
             && inner.policy.is_some()
         {
+            inner.vault = None;
             return !self.locked.swap(true, Ordering::AcqRel);
         }
         false
     }
     fn lock_if_idle(&self) -> bool {
+        let Ok(_operation) = self.operation.try_lock() else {
+            return false;
+        };
         if self.is_locked() {
             return false;
         }
-        if let Ok(inner) = self.inner.lock()
+        if let Ok(mut inner) = self.inner.lock()
             && let Some(policy) = &inner.policy
             && policy.idle_minutes > 0
             && inner.last_activity.elapsed()
                 >= Duration::from_secs(u64::from(policy.idle_minutes) * 60)
         {
+            inner.vault = None;
             return !self.locked.swap(true, Ordering::AcqRel);
         }
         false
     }
 }
+/// App-owned credential store, sharing the screen-lock lifecycle.
+#[derive(Clone)]
+pub struct NativeVault(pub WorkspaceLock);
+impl NativeVault {
+    fn access(&self) -> Result<std::sync::MutexGuard<'_, Inner>, VaultError> {
+        let inner = self.0.inner.lock().map_err(|_| {
+            VaultError::PortableStateUnavailable("Workspace security unavailable.".into())
+        })?;
+        if self.0.is_locked() || inner.vault.is_none() {
+            return Err(VaultError::PortableStateUnavailable(
+                "Set up or unlock the workspace PIN in Settings > Security to use saved passwords."
+                    .into(),
+            ));
+        }
+        Ok(inner)
+    }
+    pub fn get(&self, id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        self.access()?.vault.as_ref().unwrap().get(id)
+    }
+    pub fn list_ids(&self) -> Result<Vec<String>, VaultError> {
+        let inner = self.0.inner.lock().map_err(|_| {
+            VaultError::PortableStateUnavailable("Workspace security unavailable.".into())
+        })?;
+        if inner.policy.is_none() {
+            return Ok(Vec::new());
+        }
+        if self.0.is_locked() {
+            return Err(VaultError::PortableStateUnavailable(
+                "Unlock the workspace first.".into(),
+            ));
+        }
+        Ok(inner
+            .vault
+            .as_ref()
+            .map_or_else(Vec::new, EncryptedCredentials::list_ids))
+    }
+    pub fn put(&self, id: &CredentialId, secret: &SecretMaterial) -> Result<(), VaultError> {
+        self.update(id, Some(SecretMaterial::new(secret.as_str())))
+    }
+    pub fn delete(&self, id: &CredentialId) -> Result<(), VaultError> {
+        self.update(id, None)
+    }
+    fn update(&self, id: &CredentialId, secret: Option<SecretMaterial>) -> Result<(), VaultError> {
+        let _operation = self.0.operation.lock().map_err(|_| {
+            VaultError::PortableStateUnavailable("Workspace security unavailable.".into())
+        })?;
+        let mut inner = self.access()?;
+        let vault = inner.vault.as_mut().unwrap();
+        let previous = match vault.get(id) {
+            Ok(value) => Some(value),
+            Err(VaultError::PortableCredentialMissing(_)) => None,
+            Err(error) => return Err(error),
+        };
+        match secret {
+            Some(secret) => vault.put(id, secret)?,
+            None => vault.delete(id),
+        }
+        let sealed = vault.seal();
+        let result = (|| {
+            let bytes = sealed?;
+            let mut policy = inner.policy.clone().unwrap();
+            policy.vault = Some(bytes);
+            self.0
+                .persist(&Some(policy.clone()))
+                .map_err(VaultError::PortableStateUnavailable)?;
+            inner.policy = Some(policy);
+            Ok(())
+        })();
+        if result.is_err() {
+            let vault = inner.vault.as_mut().unwrap();
+            match previous {
+                Some(secret) => {
+                    vault.put(id, secret)?;
+                }
+                None => vault.delete(id),
+            }
+        }
+        result
+    }
+    pub fn stage_policy(&self, directory: &std::path::Path, ids: &[String]) -> Result<(), String> {
+        let inner = self.access().map_err(|e| e.to_string())?;
+        let target = WorkspaceLock::open(directory.join("workspace-lock.json"))?;
+        let mut policy = inner
+            .policy
+            .clone()
+            .ok_or("Set up the workspace PIN first.")?;
+        policy.vault = Some(
+            inner
+                .vault
+                .as_ref()
+                .unwrap()
+                .subset(ids)
+                .and_then(|v| v.seal())
+                .map_err(|_| "Could not encrypt restored passwords.")?,
+        );
+        target.persist(&Some(policy))
+    }
+}
+impl CredentialLookup for NativeVault {
+    fn get(&self, id: &CredentialId) -> Result<SecretMaterial, VaultError> {
+        self.get(id)
+    }
+}
+
 #[tauri::command]
 pub fn workspace_lock_status(state: State<'_, WorkspaceLock>) -> Result<LockStatus, String> {
     state.status()
@@ -357,7 +520,11 @@ mod tests {
         assert!(!state.status().unwrap().enabled);
         assert!(state.configure(configure(true, "", "123", 5)).is_err());
         assert!(state.configure(configure(true, "", "abcdef", 5)).is_err());
-        assert!(state.configure(configure(true, "", "1234567890123", 5)).is_err());
+        assert!(
+            state
+                .configure(configure(true, "", "1234567890123", 5))
+                .is_err()
+        );
         state.configure(configure(true, "", "8392", 1)).unwrap();
         assert!(!state.is_locked());
         let stored = fs::read_to_string(&path).unwrap();
@@ -403,12 +570,109 @@ mod tests {
             .unwrap();
         cold.inner.lock().unwrap().last_activity = Instant::now() - Duration::from_secs(10000);
         assert!(!cold.lock_if_idle());
-        cold.configure(configure(false, "927183045612", "", 0)).unwrap();
+        cold.configure(configure(false, "927183045612", "", 0))
+            .unwrap();
         assert!(!cold.status().unwrap().enabled);
         assert!(
             !WorkspaceLock::open(root.path().join("lock.json"))
                 .unwrap()
                 .is_locked()
+        );
+    }
+    #[test]
+    fn native_credentials_follow_screen_lock_and_pin_changes() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lock.json");
+        let state = WorkspaceLock::open(path.clone()).unwrap();
+        let vault = NativeVault(state.clone());
+        let id = CredentialId::new("fixture-password").unwrap();
+        assert!(
+            vault
+                .put(&id, &SecretMaterial::new("fixture-only-secret"))
+                .is_err()
+        );
+        state.configure(configure(true, "", "1234", 1)).unwrap();
+        vault
+            .put(&id, &SecretMaterial::new("fixture-only-secret"))
+            .unwrap();
+        assert_eq!(vault.list_ids().unwrap(), vec!["fixture-password"]);
+        assert!(
+            !fs::read_to_string(&path)
+                .unwrap()
+                .contains("fixture-only-secret")
+        );
+        assert!(state.configure(configure(false, "1234", "", 1)).is_err());
+        state
+            .configure(configure(true, "1234", "123456789012", 1))
+            .unwrap();
+        assert_eq!(vault.get(&id).unwrap().as_str(), "fixture-only-secret");
+        let cold = WorkspaceLock::open(path.clone()).unwrap();
+        assert!(NativeVault(cold.clone()).get(&id).is_err());
+        cold.unlock("123456789012").unwrap();
+        assert_eq!(
+            NativeVault(cold.clone()).get(&id).unwrap().as_str(),
+            "fixture-only-secret"
+        );
+        assert!(state.lock_now());
+        assert!(state.inner.lock().unwrap().vault.is_none());
+        assert!(vault.get(&id).is_err());
+        state.unlock("123456789012").unwrap();
+        state.inner.lock().unwrap().last_activity = Instant::now() - Duration::from_secs(61);
+        assert!(state.lock_if_idle());
+        assert!(state.inner.lock().unwrap().vault.is_none());
+        state.unlock("123456789012").unwrap();
+        vault.delete(&id).unwrap();
+        assert!(vault.get(&id).is_err());
+        state
+            .configure(configure(false, "123456789012", "", 1))
+            .unwrap();
+    }
+    #[test]
+    fn native_credentials_tampering_fails_closed_and_rekey_is_atomic() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("lock.json");
+        let state = WorkspaceLock::open(path.clone()).unwrap();
+        state.configure(configure(true, "", "1234", 0)).unwrap();
+        let vault = NativeVault(state.clone());
+        let id = CredentialId::new("fixture").unwrap();
+        vault
+            .put(&id, &SecretMaterial::new("synthetic-value"))
+            .unwrap();
+        // Force persistence failure without touching any real credential store.
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(vault.put(&id, &SecretMaterial::new("replacement")).is_err());
+        assert_eq!(vault.get(&id).unwrap().as_str(), "synthetic-value");
+        assert!(state.configure(configure(true, "1234", "5678", 0)).is_err());
+        assert_eq!(vault.get(&id).unwrap().as_str(), "synthetic-value");
+        fs::remove_dir(&path).unwrap();
+        state.persist(&state.inner.lock().unwrap().policy).unwrap();
+        let mut policy = state.inner.lock().unwrap().policy.clone().unwrap();
+        let encrypted = policy.vault.as_mut().unwrap();
+        *encrypted.last_mut().unwrap() ^= 1;
+        state.persist(&Some(policy)).unwrap();
+        let cold = WorkspaceLock::open(path).unwrap();
+        assert!(cold.unlock("1234").is_err());
+        assert!(cold.is_locked());
+        assert!(cold.inner.lock().unwrap().vault.is_none());
+    }
+    #[test]
+    fn restored_native_policy_preserves_encrypted_passwords() {
+        let root = tempfile::tempdir().unwrap();
+        let state = WorkspaceLock::open(root.path().join("lock.json")).unwrap();
+        state.configure(configure(true, "", "4567", 0)).unwrap();
+        let vault = NativeVault(state);
+        let id = CredentialId::new("restored-synthetic").unwrap();
+        vault
+            .put(&id, &SecretMaterial::new("fixture-secret"))
+            .unwrap();
+        let stage = root.path().join("staged");
+        vault.stage_policy(&stage, &[id.to_string()]).unwrap();
+        let restored = WorkspaceLock::open(stage.join("workspace-lock.json")).unwrap();
+        restored.unlock("4567").unwrap();
+        assert_eq!(
+            NativeVault(restored).get(&id).unwrap().as_str(),
+            "fixture-secret"
         );
     }
     #[test]

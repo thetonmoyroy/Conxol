@@ -9,7 +9,7 @@ use conxol_ssh::{
     SshError, SshOutput, X11ForwardingOptions, negotiate_socks5, send_socks5_reply,
     validate_forward_host,
 };
-use conxol_vault::{CredentialId, CredentialLookup, PlatformVault, SecretMaterial, VaultError};
+use conxol_vault::{CredentialId, CredentialLookup, SecretMaterial, VaultError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, VecDeque};
@@ -20,7 +20,8 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
+use crate::NativeVault;
 use thiserror::Error;
 use tokio::fs::{self, OpenOptions};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf, copy_bidirectional};
@@ -541,6 +542,7 @@ struct AuthPromptContext {
     username: String,
     terminal_id: Option<String>,
     saved_password: Option<Arc<Mutex<SavedPassword>>>,
+    native_vault: Option<NativeVault>,
 }
 
 struct AuthenticationGuard {
@@ -575,7 +577,7 @@ impl AuthPromptContext {
                 .map_err(|_| SshError::AuthenticationCancelled)?;
             if !saved.tried {
                 saved.tried = true;
-                if let Ok(secret) = PlatformVault::default().get(&saved.id) {
+                if let Some(vault) = &self.native_vault && let Ok(secret) = vault.get(&saved.id) {
                     return Ok(vec![SshSecret::from_zeroizing(secret.into_zeroizing())]);
                 }
             }
@@ -816,7 +818,7 @@ impl SshManager {
         let connection = tokio::select! {
             biased;
             _ = shutdown.changed() => return Err(SshManagerError::Closed),
-            result = connect_transport(vault.as_ref(), &request, self, &auth_events, None) => result.inspect_err(record_connection_diagnostic)?,
+            result = connect_transport(vault.as_ref(), app.state::<NativeVault>().inner().clone(), &request, self, &auth_events, None) => result.inspect_err(record_connection_diagnostic)?,
         };
         let connection = Arc::new(connection);
         let shell = tokio::select! {
@@ -1945,6 +1947,7 @@ fn record_connection_diagnostic(error: &SshManagerError) {
 
 async fn connect_transport(
     vault: &dyn CredentialLookup,
+    native_vault: NativeVault,
     request: &SshConnectRequest,
     manager: &SshManager,
     auth_events: &Channel<SshAuthEvent>,
@@ -1984,6 +1987,7 @@ async fn connect_transport(
             username: username.to_owned(),
             terminal_id: terminal_id.map(str::to_owned),
             saved_password: Some(saved),
+            native_vault: Some(native_vault.clone()),
         }
     };
     let credentials = credentials_from_auth(
@@ -2043,7 +2047,7 @@ async fn connect_transport(
             (saved.id.clone(), saved.label.clone(), saved.pending.take())
         };
         if let Some(secret) = secret {
-            let vault = PlatformVault::default();
+            let vault = &native_vault;
             let decision_id =
                 CredentialId::new(format!("{}.decision", id)).expect("decision identifier");
             let decision = vault.get(&decision_id).ok();
@@ -2052,7 +2056,7 @@ async fn connect_transport(
             } else {
                 let result = rfd::AsyncMessageDialog::new()
                     .set_title("Save SSH password?")
-                    .set_description(format!("Login successful: {label}\n\nSave password for auto login? It will be stored in your operating system credential manager."))
+                    .set_description(format!("Login successful: {label}\n\nSave password for auto login? It will be encrypted with your workspace PIN. Set up the PIN in Settings > Security first."))
                     .set_buttons(rfd::MessageButtons::YesNo)
                     .show().await;
                 let save = result == rfd::MessageDialogResult::Yes;
@@ -2070,7 +2074,7 @@ async fn connect_transport(
             if save && vault.put(&id, &secret).is_err() {
                 rfd::AsyncMessageDialog::new()
                     .set_title("Password could not be saved")
-                    .set_description("Login succeeded, but the operating system credential store could not save the password. You will be asked again on your next connection.")
+                    .set_description("Login succeeded, but the encrypted vault could not save the password. Set up or unlock the workspace PIN in Settings > Security. You will be asked again on your next connection.")
                     .show().await;
             }
         }
@@ -2367,6 +2371,7 @@ async fn run_remote_session(
                     |_attempt| ssh_diagnostics::scope(DiagnosticOperation::Reconnect, request.connect_timeout_ms, request.jump_hosts.len(), async {
                         let new_connection = connect_transport(
                             vault.as_ref(),
+                            app.state::<NativeVault>().inner().clone(),
                             &request,
                             &manager,
                             &auth_events,
@@ -5159,6 +5164,7 @@ mod tests {
             username: "fixture".into(),
             terminal_id: None,
             saved_password: None,
+            native_vault: None,
         };
         (context, receiver)
     }
