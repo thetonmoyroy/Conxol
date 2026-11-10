@@ -3,6 +3,7 @@
 use crate::gre::Gre;
 use std::{
     fs, io,
+    io::{Read, Write},
     mem::{size_of, zeroed},
     net::Ipv4Addr,
     os::{
@@ -248,7 +249,7 @@ pub fn open_gre(
                 ));
             }
             match listener.accept() {
-                Ok((stream, _)) => {
+                Ok((mut stream, _)) => {
                     if peer_uid(&stream).map_err(context("verify helper identity"))? != 0 {
                         return Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,
@@ -259,7 +260,14 @@ pub fn open_gre(
                         .set_read_timeout(Some(Duration::from_secs(2)))
                         .map_err(context("configure handoff timeout"))?;
                     let fd = receive_fd(&stream).map_err(context("receive GRE descriptor"))?;
-                    return Gre::from_socket(fd, local, remote, call);
+                    let gre = Gre::from_socket(fd, local, remote, call)?;
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(2)))
+                        .map_err(context("configure handoff acknowledgement timeout"))?;
+                    stream
+                        .write_all(&[2])
+                        .map_err(context("acknowledge GRE descriptor"))?;
+                    return Ok(gre);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
                 Err(e) => return Err(context("accept helper connection")(e)),
@@ -315,7 +323,7 @@ fn helper(args: &[String]) -> io::Result<()> {
     if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
         return Err(io::Error::other("Invalid helper directory"));
     }
-    let stream = UnixStream::connect(path)?;
+    let mut stream = UnixStream::connect(path)?;
     if peer_uid(&stream)? != uid {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -335,7 +343,17 @@ fn helper(args: &[String]) -> io::Result<()> {
     }
     // SAFETY: exclusive newly created descriptor, closed immediately after send.
     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    send_fd(&stream, &fd)
+    // Keep the connection alive until the app has configured its timeouts and
+    // accepted the descriptor. Darwin rejects SO_RCVTIMEO with EINVAL once the
+    // peer has disconnected, even when SCM_RIGHTS data is still queued.
+    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+    send_fd(&stream, &fd)?;
+    let mut acknowledgement = [0];
+    stream.read_exact(&mut acknowledgement)?;
+    if acknowledgement != [2] {
+        return Err(io::Error::other("Invalid GRE handoff acknowledgement"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -418,7 +436,7 @@ mod tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             loop {
                 match listener.accept() {
-                    Ok((stream, _)) => {
+                    Ok((mut stream, _)) => {
                         assert_eq!(peer_uid(&stream).expect("root peer identity"), 0);
                         stream
                             .set_read_timeout(Some(Duration::from_secs(2)))
@@ -426,6 +444,7 @@ mod tests {
                         let fd = receive_fd(&stream).expect("receive root GRE descriptor");
                         Gre::from_socket(fd, Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1)
                             .expect("configure transferred GRE socket");
+                        stream.write_all(&[2]).expect("acknowledge handoff");
                         return Ok(());
                     }
                     Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
