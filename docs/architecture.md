@@ -39,19 +39,16 @@ traceroute processing remain Rust-owned. React merges scan batches for display.
 | `crates/conxol-mtr` | Native MTR sweep scheduler and hop statistics, using conxol-ping transport |
 | `crates/conxol-telnet` | Plaintext Telnet negotiation, transport, and lifecycle |
 | `crates/conxol-serial` | Serial configuration, transport, and recoverable device loss |
-| `crates/conxol-remote-desktop` | Versioned bounded helper frames, capability validation, credentials/control separation, process supervision |
 | `apps/desktop/src-tauri/src/main.rs` | Tauri command registration, app stores/vaults, sanitized diagnostics, native pickers |
-| `apps/desktop/src-tauri/src/{ssh,terminal,network,serial,telnet,remote_desktop}.rs` | Session/job managers, typed request validation, cancellation, event routing, cleanup |
+| `apps/desktop/src-tauri/src/{ssh,terminal,network,serial,telnet}.rs` | Session/job managers, typed request validation, cancellation, event routing, cleanup |
 | `apps/desktop/src/App.tsx` and focused `.ts` modules | Operator UI and interaction policies, including macro targets, paste confirmation, remote paths, and saved-session requests |
-| `tools/vnc-helper` | Isolated experimental VNC engine and controlled local RFB fixtures; normally packaged |
-| `tools/rdp-helper` | Isolated experimental IronRDP engine and opt-in local server fixtures; excluded from normal bundles under its advisory gate |
 | `xtask` | Sanitized developer validation, helper staging, packaging/checksum/layout audits, benchmarks |
 | `benchmarks`, `fuzz` | Synthetic in-memory probes and isolated fuzz targets |
 | `site`, `tools/release-assets.mjs` | Static project presentation and installer/version/checksum validation |
 
-The two helper tools have separate Cargo workspaces/lockfiles. Keeping the RDP
-candidate outside the desktop workspace prevents its experimental crypto and
-native dependencies from weakening the SSH or portable-vault boundaries.
+RDP/VNC support is retired. Only legacy protocol tags and opaque saved metadata
+remain for data compatibility; no runtime or helper is installed. See
+[the removal decision](adr/0036-retire-remote-desktop-support.md).
 
 Tools > PPTP manager is a React dialog hosted by the existing Tauri app.
 `apps/desktop/src-tauri/src/pptp.rs` owns profile persistence, PIN-vault password
@@ -93,7 +90,7 @@ uses bounded reads and revision checks before complete-file promotion with
 rollback attempts. See the [threat model](security/threat-model.md),
 [SSH lab](testing/ssh-lab.md), and individual [decision records](adr/).
 
-RDP/VNC interoperability, hardware serial behavior, signing, and full platform
+Hardware serial behavior, signing, and full platform
 runtime coverage are tracked separately in the [roadmap](../ROADMAP.md) and
 [evidence matrix](testing/hardware-interoperability.md).
 

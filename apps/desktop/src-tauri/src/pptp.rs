@@ -175,6 +175,15 @@ pub struct PptpManager {
     stopping: Arc<AtomicBool>,
 }
 impl PptpManager {
+    pub(crate) fn browser_route(&self, id: Uuid) -> Result<(String, String), String> {
+        let store = self.store.lock().map_err(|_| "PPTP profiles unavailable")?;
+        let profile = store
+            .profiles
+            .iter()
+            .find(|profile| profile.id == id)
+            .ok_or("PPTP profile not found")?;
+        Ok((profile.name.clone(), profile.server.clone()))
+    }
     /// Share an existing attempt or start the assigned profile once, then await readiness.
     pub async fn ensure_connected(
         &self,
@@ -199,7 +208,7 @@ impl PptpManager {
         .ready()
         .await
     }
-    fn connector(&self, id: Uuid) -> Result<conxol_pptp::transport::Connector, String> {
+    pub(crate) fn connector(&self, id: Uuid) -> Result<conxol_pptp::transport::Connector, String> {
         if self.stopping.load(Ordering::Acquire) {
             return Err("Conxol is shutting down.".into());
         }

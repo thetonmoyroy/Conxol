@@ -10,6 +10,18 @@ pub enum ThemePreference {
     Dark,
     Light,
     System,
+    Dracula,
+    Nord,
+    Gruvbox,
+    #[serde(rename = "tokyoNight")]
+    TokyoNight,
+    Catppuccin,
+    #[serde(rename = "oneDark")]
+    OneDark,
+    #[serde(rename = "solarizedDark")]
+    SolarizedDark,
+    #[serde(rename = "solarizedLight")]
+    SolarizedLight,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -238,7 +250,7 @@ impl AppSettings {
                     && value.starts_with('#')
                     && value[1..].bytes().all(|b| b.is_ascii_hexdigit()))
         };
-        if !["", "dark", "light", "midnight"].contains(&terminal.color_theme.as_str())
+        if !["", "dark", "light", "midnight", "dracula", "nord", "gruvbox", "tokyoNight", "catppuccin", "oneDark", "solarizedDark", "solarizedLight"].contains(&terminal.color_theme.as_str())
             || !color_valid(&terminal.background)
             || !color_valid(&terminal.foreground)
         {
@@ -458,6 +470,17 @@ mod tests {
             serde_json::from_str::<AppSettings>(&json).unwrap(),
             settings
         );
+        for preset in ["dracula", "nord", "gruvbox", "tokyoNight", "catppuccin", "oneDark", "solarizedDark", "solarizedLight"] {
+            settings.terminal.color_theme = preset.into();
+            assert!(settings.validate().is_ok());
+            let json = serde_json::to_string(&settings).unwrap();
+            assert_eq!(serde_json::from_str::<AppSettings>(&json).unwrap(), settings);
+        }
+        for theme in ["dracula", "nord", "gruvbox", "tokyoNight", "catppuccin", "oneDark", "solarizedDark", "solarizedLight"] {
+            settings.general.theme = serde_json::from_value(serde_json::json!(theme)).unwrap();
+            let json = serde_json::to_string(&settings).unwrap();
+            assert_eq!(serde_json::from_str::<AppSettings>(&json).unwrap(), settings);
+        }
         for color in ["red", "#123", "#xyzxyz", "#12345678"] {
             settings.terminal.background = color.into();
             assert_eq!(

@@ -12,51 +12,18 @@ These unsigned previews are separate from the signed production distribution
 gates below. They do not establish publisher authenticity, notarization, full
 GUI clean-install behavior, or real-server interoperability.
 
-Conxol packages the native VNC helper as an isolated resource. The desktop
-process resolves it from its Tauri resource directory and never launches a
-helper from an arbitrary user-provided path. The IronRDP candidate remains an
-isolated development helper and is deliberately excluded from normal bundles
-until its dependency audit is clean.
+## Build inputs
 
-## Local staging
+RDP/VNC runtime support and helper resources have been removed. The Tauri build
+hook (`tools/prepare-desktop.mjs`) builds the frontend only; there is no helper
+staging step or protocol helper workspace. Native package layouts require the
+application executable and configured license/icon resources.
 
-From `apps/desktop`, the Tauri build hook runs:
-
-```text
-node ../../tools/prepare-desktop.mjs
-```
-
-That command builds the VNC helper workspace in release mode and copies only
-its current-platform executable into the ignored
-`apps/desktop/src-tauri/helpers/` directory. Staging is repository-scoped and
-does not start an application protocol session, read credentials, or inspect
-personal configuration. Cargo may use its configured package registry when a
-dependency is not cached. The generated files must never be committed.
-
-`cargo xtask stage-helpers` can be run directly when inspecting the staging
-step. `cargo xtask check` remains the normal validation command and does not
-turn the application into portable mode.
-
-On an Apple Silicon Mac, release DMGs can be built for both Mac architectures
-without starting the GUI. The target variable makes the build hook stage an
-Intel VNC helper for the Intel package; use it with the matching Tauri target:
-
-```bash
-cd apps/desktop
-CI=true TAURI_BUNDLER_DMG_IGNORE_CI=false pnpm tauri build --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
-CI=true TAURI_BUNDLER_DMG_IGNORE_CI=false CONXOL_PACKAGE_TARGET=x86_64-apple-darwin pnpm tauri build --target x86_64-apple-darwin --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
-```
-
-These process-local variables select headless DMG assembly and skip
-[Tauri's Finder styling script](https://github.com/tauri-apps/tauri/blob/dev/crates/tauri-bundler/src/bundle/macos/dmg/mod.rs).
-They do not enable or run GitHub Actions.
-Run the two builds sequentially because helper staging is shared.
-
-The Intel DMG is under `target/x86_64-apple-darwin/release/bundle/dmg/`.
-Verify its mounted app and helper architectures with `lipo -archs`, its package
-layout with `cargo xtask verify-platform-layout`, and its signature with
-`cargo xtask verify-macos-signature`. Cross-building on Apple Silicon does not
-prove clean installation or GUI behavior on an Intel Mac.
+For ordinary changes, run focused checks or a development build. Build release
+binaries, installers, or bump versions only when explicitly requested. For
+packages produced in GitHub Actions, use the GitHub-hosted publishing workflow
+and verify both source checksums and uploaded asset hashes; do not download
+packages locally merely to re-upload them.
 
 `tools/release-assets.mjs collect` accepts the bundle directory as its fourth
 argument and an output directory as its fifth. Use an empty, version-specific
@@ -90,9 +57,8 @@ bundle and verifies that the Tauri resource step completes. The bundle
 configuration includes the versioned Conxol mark from
 `apps/desktop/src-tauri/icons/icon.png`, so the application icon is generated
 into the platform bundle rather than remaining a source-only asset. On macOS
-it also checks the app executable and the shippable VNC helper resource is a
-regular file inside the bundle, while asserting that the unshippable RDP
-candidate is absent. It writes a `Conxol.sha256` manifest beside the generated
+it also checks that the app executable is a regular executable file inside
+the bundle. It writes a `Conxol.sha256` manifest beside the generated
 bundle and verifies it immediately; the manifest uses the portable two-space
 SHA-256 format accepted by both `sha256sum` and macOS `shasum`, and covers every
 regular file in the artifact scope. It is a packaging smoke test, not code-signing,

@@ -33,24 +33,27 @@ function WordList(props: ComponentProps<"textarea">) {
   return <textarea {...props} ref={ref} rows={1} wrap="soft" />;
 }
 
-export function SyntaxHighlightSettings({ onClose }: { onClose: () => void }) {
-  const formRef = useRef<HTMLFormElement>(null);
+export function SyntaxHighlightSettings({ onClose, embedded = false, onRulesChange }: { onClose: () => void; embedded?: boolean; onRulesChange?: (rules: HighlightRule[]) => void }) {
+  const formRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
+    if (embedded) return;
     const previous = document.activeElement;
     formRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
     return () => { if (previous instanceof HTMLElement && previous.isConnected) previous.focus(); };
-  }, []);
+  }, [embedded]);
   const [rules, setRules] = useState(getHighlightRules);
+  useEffect(() => { onRulesChange?.(rules); }, [rules, onRulesChange]);
+  const Form = embedded ? "div" : "form";
   const [error, setError] = useState("");
   const update = (id: string, patch: Partial<HighlightRule>) => setRules(current => current.map(rule => rule.id === id ? { ...rule, ...patch } : rule));
-  return <div className="palette-backdrop" onMouseDown={onClose}>
-    <form ref={formRef} onKeyDown={event => { if (event.key === "Escape") onClose(); }} className="syntax-settings" role="dialog" aria-modal="true" aria-labelledby="syntax-settings-title" onMouseDown={event => event.stopPropagation()} onSubmit={event => {
+  return <div className={embedded ? "syntax-settings-embedded" : "palette-backdrop"} onMouseDown={embedded ? undefined : onClose}>
+    <Form ref={(node: HTMLFormElement | HTMLDivElement | null) => { formRef.current = node; }} onKeyDown={event => { if (!embedded && event.key === "Escape") { event.stopPropagation(); onClose(); } }} className="syntax-settings" role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-labelledby="syntax-settings-title" onMouseDown={event => event.stopPropagation()} onSubmit={event => {
       event.preventDefault();
       const tooManyWords = rules.some(rule => rule.words !== undefined && (rule.words.split(",").filter(word => word.trim()).length > MAX_GROUP_WORDS || rule.words.split(",").some(word => word.trim().length > MAX_HIGHLIGHT_TEXT)));
       if (tooManyWords) { setError(`Use up to ${MAX_GROUP_WORDS} words per list, with up to ${MAX_HIGHLIGHT_TEXT} characters each.`); return; }
       try { saveHighlightRules(rules); onClose(); } catch { setError("Could not save highlighting settings. Please try again."); }
     }}>
-      <div className="quick-connect-heading"><h2 id="syntax-settings-title">Highlight words</h2><button type="button" className="icon-button" aria-label="Close syntax highlighting" onClick={onClose}><X size={17} /></button></div>
+      {!embedded && <div className="quick-connect-heading"><h2 id="syntax-settings-title">Highlight words</h2><button type="button" className="icon-button" aria-label="Close syntax highlighting" onClick={onClose}><X size={17} /></button></div>}
       <p>Separate words with commas, then pick a color. Capital letters don’t matter. Up to {MAX_GROUP_WORDS} words per list.</p>
       <div className="syntax-rules">
         {rules.map((rule, index) => <div className="syntax-rule" key={rule.id}>
@@ -64,7 +67,7 @@ export function SyntaxHighlightSettings({ onClose }: { onClose: () => void }) {
       <div className="syntax-rule-actions"><button type="button" className="outline-button" disabled={rules.length >= MAX_HIGHLIGHT_RULES} onClick={() => setRules(current => [...current, { id: crypto.randomUUID(), text: "", color: "#e8b45c" }])}>Add a word</button><span>{rules.length} of {MAX_HIGHLIGHT_RULES} available</span><button type="button" className="outline-button" onClick={() => setRules(defaultHighlightRules())}>Reset to defaults</button></div>
       {error && <p role="alert">{error}</p>}
       <p>Colors already sent by your device stay as they are.</p>
-      <div className="syntax-footer"><button type="button" className="outline-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button">Save</button></div>
-    </form>
+      {!embedded && <div className="syntax-footer"><button type="button" className="outline-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button">{embedded ? "Save highlighting" : "Save"}</button></div>}
+    </Form>
   </div>;
 }

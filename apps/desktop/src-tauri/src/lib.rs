@@ -1,32 +1,46 @@
-
+mod backup;
 mod logging;
 mod store_updates;
-mod backup;
-use backup::{workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences};
+use backup::{
+    workspace_backup_cancel, workspace_backup_choose, workspace_backup_export,
+    workspace_backup_inspect, workspace_backup_preferences, workspace_backup_restart,
+    workspace_backup_restore,
+};
+mod clipboard;
 mod notes;
 mod pptp;
+mod pptp_browser;
 mod pptp_diagnostics;
-mod clipboard;
 use clipboard::{clipboard_read_text, clipboard_write_text};
 mod workspace_lock;
-use workspace_lock::{NativeVault, WorkspaceLock, workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure};
+use workspace_lock::{
+    NativeVault, WorkspaceLock, workspace_activity, workspace_lock_configure, workspace_lock_now,
+    workspace_lock_status, workspace_unlock,
+};
 mod tftp_server;
-use tftp_server::{TftpServerManager, tftp_server_start, tftp_server_stop, tftp_server_status};
+use tftp_server::{TftpServerManager, tftp_server_start, tftp_server_status, tftp_server_stop};
 mod file_transfer;
-use file_transfer::{FileTransferManager, file_transfer_run, file_transfer_cancel};
+use file_transfer::{FileTransferManager, file_transfer_cancel, file_transfer_run};
 mod network;
 mod output_batch;
-mod remote_desktop;
 mod serial;
 mod ssh;
 mod ssh_trust;
 mod telnet;
 mod terminal;
 
-use network::{NetworkManager, NetworkScanRequest};
-use remote_desktop::{
-    RemoteDesktopConnectRequest, RemoteDesktopConnectResponse, RemoteDesktopManager, helper_program,
+use conxol_core::{
+    AppSettings, AuditEvent, AuditEventKind, AuthMethod, JumpHostRecord, Protocol, SerialProfile,
+    SessionId, SessionRecord, TelnetProfile,
 };
+use conxol_network::{TcpCheckOptions, check_tcp_report, resolve_host};
+use conxol_ssh::{SshFingerprintOptions, inspect_host_key};
+use conxol_store::{
+    AuditStore, MacroStore, OpenSshImportReport, SessionImportReport, SessionStore, SettingsStore,
+    SnippetStore,
+};
+use conxol_vault::{CredentialId, CredentialLookup, PortableVault, SecretMaterial, VaultError};
+use network::{NetworkManager, NetworkScanRequest};
 use serde::Serialize;
 use serial::{SerialConnectRequest, SerialManager};
 use ssh::{
@@ -40,21 +54,6 @@ use tauri::State;
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use telnet::{TelnetConnectRequest, TelnetManager};
 use terminal::TerminalManager;
-use conxol_core::{
-    AppSettings, AuditEvent, AuditEventKind, AuthMethod, JumpHostRecord, Protocol,
-    RdpGatewayProfile, RemoteDesktopProfile, SerialProfile, SessionId, SessionRecord,
-    TelnetProfile,
-};
-use conxol_network::{TcpCheckOptions, check_tcp_report, resolve_host};
-use conxol_remote_desktop::HelperCommand;
-use conxol_ssh::{SshFingerprintOptions, inspect_host_key};
-use conxol_store::{
-    AuditStore, MacroStore, OpenSshImportReport, SessionImportReport, SessionStore, SettingsStore,
-    SnippetStore,
-};
-use conxol_vault::{
-    CredentialId, CredentialLookup, PortableVault, SecretMaterial, VaultError,
-};
 use zeroize::Zeroizing;
 
 const MAX_NATIVE_PICKER_PATHS: usize = 16;
@@ -151,13 +150,6 @@ struct SaveSerialSessionRequest {
 struct SaveTelnetSessionRequest {
     name: String,
     request: TelnetConnectRequest,
-}
-
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct SaveRemoteDesktopSessionRequest {
-    name: String,
-    request: RemoteDesktopConnectRequest,
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -262,13 +254,6 @@ struct PortableVaultPutRequest {
     secret: Zeroizing<String>,
 }
 
-#[derive(Debug, serde::Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RemoteDesktopClipboardRequest {
-    session_id: String,
-    text: Zeroizing<String>,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PortableVaultStatus {
@@ -317,103 +302,6 @@ fn diagnostic_timeout(timeout_ms: u64) -> Result<std::time::Duration, String> {
         return Err("diagnostic timeout must be between 50 and 60000 milliseconds".into());
     }
     Ok(std::time::Duration::from_millis(timeout_ms))
-}
-
-#[tauri::command]
-async fn remote_desktop_start(
-    app: tauri::AppHandle,
-    manager: State<'_, RemoteDesktopManager>,
-    resolver: State<'_, CredentialResolver>,
-    request: RemoteDesktopConnectRequest,
-    on_event: tauri::ipc::Channel,
-) -> Result<RemoteDesktopConnectResponse, String> {
-    let program = helper_program(&app, request.protocol)?;
-    manager.start(on_event, program, &*resolver, request).await
-}
-
-#[tauri::command]
-async fn remote_desktop_key(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-    scancode: u32,
-    pressed: bool,
-) -> Result<(), String> {
-    manager
-        .send(&session_id, HelperCommand::Key { scancode, pressed })
-        .await
-}
-
-#[tauri::command]
-async fn remote_desktop_pointer(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-    x: u16,
-    y: u16,
-    buttons: u8,
-) -> Result<(), String> {
-    manager
-        .send(&session_id, HelperCommand::Pointer { x, y, buttons })
-        .await
-}
-
-#[tauri::command]
-async fn remote_desktop_wheel(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-    x: u16,
-    y: u16,
-    delta: i16,
-) -> Result<(), String> {
-    manager
-        .send(&session_id, HelperCommand::Wheel { x, y, delta })
-        .await
-}
-
-#[tauri::command]
-async fn remote_desktop_resize(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-    width: u16,
-    height: u16,
-) -> Result<(), String> {
-    manager
-        .send(
-            &session_id,
-            HelperCommand::Resize {
-                display: conxol_remote_desktop::DisplaySize { width, height },
-            },
-        )
-        .await
-}
-
-#[tauri::command]
-async fn remote_desktop_clipboard(
-    manager: State<'_, RemoteDesktopManager>,
-    payload: RemoteDesktopClipboardRequest,
-) -> Result<(), String> {
-    manager
-        .send(
-            &payload.session_id,
-            HelperCommand::Clipboard { text: payload.text },
-        )
-        .await
-}
-
-#[tauri::command]
-async fn remote_desktop_framebuffer(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-    generation: u64,
-) -> Result<tauri::ipc::Response, String> {
-    manager.take_framebuffer(&session_id, generation).await
-}
-
-#[tauri::command]
-async fn remote_desktop_stop(
-    manager: State<'_, RemoteDesktopManager>,
-    session_id: String,
-) -> Result<(), String> {
-    manager.stop(&session_id).await
 }
 
 #[tauri::command]
@@ -469,7 +357,9 @@ async fn diagnostic_export_save() -> Result<bool, String> {
 }
 
 fn save_diagnostic_export(path: Option<PathBuf>) -> Result<bool, String> {
-    let Some(path) = path else { return Ok(false); };
+    let Some(path) = path else {
+        return Ok(false);
+    };
     let report = diagnostic_export()?;
     std::fs::write(path, report.as_bytes())
         .map_err(|_| "could not save diagnostics; choose a writable destination".to_owned())?;
@@ -740,7 +630,11 @@ fn audit_clear(store: State<'_, Mutex<AuditStore>>) -> Result<(), String> {
 /// returned to the renderer and is owned by a zeroizing native wrapper while
 /// the encrypted credential write is in progress.
 #[tauri::command]
-fn vault_put(vault: State<'_, NativeVault>, backup: State<'_, backup::BackupState>, payload: VaultPutRequest) -> Result<String, String> {
+fn vault_put(
+    vault: State<'_, NativeVault>,
+    backup: State<'_, backup::BackupState>,
+    payload: VaultPutRequest,
+) -> Result<String, String> {
     let _operation = backup.operation()?;
     let credential_id =
         CredentialId::new(payload.credential_id).map_err(|error| error.to_string())?;
@@ -1167,7 +1061,9 @@ fn session_save_telnet(
         encoding,
         columns,
         rows,
-        username, credential_id, ..
+        username,
+        credential_id,
+        ..
     } = request;
     let encoding = match encoding {
         conxol_telnet::TelnetEncoding::Utf8 => "utf-8",
@@ -1180,7 +1076,9 @@ fn session_save_telnet(
         hostname: host,
         port,
         username,
-        auth: credential_id.map(|credential_ref| AuthMethod::Password { credential_ref }).unwrap_or(AuthMethod::None),
+        auth: credential_id
+            .map(|credential_ref| AuthMethod::Password { credential_ref })
+            .unwrap_or(AuthMethod::None),
         last_used_at: None,
         known_hosts_path: None,
         legacy_rsa: false,
@@ -1214,91 +1112,6 @@ fn session_save_telnet(
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-fn session_save_remote_desktop(
-    store: State<'_, Mutex<SessionStore>>,
-    payload: SaveRemoteDesktopSessionRequest,
-) -> Result<SessionRecord, String> {
-    remote_desktop::validate_request(&payload.request)?;
-    let SaveRemoteDesktopSessionRequest { name, request } = payload;
-    let protocol = match request.protocol {
-        conxol_remote_desktop::DesktopProtocol::Rdp => Protocol::Rdp,
-        conxol_remote_desktop::DesktopProtocol::Vnc => Protocol::Vnc,
-    };
-    let protocol_tag = match request.protocol {
-        conxol_remote_desktop::DesktopProtocol::Rdp => "rdp",
-        conxol_remote_desktop::DesktopProtocol::Vnc => "vnc",
-    };
-    let credential_ref = request.credential_id.unwrap_or_default().trim().to_owned();
-    let auth = if credential_ref.is_empty() {
-        if protocol == Protocol::Rdp {
-            return Err("RDP requires a saved credential reference".into());
-        }
-        AuthMethod::None
-    } else {
-        CredentialId::new(&credential_ref).map_err(|error| error.to_string())?;
-        AuthMethod::Password { credential_ref }
-    };
-    let session = SessionRecord {
-        id: SessionId::new(),
-        name,
-        protocol,
-        hostname: request.host,
-        port: request.port,
-        username: (!request.username.trim().is_empty()).then_some(request.username),
-        auth,
-        last_used_at: None,
-        known_hosts_path: None,
-        legacy_rsa: false,
-        pinned_fingerprint: None,
-        x11_display: None,
-        x11_single_connection: false,
-        server_alive_interval: None,
-        folder: None,
-        tags: vec![protocol_tag.into()],
-        favorite: false,
-        startup_directory: None,
-        startup_command: None,
-        environment: Vec::new(),
-        pptp_profile_id: None,
-        jump_hosts: Vec::new(),
-        jump_host_profiles: Vec::new(),
-        notes: None,
-        serial_profile: None,
-        telnet_profile: None,
-        remote_desktop_profile: Some(RemoteDesktopProfile {
-            domain: request.domain,
-            gateway: match (
-                request.gateway_endpoint,
-                request.gateway_username,
-                request.gateway_credential_id,
-            ) {
-                (Some(endpoint), Some(username), Some(credential_ref)) => Some(RdpGatewayProfile {
-                    endpoint,
-                    username,
-                    credential_ref,
-                }),
-                (None, None, None) => None,
-                _ => return Err("RDP gateway settings are incomplete".into()),
-            },
-            width: request.width,
-            height: request.height,
-            color_depth: request.color_depth,
-            audio_enabled: request.audio_enabled,
-            clipboard_enabled: request.clipboard_enabled,
-            vnc_quality: request.vnc_quality,
-            allow_insecure_vnc: request.allow_insecure_vnc,
-            reconnect_enabled: request.reconnect_enabled,
-            reconnect_attempts: request.reconnect_attempts,
-        }),
-    };
-    store
-        .lock()
-        .map_err(|_| "session store lock poisoned".to_owned())?
-        .save(session)
-        .map_err(|error| error.to_string())
-}
-
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkDnsRequest {
@@ -1319,13 +1132,30 @@ async fn network_dns_lookup(
 ) -> Result<conxol_network::DnsLookupResult, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
     if let Some(id) = request.pptp_profile_id {
-        let server = request.server.as_deref().filter(|s| !s.is_empty()).ok_or("Enter an explicit IPv4 DNS server for PPTP diagnostics.")?;
+        let server = request
+            .server
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .ok_or("Enter an explicit IPv4 DNS server for PPTP diagnostics.")?;
         pptp_diagnostics::ipv4(server)?;
         let connector = pptp.ensure_connected(id, &vault).await?;
         return tokio::time::timeout(timeout, async {
-            let stream = connector.connect(server, 53).await.map_err(|e|e.to_string())?;
-            conxol_network::lookup_dns_stream(&request.host,request.record_type,server,timeout,stream).await.map_err(|e|e.to_string())
-        }).await.map_err(|_| "PPTP DNS lookup timed out.".to_string())?;
+            let stream = connector
+                .connect(server, 53)
+                .await
+                .map_err(|e| e.to_string())?;
+            conxol_network::lookup_dns_stream(
+                &request.host,
+                request.record_type,
+                server,
+                timeout,
+                stream,
+            )
+            .await
+            .map_err(|e| e.to_string())
+        })
+        .await
+        .map_err(|_| "PPTP DNS lookup timed out.".to_string())?;
     }
     conxol_network::lookup_dns(
         &request.host,
@@ -1361,7 +1191,15 @@ async fn network_check_tcp(
     if let Some(id) = request.pptp_profile_id {
         pptp_diagnostics::ipv4(&request.host)?;
         let connector = pptp.ensure_connected(id, &vault).await?;
-        return pptp_diagnostics::tcp_report(connector, TcpCheckOptions {host:request.host,port:request.port,timeout}).await;
+        return pptp_diagnostics::tcp_report(
+            connector,
+            TcpCheckOptions {
+                host: request.host,
+                port: request.port,
+                timeout,
+            },
+        )
+        .await;
     }
     check_tcp_report(TcpCheckOptions {
         host: request.host,
@@ -1379,18 +1217,33 @@ async fn ssh_inspect_host_key(
     request: SshFingerprintRequest,
 ) -> Result<conxol_ssh::SshHostKeyInspection, String> {
     let timeout = diagnostic_timeout(request.timeout_ms)?;
-    let options = SshFingerprintOptions { legacy_rsa: request.legacy_rsa, host: request.host, port: request.port, timeout };
-    conxol_ssh::diagnostics::scope(conxol_ssh::diagnostics::Operation::HostKeyInspection, request.timeout_ms, 0, async {
-        if let Some(id) = request.pptp_profile_id {
-            let connector = pptp.ensure_connected(id, &vault).await?;
-            let stream = tokio::time::timeout(timeout, connector.connect(&options.host, options.port)).await
-                .map_err(|_| "PPTP TCP connection timed out.".to_string())?
-                .map_err(|e| e.to_string())?;
-            conxol_ssh::inspect_host_key_stream(options, stream).await.map_err(|e| e.to_string())
-        } else {
-            inspect_host_key(options).await.map_err(|e| e.to_string())
-        }
-    }).await
+    let options = SshFingerprintOptions {
+        legacy_rsa: request.legacy_rsa,
+        host: request.host,
+        port: request.port,
+        timeout,
+    };
+    conxol_ssh::diagnostics::scope(
+        conxol_ssh::diagnostics::Operation::HostKeyInspection,
+        request.timeout_ms,
+        0,
+        async {
+            if let Some(id) = request.pptp_profile_id {
+                let connector = pptp.ensure_connected(id, &vault).await?;
+                let stream =
+                    tokio::time::timeout(timeout, connector.connect(&options.host, options.port))
+                        .await
+                        .map_err(|_| "PPTP TCP connection timed out.".to_string())?
+                        .map_err(|e| e.to_string())?;
+                conxol_ssh::inspect_host_key_stream(options, stream)
+                    .await
+                    .map_err(|e| e.to_string())
+            } else {
+                inspect_host_key(options).await.map_err(|e| e.to_string())
+            }
+        },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1401,11 +1254,25 @@ async fn network_scan_start(
     manager: State<'_, NetworkManager>,
     request: NetworkScanRequest,
 ) -> Result<network::NetworkScanResponse, String> {
-    conxol_network::PortScanOptions {host:request.host.clone(),start_port:request.start_port,end_port:request.end_port,concurrency:request.concurrency,timeout:diagnostic_timeout(request.timeout_ms)?}.validate().map_err(|e|e.to_string())?;
+    conxol_network::PortScanOptions {
+        host: request.host.clone(),
+        start_port: request.start_port,
+        end_port: request.end_port,
+        concurrency: request.concurrency,
+        timeout: diagnostic_timeout(request.timeout_ms)?,
+    }
+    .validate()
+    .map_err(|e| e.to_string())?;
     let probe = if let Some(id) = request.pptp_profile_id {
-        for host in conxol_network::scan_targets(&request.host).map_err(|e|e.to_string())? { pptp_diagnostics::ipv4(&host)?; }
-        Some(pptp_diagnostics::scan_probe(pptp.ensure_connected(id, &vault).await?))
-    } else {None};
+        for host in conxol_network::scan_targets(&request.host).map_err(|e| e.to_string())? {
+            pptp_diagnostics::ipv4(&host)?;
+        }
+        Some(pptp_diagnostics::scan_probe(
+            pptp.ensure_connected(id, &vault).await?,
+        ))
+    } else {
+        None
+    };
     manager
         .start_scan(app, request, probe)
         .await
@@ -1420,14 +1287,32 @@ async fn network_ping_start(
     manager: State<'_, NetworkManager>,
     request: NetworkPingRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
-    conxol_network::LivePingOptions {host:request.host.clone(),timeout:diagnostic_timeout(request.timeout_ms)?,interval:std::time::Duration::from_millis(request.interval_ms),packet_size:request.packet_size}.validate().map_err(|e|e.to_string())?;
-    if request.pptp_profile_id.is_some() && request.packet_size > 1332 { return Err("PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).".into()); }
+    conxol_network::LivePingOptions {
+        host: request.host.clone(),
+        timeout: diagnostic_timeout(request.timeout_ms)?,
+        interval: std::time::Duration::from_millis(request.interval_ms),
+        packet_size: request.packet_size,
+    }
+    .validate()
+    .map_err(|e| e.to_string())?;
+    if request.pptp_profile_id.is_some() && request.packet_size > 1332 {
+        return Err("PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).".into());
+    }
     let connector = if let Some(id) = request.pptp_profile_id {
         pptp_diagnostics::ipv4(&request.host)?;
         Some(pptp.ensure_connected(id, &vault).await?)
-    } else {None};
+    } else {
+        None
+    };
     manager
-        .start_ping(app, request.host, request.timeout_ms, request.interval_ms, request.packet_size, connector)
+        .start_ping(
+            app,
+            request.host,
+            request.timeout_ms,
+            request.interval_ms,
+            request.packet_size,
+            connector,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -1440,13 +1325,27 @@ async fn network_mtr_start(
     manager: State<'_, NetworkManager>,
     request: NetworkMtrRequest,
 ) -> Result<network::NetworkDiagnosticResponse, String> {
-    conxol_network::TracerouteOptions {host:request.host.clone(),timeout:diagnostic_timeout(request.timeout_ms)?,max_hops:request.max_hops}.validate().map_err(|e|e.to_string())?;
+    conxol_network::TracerouteOptions {
+        host: request.host.clone(),
+        timeout: diagnostic_timeout(request.timeout_ms)?,
+        max_hops: request.max_hops,
+    }
+    .validate()
+    .map_err(|e| e.to_string())?;
     let connector = if let Some(id) = request.pptp_profile_id {
         pptp_diagnostics::ipv4(&request.host)?;
         Some(pptp.ensure_connected(id, &vault).await?)
-    } else {None};
+    } else {
+        None
+    };
     manager
-        .start_mtr(app, request.host, request.timeout_ms, request.max_hops, connector)
+        .start_mtr(
+            app,
+            request.host,
+            request.timeout_ms,
+            request.max_hops,
+            connector,
+        )
         .await
         .map_err(|error| error.to_string())
 }
@@ -1790,7 +1689,11 @@ fn local_pick_download_path(
 #[tauri::command]
 fn local_pick_upload_paths(kind: LocalPickerKind) -> Result<Vec<String>, String> {
     let paths = match kind {
-        LocalPickerKind::File => rfd::FileDialog::new().set_title("Select a local file to upload").pick_file().into_iter().collect(),
+        LocalPickerKind::File => rfd::FileDialog::new()
+            .set_title("Select a local file to upload")
+            .pick_file()
+            .into_iter()
+            .collect(),
         LocalPickerKind::Files => rfd::FileDialog::new()
             .set_title("Select local files to upload")
             .pick_files()
@@ -2150,7 +2053,11 @@ pub fn run() {
     // Same-binary, app-session socket broker: never open Tauri, profiles or the
     // credential vault in the elevated process.
     #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
-    if let Some(code)=conxol_pptp::elevation::broker_entry(&std::env::args().skip(1).collect::<Vec<_>>()) {std::process::exit(code);}
+    if let Some(code) =
+        conxol_pptp::elevation::broker_entry(&std::env::args().skip(1).collect::<Vec<_>>())
+    {
+        std::process::exit(code);
+    }
     if let Some(message) = cli_message(std::env::args().nth(1).as_deref()) {
         println!("{message}");
         return;
@@ -2250,8 +2157,11 @@ pub fn run() {
                 .map_err(|error| error.to_string())?;
             let snippets = SnippetStore::open(data_dir.join("snippets.json"))
                 .map_err(|error| error.to_string())?;
-            app.manage(Mutex::new(notes::NoteStore::open(data_dir.join("notes.json"))?));
+            app.manage(Mutex::new(notes::NoteStore::open(
+                data_dir.join("notes.json"),
+            )?));
             app.manage(pptp::PptpManager::open(data_dir.join("pptp.json"))?);
+            app.manage(pptp_browser::BrowserManager::default());
             let macros = MacroStore::open(data_dir.join("macros.json"))
                 .map_err(|error| error.to_string())?;
             let audit =
@@ -2263,127 +2173,171 @@ pub fn run() {
             app.manage(Mutex::new(snippets));
             app.manage(Mutex::new(macros));
             app.manage(Mutex::new(audit));
-            app.manage(RemoteDesktopManager::default());
             Ok(())
         })
         .invoke_handler(|invoke| {
-            let allowed = invoke.message.webview_ref().try_state::<WorkspaceLock>()
+            let caller = invoke.message.webview_ref().label();
+            if caller.starts_with("pptp-browser-")
+                && (caller.contains("-content")
+                    || !matches!(
+                        invoke.message.command(),
+                        "pptp_browser_navigate" | "pptp_browser_snapshot" | "pptp_browser_control"
+                    ))
+            {
+                invoke
+                    .resolver
+                    .reject("Browser pages cannot access workspace commands.");
+                return true;
+            }
+            let allowed = invoke
+                .message
+                .webview_ref()
+                .try_state::<WorkspaceLock>()
                 .is_some_and(|state| state.allows(invoke.message.command()));
-            let backup_allowed = invoke.message.webview_ref().try_state::<backup::BackupState>().is_none_or(|state| state.allows(invoke.message.command()));
-            if !backup_allowed { invoke.resolver.reject("Workspace restored. Restart Conxol to continue."); return true; }
-            if !allowed { invoke.resolver.reject("Workspace is locked. Enter your PIN to continue."); return true; }
+            let backup_allowed = invoke
+                .message
+                .webview_ref()
+                .try_state::<backup::BackupState>()
+                .is_none_or(|state| state.allows(invoke.message.command()));
+            if !backup_allowed {
+                invoke
+                    .resolver
+                    .reject("Workspace restored. Restart Conxol to continue.");
+                return true;
+            }
+            if !allowed {
+                invoke
+                    .resolver
+                    .reject("Workspace is locked. Enter your PIN to continue.");
+                return true;
+            }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
-            workspace_lock_status, workspace_unlock, workspace_lock_now, workspace_activity, workspace_lock_configure,
-            pptp::pptp_list, pptp::pptp_save, pptp::pptp_delete, pptp::pptp_connect, pptp::pptp_disconnect,
-            clipboard_read_text, clipboard_write_text,
-            file_transfer_run, file_transfer_cancel,
-            tftp_server_start, tftp_server_stop, tftp_server_status,
-            app_snapshot,
-            store_updates::store_update_supported, store_updates::store_update,
-            diagnostic_export,
-            diagnostic_export_save,
-            workspace_backup_export, workspace_backup_choose, workspace_backup_inspect, workspace_backup_restore, workspace_backup_cancel, workspace_backup_restart, workspace_backup_preferences,
-            session_list,
-            session_save,
-            session_import_openssh,
-            session_export,
-            session_import,
-            session_set_favorite,
-            session_touch,
-            settings_get,
-            settings_save,
-            settings_reset,
-            settings_export,
-            settings_import,
-            audit_list,
-            audit_record,
-            audit_clear,
-            vault_put,
-            vault_delete,
-            portable_vault_status,
-            portable_vault_create,
-            portable_vault_unlock,
-            portable_vault_lock,
-            portable_vault_list,
-            portable_vault_put,
-            portable_vault_delete,
-            snippet_list,
-            snippet_save,
-            snippet_delete,
-            notes::note_list,
-            notes::note_save,
-            notes::note_delete,
-            macro_list,
-            macro_save,
-            macro_delete,
-            session_save_ssh,
-            session_save_serial,
-            session_save_telnet,
-            session_save_remote_desktop,
-            session_delete,
-            network_resolve_host,
-            network_dns_lookup,
-            network_diagnostic_output_export,
-            network_check_tcp,
-            ssh_inspect_host_key,
-            ssh_trust_lookup,
-            ssh_trust_accept,
-            network_ping_start,
-            network_mtr_start,
-            network_diagnostic_cancel,
-            network_scan_start,
-            network_scan_cancel,
-            remote_desktop_start,
-            remote_desktop_framebuffer,
-            remote_desktop_key,
-            remote_desktop_pointer,
-            remote_desktop_wheel,
-            remote_desktop_resize,
-            remote_desktop_clipboard,
-            remote_desktop_stop,
-            ssh_connect,
-            ssh_branch,
-            ssh_authentication_answer,
-            ssh_write,
-            ssh_resize,
-            ssh_close,
-            ssh_attach,
-            ssh_list_directory,
-            ssh_open_remote_text_file,
-            ssh_collect_remote_monitor,
-            ssh_save_remote_text_file,
-            ssh_save_remote_text_file_as,
-            ssh_rename_remote,
-            ssh_delete_remote,
-            ssh_create_remote_directory,
-            ssh_set_remote_permissions,
-            ssh_download,
-            ssh_upload,
-            local_pick_upload_paths,
-            local_pick_download_path,
-            ssh_cancel_transfer,
-            ssh_start_local_forward,
-            ssh_start_dynamic_forward,
-            ssh_start_remote_forward,
-            ssh_cancel_tunnel,
-            telnet_connect,
-            telnet_write,
-            telnet_resize,
-            telnet_attach,
-            telnet_close,
-            telnet_reconnect,
-            serial_connect,
-            serial_list_devices,
-            serial_write,
-            serial_attach,
-            serial_close,
-            serial_reconnect,
-            terminal_spawn,
-            terminal_attach,
-            terminal_list_wsl,
-            terminal_write,
-            terminal_resize,
-            terminal_close
+                workspace_lock_status,
+                workspace_unlock,
+                workspace_lock_now,
+                workspace_activity,
+                workspace_lock_configure,
+                pptp::pptp_list,
+                pptp::pptp_save,
+                pptp::pptp_delete,
+                pptp::pptp_connect,
+                pptp::pptp_disconnect,
+                pptp_browser::pptp_browser_open,
+                pptp_browser::pptp_browser_navigate,
+                pptp_browser::pptp_browser_snapshot,
+                pptp_browser::pptp_browser_control,
+                pptp_browser::session_open_web,
+                clipboard_read_text,
+                clipboard_write_text,
+                file_transfer_run,
+                file_transfer_cancel,
+                tftp_server_start,
+                tftp_server_stop,
+                tftp_server_status,
+                app_snapshot,
+                store_updates::store_update_supported,
+                store_updates::store_update,
+                diagnostic_export,
+                diagnostic_export_save,
+                workspace_backup_export,
+                workspace_backup_choose,
+                workspace_backup_inspect,
+                workspace_backup_restore,
+                workspace_backup_cancel,
+                workspace_backup_restart,
+                workspace_backup_preferences,
+                session_list,
+                session_save,
+                session_import_openssh,
+                session_export,
+                session_import,
+                session_set_favorite,
+                session_touch,
+                settings_get,
+                settings_save,
+                settings_reset,
+                settings_export,
+                settings_import,
+                audit_list,
+                audit_record,
+                audit_clear,
+                vault_put,
+                vault_delete,
+                portable_vault_status,
+                portable_vault_create,
+                portable_vault_unlock,
+                portable_vault_lock,
+                portable_vault_list,
+                portable_vault_put,
+                portable_vault_delete,
+                snippet_list,
+                snippet_save,
+                snippet_delete,
+                notes::note_list,
+                notes::note_save,
+                notes::note_delete,
+                macro_list,
+                macro_save,
+                macro_delete,
+                session_save_ssh,
+                session_save_serial,
+                session_save_telnet,
+                session_delete,
+                network_resolve_host,
+                network_dns_lookup,
+                network_diagnostic_output_export,
+                network_check_tcp,
+                ssh_inspect_host_key,
+                ssh_trust_lookup,
+                ssh_trust_accept,
+                network_ping_start,
+                network_mtr_start,
+                network_diagnostic_cancel,
+                network_scan_start,
+                network_scan_cancel,
+                ssh_connect,
+                ssh_branch,
+                ssh_authentication_answer,
+                ssh_write,
+                ssh_resize,
+                ssh_close,
+                ssh_attach,
+                ssh_list_directory,
+                ssh_open_remote_text_file,
+                ssh_collect_remote_monitor,
+                ssh_save_remote_text_file,
+                ssh_save_remote_text_file_as,
+                ssh_rename_remote,
+                ssh_delete_remote,
+                ssh_create_remote_directory,
+                ssh_set_remote_permissions,
+                ssh_download,
+                ssh_upload,
+                local_pick_upload_paths,
+                local_pick_download_path,
+                ssh_cancel_transfer,
+                ssh_start_local_forward,
+                ssh_start_dynamic_forward,
+                ssh_start_remote_forward,
+                ssh_cancel_tunnel,
+                telnet_connect,
+                telnet_write,
+                telnet_resize,
+                telnet_attach,
+                telnet_close,
+                telnet_reconnect,
+                serial_connect,
+                serial_list_devices,
+                serial_write,
+                serial_attach,
+                serial_close,
+                serial_reconnect,
+                terminal_spawn,
+                terminal_attach,
+                terminal_list_wsl,
+                terminal_write,
+                terminal_resize,
+                terminal_close
             ];
             handler(invoke)
         })
@@ -2393,9 +2347,10 @@ pub fn run() {
     let mut exit_pending = false;
     desktop.run(move |app, event| match event {
         RunEvent::WindowEvent {
+            label,
             event: WindowEvent::CloseRequested { api, .. },
             ..
-        } if !exit_ready.load(Ordering::Acquire) => {
+        } if label == "main" && !exit_ready.load(Ordering::Acquire) => {
             api.prevent_close();
             app.exit(0);
         }
@@ -2429,7 +2384,12 @@ pub fn run() {
             let manager = app.state::<SshManager>().inner().clone();
             app.state::<pptp::PptpManager>().shutdown();
             let local_cleanup = app.state::<TerminalManager>().shutdown();
-            tauri::async_runtime::block_on(finish_native_shutdown(manager, transfers, server, local_cleanup));
+            tauri::async_runtime::block_on(finish_native_shutdown(
+                manager,
+                transfers,
+                server,
+                local_cleanup,
+            ));
         }
         _ => {}
     });
@@ -2498,10 +2458,18 @@ mod tests {
         assert_eq!(std::fs::read_dir(root.path()).unwrap().count(), 0);
         let output = root.path().join("diagnostics.json");
         assert!(super::save_diagnostic_export(Some(output.clone())).unwrap());
-        assert_eq!(std::fs::read_to_string(&output).unwrap(), diagnostic_export().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&output).unwrap(),
+            diagnostic_export().unwrap()
+        );
         // A failed write is visible and must not expose the selected path.
-        let failure = super::save_diagnostic_export(Some(root.path().join("missing").join("report.json"))).unwrap_err();
-        assert_eq!(failure, "could not save diagnostics; choose a writable destination");
+        let failure =
+            super::save_diagnostic_export(Some(root.path().join("missing").join("report.json")))
+                .unwrap_err();
+        assert_eq!(
+            failure,
+            "could not save diagnostics; choose a writable destination"
+        );
     }
 
     #[test]
@@ -2513,7 +2481,11 @@ mod tests {
         assert_eq!(value["schemaVersion"], 2);
         assert!(value["ssh"]["failures"].is_array());
         assert_eq!(value["ssh"]["maximumFailures"], 64);
-        assert!(value["sshClientAlgorithms"]["keyExchange"].as_array().is_some_and(|names| !names.is_empty()));
+        assert!(
+            value["sshClientAlgorithms"]["keyExchange"]
+                .as_array()
+                .is_some_and(|names| !names.is_empty())
+        );
         assert_eq!(value["product"], "Conxol");
         assert_eq!(value["platform"], std::env::consts::OS);
         assert_eq!(value["architecture"], std::env::consts::ARCH);
@@ -2609,36 +2581,6 @@ mod tests {
         };
         assert!(error.to_string().contains("unknown field"));
 
-        let clipboard_payload = serde_json::json!({
-            "sessionId": "fixture-session",
-            "text": "fixture-text",
-            "extra": true
-        });
-        let error =
-            serde_json::from_value::<super::RemoteDesktopClipboardRequest>(clipboard_payload)
-                .expect_err("clipboard payload must reject unknown fields");
-        assert!(error.to_string().contains("unknown field"));
-
-        let session_payload = serde_json::json!({
-            "name": "fixture desktop",
-            "request": {
-                "protocol": "vnc",
-                "host": "127.0.0.1",
-                "port": 5900,
-                "username": "viewer",
-                "width": 1024,
-                "height": 768
-            },
-            "extra": true
-        });
-        let error =
-            match serde_json::from_value::<super::SaveRemoteDesktopSessionRequest>(session_payload)
-            {
-                Err(error) => error,
-                Ok(_) => panic!("saved remote-desktop payload must reject unknown fields"),
-            };
-        assert!(error.to_string().contains("unknown field"));
-
         let import_open_ssh_payload = serde_json::json!({
             "path": "fixture-config",
             "extra": true
@@ -2729,7 +2671,10 @@ async fn network_diagnostic_output_export(tool: String, content: String) -> Resu
 }
 #[cfg(target_os = "android")]
 #[tauri::command]
-fn local_pick_download_path(kind: LocalDownloadPickerKind, suggested_name: String) -> Result<Option<String>, String> {
+fn local_pick_download_path(
+    kind: LocalDownloadPickerKind,
+    suggested_name: String,
+) -> Result<Option<String>, String> {
     let _ = (kind, suggested_name);
     Err("SFTP downloads to Android shared storage are not available in this preview.".into())
 }

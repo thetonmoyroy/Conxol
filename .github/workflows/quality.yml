@@ -41,7 +41,6 @@ jobs:
           cache-on-failure: true
           workspaces: |
             . -> target
-            tools/vnc-helper -> target
       - name: Linux native and OpenSSH lab dependencies
         if: runner.os == 'Linux'
         run: |
@@ -63,5 +62,5 @@ jobs:
       - name: Rust workspace checks and native fixtures
         run: cargo xtask check-rust
 
-# Experimental helpers, fuzzing, installers, signing and GUI/hardware testing
+# Fuzzing, installers, signing and GUI/hardware testing
 # remain separate gates. This workflow never creates a release.

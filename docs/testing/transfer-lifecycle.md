@@ -1,5 +1,9 @@
 # Native transfer cancellation and SSH-close receipt — 2026-10-02
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## Reproduced problem and correction
 
 Closing an SSH tab during an upload disconnected its transport before signalling

@@ -1,5 +1,9 @@
 # Responsive UI testing
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 The browser preview can be inspected without starting the Tauri desktop
 runtime or opening a protocol connection. The local smoke check uses only the
 Vite server on `127.0.0.1` and synthetic preview sessions.

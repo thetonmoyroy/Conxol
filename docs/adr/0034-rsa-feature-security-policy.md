@@ -1,5 +1,9 @@
 # ADR 0034: disable vulnerable RSA key support until a fixed SSH dependency exists
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## Status
 
 Implemented in the main workspace.

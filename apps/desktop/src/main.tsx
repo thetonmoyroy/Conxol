@@ -5,11 +5,12 @@ import "./styles.css";
 import "./mobile.css";
 import App from "./App";
 import { WorkspaceSecurity } from "./WorkspaceSecurity";
+import { PptpBrowser } from "./PptpBrowser";
 
 if (/Android/i.test(navigator.userAgent)) document.documentElement.classList.add("android");
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <WorkspaceSecurity><App /></WorkspaceSecurity>
+    {location.search === "?pptp-browser" ? <PptpBrowser /> : <WorkspaceSecurity><App /></WorkspaceSecurity>}
   </StrictMode>,
 );

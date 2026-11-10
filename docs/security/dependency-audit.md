@@ -1,5 +1,9 @@
 # Dependency audit record
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## v0.1.30 release preparation audit — 2026-10-03
 
 The refreshed RustSec database remains at

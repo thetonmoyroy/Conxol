@@ -1,5 +1,9 @@
 # Native SSH retry-budget and closure receipt — 2026-10-02
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## Corrected behavior
 
 After an exhausted reconnect budget, the Rust SSH manager emits `failed`, then

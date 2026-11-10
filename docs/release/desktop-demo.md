@@ -1,5 +1,9 @@
 # Real native desktop walkthrough — v0.1.17
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 `site/media/conxol-desktop-demo.mp4` is a **94-second**, 1920×1080, 30 fps
 H.264 MP4 with fast-start metadata. It is silent, with original chapter titles,
 an English WebVTT track, a JPEG poster and a small animated GIF preview.

@@ -1,5 +1,9 @@
 # Hardware and interoperability evidence matrix
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 This document records controlled evidence and the hardware/cross-platform
 checks that remain before Conxol can claim broad interoperability. The
 required matrix is a test plan; pending checks have not passed.
@@ -36,8 +40,6 @@ or server is a pending result, not a reason to probe the local machine.
 | SSH / SFTP / tunnels | Local/CI SSH fixtures plus the [native ARM64 workflow receipt](native-workflow.md): terminal input/output, SFTP editing/save and download, local/remote/SOCKS5 HTTP round trips and listener cleanup | Internet-host interoperability, sustained GUI use, wider retry/authentication cases, or the operator's SSH configuration |
 | Telnet | Local TCP fixture covers negotiation, I/O, reconnect, and cancellation | Security; Telnet remains unencrypted |
 | Serial | Disposable pseudo-terminal fixture covers lifecycle and device-loss handling | USB driver, permission, baud/parity, and real-adapter behavior |
-| VNC | Isolated helper controls local RFB fixtures, including password auth and reconnect | Mature-engine selection, encrypted transport, and cross-platform packaging |
-| RDP | Isolated helper and a real loopback IronRDP server fixture cover TLS/Hybrid authentication, framebuffer, input, resize, and reconnect | Real Windows desktops, platform certificate stores, audio, gateway interoperability, and multi-monitor behavior |
 
 These rows must remain distinct from the release matrix below. A fixture or
 unit test must never be promoted to hardware or cross-platform evidence by
@@ -149,7 +151,7 @@ clean-install gates remain open.
 On 2026-10-02, v0.1.18 at tag commit `b0ae2c3` passed the full local suite. Locally built
 ARM64/x64 DMGs passed disk-image verification, read-only layout, strict ad hoc
 signature, matching app/helper architectures, CLI version and SHA-256 manifests.
-The [ARM64 release-copy receipt](remote-desktop-renderer.md#v0118-release-bundle-recheck)
+The [ARM64 release-copy receipt](../adr/0036-retire-remote-desktop-support.md)
 records Full-HD rendering, keyboard input before/after reconnect, focused
 settings errors with unchanged persistence, and native Quit releasing an active
 zsh PTY and VNC helper. All fixture listeners were loopback-only and stopped.
@@ -185,14 +187,14 @@ installer or hardware interoperability. Workflows remain disabled.
 
 ## Required matrix
 
-| Target | PTY / shell | SSH / SFTP | Serial adapter | RDP | VNC | Clipboard / display | Status |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| macOS ARM64 | Native CI/local fixtures and short GUI input/split checks; broader shell checks remain | Local/CI OpenSSH plus GUI SFTP edit/download and three tunnel modes; sustained/recovery checks remain | Dedicated adapter required | Dedicated server required | Dedicated server required | Record native behavior | Partial fixture/local GUI evidence |
-| macOS x64 | Separate runtime required | Separate runtime required | Dedicated adapter required | Dedicated server required | Dedicated server required | Record native behavior | Pending |
-| Windows x64 | PowerShell/cmd native CI fixtures; WSL and GUI checks remain | Real Windows runtime required | Dedicated adapter/driver required | Real Windows RDP server required | Dedicated server required | Clipboard, DPI, multi-monitor | Partial CI fixture evidence |
-| Windows ARM64 | Real Windows ARM64 runtime | Real Windows ARM64 runtime | Dedicated adapter/driver required | Real Windows RDP server required | Dedicated server required | Clipboard, DPI, multi-monitor | Pending |
-| Linux x64 | Native CI fixture; X11/Wayland GUI checks remain | CI OpenSSH fixture; manual checks remain | Dedicated adapter/permissions required | Dedicated server required | Dedicated server required | Clipboard and window manager | Partial CI fixture evidence |
-| Linux ARM64 | Local-shell PTY matrix still required | [Offline Ubuntu guest](linux-ssh-vm.md) ran cross-built static musl SSH/SFTP fixtures; GUI and broader server checks remain | Dedicated adapter/permissions required | Dedicated server required | Dedicated server required | Clipboard and window manager | Partial backend VM evidence |
+| Target | PTY / shell | SSH / SFTP | Serial adapter | Clipboard / display | Status |
+| --- | --- | --- | --- | --- | --- |
+| macOS ARM64 | Native CI/local fixtures and short GUI input/split checks; broader shell checks remain | Local/CI OpenSSH plus GUI SFTP edit/download and three tunnel modes; sustained/recovery checks remain | Dedicated adapter required | Record native behavior | Partial fixture/local GUI evidence |
+| macOS x64 | Separate runtime required | Separate runtime required | Dedicated adapter required | Record native behavior | Pending |
+| Windows x64 | PowerShell/cmd native CI fixtures; WSL and GUI checks remain | Real Windows runtime required | Dedicated adapter/driver required | Clipboard, DPI, multi-monitor | Partial CI fixture evidence |
+| Windows ARM64 | Real Windows ARM64 runtime | Real Windows ARM64 runtime | Dedicated adapter/driver required | Clipboard, DPI, multi-monitor | Pending |
+| Linux x64 | Native CI fixture; X11/Wayland GUI checks remain | CI OpenSSH fixture; manual checks remain | Dedicated adapter/permissions required | Clipboard and window manager | Partial CI fixture evidence |
+| Linux ARM64 | Local-shell PTY matrix still required | [Offline Ubuntu guest](linux-ssh-vm.md) ran cross-built static musl SSH/SFTP fixtures; GUI and broader server checks remain | Dedicated adapter/permissions required | Clipboard and window manager | Partial backend VM evidence |
 
 ## Serial test cases
 
@@ -214,24 +216,6 @@ device parameters without recording private device identifiers.
 
 No test should write arbitrary firmware, change host configuration, or run a
 shell command on the attached device.
-
-## Remote-protocol test cases
-
-For RDP and VNC, use a dedicated local or lab server and record the exact
-engine/helper version. Verify, as applicable:
-
-- connect, authentication failure, cancellation, disconnect, and bounded
-  reconnect;
-- negotiated resolution, local scaling, keyboard, mouse, and pointer release;
-- clipboard only after an explicit user action, with bounded text and no
-  automatic execution;
-- certificate/transport policy and the displayed security warning;
-- fullscreen, resize, color depth, audio, gateway, and multi-monitor behavior;
-- helper crash containment and cleanup of the child process.
-
-Unsupported capabilities must produce an explicit diagnostic. A screenshot,
-mock framebuffer, or successful helper startup is not interoperability
-evidence.
 
 ## Evidence record template
 

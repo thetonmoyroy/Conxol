@@ -34,7 +34,7 @@ cargo xtask pre-push-check
 ```
 
 `check` runs formatting, workspace tests/Clippy, frontend unit tests,
-TypeScript/lint/build, isolated helper checks, package-layout fixtures, and
+TypeScript/lint/build, package-layout fixtures, and
 fuzz-target compilation. Every child receives an isolated HOME/XDG and a
 sanitized credential environment. The full suite needs the local OpenSSH/X11
 prerequisites in the [SSH lab guide](testing/ssh-lab.md); it can also need
@@ -46,7 +46,7 @@ Release asset validation is `node --test tools/release-assets.test.mjs`.
 The [fuzzing guide](testing/fuzzing.md) and [benchmark guide](../benchmarks/README.md)
 describe the existing isolated tools.
 
-`cargo xtask check-rust` runs just workspace formatting, helper staging,
+`cargo xtask check-rust` runs just workspace formatting,
 tests, and Clippy. GitHub Quality and installer workflows are disabled at the
 maintainer's request. Quality has no push/PR triggers; use the local commands
 above. The preserved [Quality recipe](../.github/workflows/quality.yml) combines
@@ -58,7 +58,7 @@ PowerShell and cmd each perform three consecutive ConPTY round trips; every
 startup must pass, with no retry after a failure.
 Successful test output is retained so optional fixture skip messages
 remain visible in CI logs. The full local command additionally checks
-experimental helpers and fuzz targets. CI fixtures do not establish GUI, hardware, installer, or
+fuzz targets. CI fixtures do not establish GUI, hardware, installer, or
 external-server interoperability. Quality never publishes installers.
 
 The [Windows GNU compile/link receipt](testing/windows-cross-check.md) records

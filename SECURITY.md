@@ -16,6 +16,6 @@ or production infrastructure.
 The [threat model](docs/security/threat-model.md),
 [dependency audit record](docs/security/dependency-audit.md), and
 [safe testing policy](docs/security/safe-testing.md) describe current boundaries
-and limits. RDP remains experimental and excluded from normal bundles under
-its separate advisory gate. A clean dependency audit is not a guarantee that
-application code is vulnerability-free.
+and limits. RDP/VNC implementations and helper dependencies have been removed.
+Legacy saved entries are preserved but cannot connect. A clean dependency audit
+is not a guarantee that application code is vulnerability-free.

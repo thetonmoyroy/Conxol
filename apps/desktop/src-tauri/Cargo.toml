@@ -28,14 +28,14 @@ conxol-telnet = { path = "../../../crates/conxol-telnet" }
 conxol-ssh = { path = "../../../crates/conxol-ssh" }
 conxol-serial = { path = "../../../crates/conxol-serial" }
 conxol-network = { path = "../../../crates/conxol-network" }
-conxol-remote-desktop = { path = "../../../crates/conxol-remote-desktop" }
 conxol-store = { path = "../../../crates/conxol-store" }
 conxol-vault = { path = "../../../crates/conxol-vault" }
 portable-pty = "0.9"
 sha2.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-tauri = { version = "2.12.1", features = [] }
+tauri = { version = "2.12.1", features = ["unstable", "devtools"] }
+hickory-proto = { version = "0.26.3", default-features = false, features = ["std"] }
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -48,6 +48,7 @@ tauri-plugin-clipboard-manager = "2"
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
+webview2-com = "0.39.1"
 windows-collections = "0.3.2"
 windows = { version = "0.62.2", features = ["ApplicationModel", "Services_Store", "Win32_UI_Shell", "Win32_Foundation"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }

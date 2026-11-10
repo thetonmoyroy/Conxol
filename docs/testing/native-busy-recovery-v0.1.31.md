@@ -1,5 +1,9 @@
 # v0.1.31 ARM64 busy-session recovery — 2026-10-03
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 A disposable copy of the verified v0.1.31 ARM64 installer, runtime source/tag
 `d9910c815508fcf51e074c89fcb4a1353220a05d`, exercised native directory-listing
 and monitoring requests at the shared 32-worker limit. Its source executable
