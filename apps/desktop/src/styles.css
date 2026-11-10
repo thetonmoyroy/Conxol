@@ -1653,3 +1653,12 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 :root[data-palette="dark"] .session-activity-strip .activity-settings { --activity-color: var(--icon-settings, #b76578); }
 :root[data-palette="dark"] .session-activity-strip button { color: var(--activity-color, var(--muted)); }
 :root[data-palette="dark"] .session-activity-strip button:is(:hover, :focus-visible, [aria-pressed="true"]) { color: var(--activity-color, var(--amber)); }
+
+.terminal-more-actions { position: relative; }
+.terminal-more-actions > summary { display: grid; place-items: center; width: 22px; height: 22px; color: var(--faint); cursor: pointer; list-style: none; }
+.terminal-more-actions > summary::-webkit-details-marker { display: none; }
+.terminal-more-actions > summary:hover, .terminal-more-actions[open] > summary { color: var(--text); }
+.terminal-more-actions > summary:focus-visible { outline: 1px solid var(--mint); }
+.terminal-more-actions-popup { position: absolute; right: 0; top: 26px; z-index: 50; min-width: 190px; padding: 5px; border: 1px solid var(--line-strong); background: var(--panel-raised); box-shadow: 0 8px 24px #0006; }
+.app-shell .terminal-more-actions-popup button { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; text-align: left; white-space: nowrap; }
+.terminal-more-actions-popup button:hover { background: var(--mint-soft); }

@@ -1,3 +1,4 @@
+import { terminalOutputText, terminalOutputFilename } from "./terminal-output-export";
 import { createSavedWebSession } from "./saved-web-session";
 import { PptpAttachment } from "./PptpAttachment";
 import { WebglAddon } from "@xterm/addon-webgl";
@@ -247,6 +248,8 @@ type SerialSessionEvent = {
 };
 
 type TerminalViewportProps = {
+  exportHost: string | null;
+  exportBookmark: string | null;
   label: string;
   colorTheme: ColorTheme;
   workspaceId: string;
@@ -713,7 +716,18 @@ function auditProtocol(protocol: string | null | undefined): AuditProtocol | nul
     : null;
 }
 
-function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange }: TerminalViewportProps) {
+async function saveTerminalOutput(content: string, fileName: string): Promise<void> {
+    if (IS_TAURI) {
+      await invoke<boolean>("terminal_output_export", { content, fileName });
+    } else {
+      const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url; link.download = fileName;
+      link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+}
+
+function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange }: TerminalViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -1080,6 +1094,10 @@ function TerminalViewport({ label, colorTheme, workspaceId, instanceKey, remoteS
     if (isWorkspaceLocked()) return;
     if (!IS_TAURI && !navigator.clipboard?.writeText) throw new Error("Clipboard writer unavailable.");
     await writeClipboardText(contextMenu.selection);
+  }} onExport={async () => {
+    if (isWorkspaceLocked() || !terminalRef.current) return;
+    const content = terminalOutputText(terminalRef.current.buffer.active);
+    await saveTerminalOutput(content, terminalOutputFilename(exportHost, exportBookmark));
   }} onBranch={remoteProtocol === "ssh" && remoteSessionId ? () => { setContextMenu(null); onBranchSession(workspaceId); } : undefined} onSaveShortcut={selection => { if (isWorkspaceLocked()) return; setContextMenu(null); onSaveSelectionShortcut(workspaceId, selection); }} onPaste={pasteFromContextMenu} onSelectAll={() => { if (!isWorkspaceLocked()) terminalRef.current?.selectAll(); }} />}</>;
 }
 
@@ -1892,6 +1910,26 @@ function App() {
       setConnectionError(`Terminal selection could not be copied: ${String(error)}`);
     }
   }, []);
+
+  const terminalExportGate = useRef(false);
+  const [terminalExportBusy, setTerminalExportBusy] = useState(false);
+  const exportTerminalOutput = useCallback(async () => {
+    if (isWorkspaceLocked() || terminalExportGate.current) return;
+    const terminal = terminalInstancesRef.current.get(selectedTerminalIdRef.current)?.terminal;
+    if (!terminal) return;
+    terminalExportGate.current = true;
+    setTerminalExportBusy(true);
+    try {
+      const tab = terminalTabs.find(item => item.id === selectedTerminalIdRef.current);
+      const bookmark = savedSessions.find(item => item.id === tab?.shortcutDeviceId);
+      await saveTerminalOutput(terminalOutputText(terminal.buffer.active), terminalOutputFilename(tab?.remoteHost, bookmark?.name ?? tab?.customName));
+    } catch (error) {
+      setConnectionError(`Could not export terminal output: ${String(error)}`);
+    } finally {
+      terminalExportGate.current = false;
+      setTerminalExportBusy(false);
+    }
+  }, [terminalTabs, savedSessions]);
 
   const clearTerminalScrollback = useCallback(() => {
     const instance = terminalInstancesRef.current.get(selectedTerminalIdRef.current);
@@ -4054,9 +4092,9 @@ function App() {
   const activeTunnelCount = tunnels.filter((tunnel) => !["stopped", "failed"].includes(tunnel.state)).length;
 
   const renderTerminalPane = useCallback((terminal: WorkspaceTerminal) => {
-    const viewport = terminal.connecting ? null : <TerminalViewport label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
+    const viewport = terminal.connecting ? null : <TerminalViewport exportHost={terminal.remoteHost} exportBookmark={savedSessions.find(item => item.id === terminal.shortcutDeviceId)?.name ?? terminal.customName ?? null} label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
     return <div className="terminal-login-container">{viewport}{terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}</div>;
-  }, [colorTheme, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
+  }, [colorTheme, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
 
   if (closing) return <main className={`app-shell shutdown-state theme-${themeMode(colorTheme)}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
@@ -4279,7 +4317,21 @@ function App() {
             {activeView !== "home" && activeView !== "terminal" && <div className="desktop-tool-tab"><span>{activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)}</span><button aria-label="Close tool" onClick={() => setActiveView(selectedTerminalId ? "terminal" : "home")}><X size={12} /></button></div>}
             <button className="desktop-add-tab" aria-label={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} title={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} onClick={() => settings.general.tabPlusSavedSessions ? setSavedSessionPickerOpen(true) : setQuickConnectOpen(true)}><Plus size={14} /></button>
             {activeView === "terminal" && (<div className="terminal-toolbar">
-                  <div className="terminal-toolbar-actions"><button type="button" className={`terminal-broadcast-button ${broadcastEnabled ? "active" : ""}`} aria-label="Configure broadcast input" title="Configure broadcast input" onClick={() => setBroadcastOpen(true)}><Radio size={14} /> {broadcastEnabled ? `${broadcastTargetIds.length} targets` : "Broadcast"}</button><button type="button" className="terminal-new-tab" aria-label="New terminal tab" title="New terminal tab" onClick={() => startNewTerminal()}><Plus size={14} /></button><button type="button" aria-label="Split terminal right" title="Split right" onClick={() => openSplit("right")}><PanelRight size={14} /></button><button type="button" aria-label="Split terminal down" title="Split down" onClick={() => openSplit("down")}><PanelBottom size={14} /></button><span className="terminal-chip">{"UTF-8"}</span><span className="terminal-chip">{"256 colors"}</span><button type="button" className={macroRecording ? "terminal-record-button active" : ""} aria-label={macroRecording ? "Stop macro recording" : "Record macro from terminal input"} title={macroRecording ? "Stop macro recording" : "Record macro from terminal input"} onClick={macroRecording ? stopMacroRecording : startMacroRecording}><Radio size={14} /></button><button type="button" aria-label="Search terminal" title="Search terminal" onClick={openTerminalSearch}><Search size={14} /></button><button type="button" aria-label="Copy terminal selection" title="Copy selected terminal text" onClick={() => void copyTerminalSelection()}><Copy size={14} /></button><button type="button" aria-label="Clear terminal scrollback" title="Clear terminal scrollback" onClick={clearTerminalScrollback}><Trash2 size={14} /></button><button type="button" aria-label="Terminal options" title="Open terminal settings" onClick={openSettings}><MoreHorizontal size={16} /></button></div>
+                  <div className="terminal-toolbar-actions">
+                    <button type="button" aria-label="Search terminal" title="Search terminal" onClick={openTerminalSearch}><Search size={14} /></button>
+                    <button type="button" aria-label="Copy terminal selection" title="Copy selected terminal text" onClick={() => void copyTerminalSelection()}><Copy size={14} /></button>
+                    <button type="button" aria-label="Export terminal output as text" title={terminalExportBusy ? "Saving terminal output…" : "Export terminal output as text"} disabled={terminalExportBusy || !terminalTabs.some(tab => tab.id === selectedTerminalId && !tab.connecting)} onClick={() => void exportTerminalOutput()}><Download size={14} /></button>
+                    <button type="button" aria-label="Clear terminal scrollback" title="Clear terminal scrollback" onClick={clearTerminalScrollback}><Trash2 size={14} /></button>
+                    <details className="terminal-more-actions" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) event.currentTarget.open = false; }} onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+                      <summary aria-label="More terminal actions" title="More terminal actions"><MoreHorizontal size={16} /></summary>
+                      <div className="terminal-more-actions-popup" onClick={event => { const button = (event.target as HTMLElement).closest("button"); if (button) event.currentTarget.closest("details")?.removeAttribute("open"); }}>
+                        <button type="button" onClick={() => openSplit("right")}><PanelRight size={14} />Split right</button>
+                        <button type="button" onClick={() => openSplit("down")}><PanelBottom size={14} />Split down</button>
+                        <button type="button" onClick={() => setBroadcastOpen(true)}><Radio size={14} />{broadcastEnabled ? `Broadcast (${broadcastTargetIds.length} targets)` : "Broadcast input"}</button>
+                        <button type="button" onClick={macroRecording ? stopMacroRecording : startMacroRecording}><Radio size={14} />{macroRecording ? "Stop macro recording" : "Record macro"}</button>
+                      </div>
+                    </details>
+                  </div>
                   </div>)}
             <button className="desktop-session-options" aria-label="Terminal tools" title="Terminal tools" onClick={() => setPaletteOpen(true)}><MoreHorizontal size={16} /></button>
           </div>

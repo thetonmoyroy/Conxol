@@ -405,6 +405,38 @@ async fn network_diagnostic_output_export(tool: String, content: String) -> Resu
     .map_err(|_| "could not open the diagnostic output Save dialog".to_owned())?
 }
 
+// Export only the rendered terminal snapshot; the destination is chosen natively.
+#[tauri::command]
+async fn terminal_output_export(content: String, file_name: String) -> Result<bool, String> {
+    if file_name.is_empty() || file_name.len() > 1024
+        || file_name.chars().any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+        || !file_name.ends_with(".txt")
+    {
+        return Err("invalid terminal export filename".into());
+    }
+    if content.len() > MAX_NETWORK_OUTPUT_EXPORT_BYTES {
+        return Err("terminal text output exceeds 16 MiB".into());
+    }
+    #[cfg(target_os = "android")]
+    {
+        Err("Android file export is not available in this preview. Copy the output instead.".into())
+    }
+    #[cfg(not(target_os = "android"))]
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = rfd::FileDialog::new()
+            .set_title("Export terminal output")
+            .add_filter("Text file", &["txt"])
+            .set_file_name(file_name)
+            .save_file();
+        let Some(path) = path else { return Ok(false); };
+        std::fs::write(path, content.as_bytes())
+            .map_err(|_| "could not save terminal output; choose a writable destination".to_owned())?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "could not open the terminal output Save dialog".to_owned())?
+}
+
 fn save_network_diagnostic_output(path: Option<PathBuf>, content: &str) -> Result<bool, String> {
     if content.len() > MAX_NETWORK_OUTPUT_EXPORT_BYTES {
         return Err("diagnostic text output exceeds 16 MiB".into());
@@ -2286,6 +2318,7 @@ pub fn run() {
                 network_resolve_host,
                 network_dns_lookup,
                 network_diagnostic_output_export,
+                terminal_output_export,
                 network_check_tcp,
                 ssh_inspect_host_key,
                 ssh_trust_lookup,

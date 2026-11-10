@@ -64,7 +64,6 @@ assert.equal(objectsLive, 6);
 buffer.viewportY = 0; callbacks.get('scroll')();
 await Promise.resolve();
 assert.equal(objectsLive, 12, 'scroll colors must be ready before the next animation frame');
-assert.equal(objectsLive, 12, 'older rows receive color after the scroll burst');
 assert.deepEqual(markerOffsets.slice(-3), [-12, -11, -10]);
 buffer.viewportY = 10; callbacks.get('scroll')();
 await new Promise(resolve => setTimeout(resolve, 60));
