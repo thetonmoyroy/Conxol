@@ -1513,6 +1513,7 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .pptp-row-action { flex: 0 0 104px; min-height: 30px; padding: 6px 9px; text-align: center; white-space: nowrap; font-size: 11px; }
 .pptp-profile-name { flex: 1; min-width: 0; }
 .pptp-profile-name strong, .pptp-profile-name small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pptp-row-error { display: block; margin-top: 6px; color: var(--coral); font-size: 11px; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
 .pptp-profile-name strong { font-weight: 500; font-size: 12px; }
 .pptp-profile-name small { margin-top: 6px; font-family: var(--mono); color: var(--muted); font-size: 10px; }
 .pptp-status-box { display: grid; place-items: center; flex: 0 0 28px; height: 28px; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 4px; color: var(--muted); background: var(--panel); font-family: var(--mono); font-size: 12px; font-weight: 600; }
