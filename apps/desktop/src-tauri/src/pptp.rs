@@ -651,7 +651,8 @@ fn run_tunnel(
             return Ok(());
         }
         let server: Ipv4Addr = profile.server.parse()?;
-        let mut control = Control::connect(server)?;
+        let mut control =
+            Control::connect(server).map_err(|e| format!("PPTP TCP control connection: {e}"))?;
         control.set_cancellation(cancel.clone());
         let mut random = [0u8; 26];
         getrandom::fill(&mut random)?;
@@ -662,21 +663,27 @@ fn run_tunnel(
             #[cfg(windows)]
             Err(error) if error.raw_os_error() == Some(10013) => {
                 set_stage("Preparing app-session administrator permission. Windows may ask once…");
-                conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())?
+                conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())
+                    .map_err(|e| format!("PPTP permission/socket handoff: {e}"))?
             }
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
                 set_stage("Requesting permission for private PPTP traffic…");
-                conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())?
+                conxol_pptp::elevation::open_gre(local, server, call, cancel.clone())
+                    .map_err(|e| format!("PPTP permission/socket handoff: {e}"))?
             }
-            Err(error) => return Err(error.into()),
+            Err(error) => return Err(format!("PPTP GRE socket setup: {error}").into()),
         };
         set_stage("Negotiating PPTP and authenticating…");
-        let peer = control.start(call)?;
-        let auth = ppp::authenticate(&mut control, &mut gre, peer, &profile.username, &password)?;
+        let peer = control
+            .start(call)
+            .map_err(|e| format!("PPTP control negotiation: {e}"))?;
+        let auth = ppp::authenticate(&mut control, &mut gre, peer, &profile.username, &password)
+            .map_err(|e| format!("PPTP PPP authentication: {e}"))?;
         drop(password);
         set_stage("Negotiating encrypted IP traffic…");
-        let mut link = Link::negotiate(&mut control, &mut gre, peer, auth)?;
+        let mut link = Link::negotiate(&mut control, &mut gre, peer, auth)
+            .map_err(|e| format!("PPTP encrypted IP negotiation: {e}"))?;
         let mut stack = Stack::new(
             link.local_ip,
             link.peer_ip,

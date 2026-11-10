@@ -6,6 +6,11 @@ use std::{
     os::fd::{AsRawFd, FromRawFd, OwnedFd},
 };
 
+fn socket_error(operation: &str) -> io::Error {
+    let error = io::Error::last_os_error();
+    io::Error::new(error.kind(), format!("PPTP GRE {operation}: {error}"))
+}
+
 fn address(ip: Ipv4Addr) -> libc::sockaddr_in {
     // SAFETY: zero initializes sockaddr_in, including padding.
     let mut address: libc::sockaddr_in = unsafe { zeroed() };
@@ -55,7 +60,7 @@ impl Gre {
             )
         } < 0
         {
-            return Err(io::Error::last_os_error());
+            return Err(socket_error("socket type inspection"));
         }
         if length as usize != size_of::<i32>() || kind != libc::SOCK_RAW {
             return Err(io::Error::other("Unexpected GRE socket type"));
@@ -75,7 +80,7 @@ impl Gre {
                 )
             } < 0
             {
-                return Err(io::Error::last_os_error());
+                return Err(socket_error("protocol inspection"));
             }
             if protocol != 47 {
                 return Err(io::Error::other("Unexpected GRE socket protocol"));
@@ -87,7 +92,7 @@ impl Gre {
             || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
             || unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) } < 0
         {
-            return Err(io::Error::last_os_error());
+            return Err(socket_error("descriptor configuration"));
         }
         let local_address = address(local);
         let remote_address = address(remote);
@@ -100,15 +105,19 @@ impl Gre {
                 size_of::<libc::sockaddr_in>() as _,
             )
         } < 0
-            || unsafe {
-                libc::connect(
-                    fd,
-                    (&remote_address as *const libc::sockaddr_in).cast(),
-                    size_of::<libc::sockaddr_in>() as _,
-                )
-            } < 0
         {
-            return Err(io::Error::last_os_error());
+            return Err(socket_error("local bind"));
+        }
+        // SAFETY: remote_address is a live sockaddr_in with matching length.
+        if unsafe {
+            libc::connect(
+                fd,
+                (&remote_address as *const libc::sockaddr_in).cast(),
+                size_of::<libc::sockaddr_in>() as _,
+            )
+        } < 0
+        {
+            return Err(socket_error("peer connect"));
         }
         Ok(Self {
             socket,
@@ -136,7 +145,7 @@ impl Gre {
             )
         };
         if n < 0 {
-            return Err(io::Error::last_os_error());
+            return Err(socket_error("packet send"));
         }
         if n as usize != bytes.len() {
             return Err(io::Error::new(io::ErrorKind::WriteZero, "short GRE write"));
