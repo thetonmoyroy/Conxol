@@ -381,15 +381,17 @@ normalized at the OS boundary before parsing.
 
 When raw-socket permission is absent, Linux requests authorization through
 `/usr/bin/pkexec` (requires polkit and a desktop authentication agent); macOS
-uses the system administrator prompt through `/usr/bin/osascript`. A one-shot
+uses the system administrator prompt through `/usr/bin/osascript`. A
 same-binary helper runs before GUI, logging, profile or vault initialization.
-It creates one GRE socket, transfers only its descriptor over a random private
-0700 Unix-socket directory, then exits. Both peers verify OS-provided Unix
+It creates GRE sockets and transfers only descriptors over an authenticated
+channel established through a random private 0700 Unix-socket directory.
+Linux exits after one handoff; macOS retains the channel for the app run. Both peers verify OS-provided Unix
 credentials. The app checks the received socket type (and GRE protocol on Linux),
 then binds/connects it to the selected endpoint. Passwords never enter the
 helper, command line, IPC or files. Cancellation and a 90-second timeout stop
-the authorization launcher and remove its rendezvous. Permission may be requested
-for each new tunnel; no persistent privileged service is installed. A cancelled
+the authorization launcher and remove its rendezvous. Linux may request
+permission for each new tunnel; macOS reuses the authorized helper until app
+exit. No persistent privileged service is installed. A cancelled
 or unavailable permission request fails the connection without direct fallback.
 
 Android hides the PPTP manager, SSH/Telnet attachment controls and diagnostics
@@ -408,3 +410,27 @@ manual acceptance. No release build or version bump was made for this change.
 
 Platform references: [Linux raw sockets](https://man7.org/linux/man-pages/man7/raw.7.html)
 and [XNU raw IPv4 handling](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/netinet/raw_ip.c).
+
+## Session-scoped macOS authorization
+
+The first PPTP connection in an app run asks macOS for administrator approval
+to create raw GRE sockets. A narrow helper retains the authenticated Unix
+channel and supplies fresh sockets for subsequent connections and reconnects.
+Authorization lasts until the app exits (including a crash); restarting the app
+requires approval again. There is no installed daemon or Keychain dependency.
+
+The app serializes socket requests. The private initial rendezvous checks peer
+UIDs in both directions and is removed after the handoff. The retained channel
+accepts only fixed request/acknowledgement bytes and descriptor transfers, never
+credentials, addresses, paths, or commands. Protocol traffic and authentication
+remain in the unelevated app. A broken exchange discards the channel; a later
+explicit connection attempt can request authorization again. Linux retains
+its one-shot pkexec behavior.
+
+Validation for this change: macOS ARM64 cargo check; 13 vault unit tests;
+27 PPTP tests on Linux/WSL, including repeated descriptor requests, invalid
+requests/acknowledgements, client death and EOF cleanup. Three privileged
+fixtures remain ignored. macOS native approval/reconnect acceptance is pending:
+approve the first connection, disconnect/reconnect and connect a second profile
+without another prompt, then quit/restart and confirm approval is requested.
+No release package was built.

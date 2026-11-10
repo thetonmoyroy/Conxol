@@ -1,8 +1,10 @@
-//! One-shot privileged raw-GRE socket creation. Authentication and all protocol
-//! traffic stay in the unelevated app; only an FD crosses a private Unix socket.
+//! Privileged raw-GRE socket creation (session-scoped on macOS).
+//! Authentication and protocol traffic stay in the unelevated app; only
+//! descriptors cross a private Unix socket.
 use crate::gre::Gre;
 use std::{
     fs, io,
+    io::{Read, Write},
     mem::{size_of, zeroed},
     net::Ipv4Addr,
     os::{
@@ -20,6 +22,10 @@ use std::{
     },
     time::{Duration, Instant},
 };
+
+fn context(operation: &'static str) -> impl FnOnce(io::Error) -> io::Error {
+    move |error| io::Error::new(error.kind(), format!("{operation}: {error}"))
+}
 
 const MODE: &str = "--conxol-pptp-gre-unix";
 
@@ -198,12 +204,79 @@ fn launch(path: &Path, uid: u32) -> io::Result<Child> {
         .spawn()
 }
 
+// Only this already-authenticated, close-on-exec channel can request more sockets.
+// No persistent service, reconnect listener, credentials, or commands are exposed.
+#[cfg(target_os = "macos")]
+struct AuthorizedHelper {
+    stream: UnixStream,
+    child: Child,
+}
+#[cfg(target_os = "macos")]
+impl Drop for AuthorizedHelper {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
 pub fn open_gre(
     local: Ipv4Addr,
     remote: Ipv4Addr,
     call: u16,
     cancel: Arc<AtomicBool>,
 ) -> io::Result<Gre> {
+    #[cfg(target_os = "macos")]
+    {
+        static HELPER: std::sync::Mutex<Option<AuthorizedHelper>> = std::sync::Mutex::new(None);
+        let mut helper = loop {
+            if cancel.load(Ordering::Acquire) {
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "PPTP connection cancelled",
+                ));
+            }
+            match HELPER.try_lock() {
+                Ok(helper) => break helper,
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(Duration::from_millis(25))
+                }
+                Err(_) => return Err(io::Error::other("PPTP helper state unavailable")),
+            }
+        };
+        if let Some(active) = helper.as_mut() {
+            let result = (|| {
+                active.stream.write_all(&[3])?;
+                let fd = receive_fd(&active.stream)?;
+                let gre = Gre::from_socket(fd, local, remote, call)?;
+                active.stream.write_all(&[2])?;
+                Ok(gre)
+            })();
+            if result.is_err() {
+                // Never retry a broken exchange on a desynchronized channel.
+                *helper = None;
+            }
+            return result;
+        }
+        let (gre, stream, child) = open_new(local, remote, call, cancel)?;
+        *helper = Some(AuthorizedHelper { stream, child });
+        Ok(gre)
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let (gre, _stream, mut child) = open_new(local, remote, call, cancel)?;
+        let _ = child.kill();
+        let _ = child.wait();
+        Ok(gre)
+    }
+}
+
+fn open_new(
+    local: Ipv4Addr,
+    remote: Ipv4Addr,
+    call: u16,
+    cancel: Arc<AtomicBool>,
+) -> io::Result<(Gre, UnixStream, Child)> {
     if cancel.load(Ordering::Acquire) {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
@@ -215,11 +288,16 @@ pub fn open_gre(
     let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     // /tmp is shared by the GUI and elevated process (unlike macOS per-user TMPDIR).
     let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
-    fs::DirBuilder::new().mode(0o700).create(&directory)?;
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .map_err(context("create handoff directory"))?;
     let rendezvous = Rendezvous(directory);
     let path = rendezvous.0.join("socket");
-    let listener = UnixListener::bind(&path)?;
-    listener.set_nonblocking(true)?;
+    let listener = UnixListener::bind(&path).map_err(context("bind handoff listener"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(context("configure handoff listener"))?;
     // SAFETY: geteuid has no arguments or side effects.
     let uid = unsafe { libc::geteuid() };
     let mut child = launch(&path, uid).map_err(|_| io::Error::other("Could not request PPTP permission. Linux requires pkexec and a running polkit authentication agent; macOS requires administrator approval."))?;
@@ -239,21 +317,34 @@ pub fn open_gre(
                 ));
             }
             match listener.accept() {
-                Ok((stream, _)) => {
-                    if peer_uid(&stream)? != 0 {
+                Ok((mut stream, _)) => {
+                    if peer_uid(&stream).map_err(context("verify helper identity"))? != 0 {
                         return Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,
                             "Unexpected GRE helper identity",
                         ));
                     }
-                    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-                    let fd = receive_fd(&stream)?;
-                    return Gre::from_socket(fd, local, remote, call);
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .map_err(context("configure handoff timeout"))?;
+                    let fd = receive_fd(&stream).map_err(context("receive GRE descriptor"))?;
+                    let gre = Gre::from_socket(fd, local, remote, call)?;
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(2)))
+                        .map_err(context("configure handoff acknowledgement timeout"))?;
+                    stream
+                        .write_all(&[2])
+                        .map_err(context("acknowledge GRE descriptor"))?;
+                    return Ok((gre, stream));
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(e) => return Err(e),
+                Err(e) => return Err(context("accept helper connection")(e)),
             }
-            if child.try_wait()?.is_some() {
+            if child
+                .try_wait()
+                .map_err(context("check helper process"))?
+                .is_some()
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "PPTP administrator permission was cancelled or unavailable",
@@ -262,9 +353,14 @@ pub fn open_gre(
             std::thread::sleep(Duration::from_millis(25));
         }
     })();
-    let _ = child.kill();
-    let _ = child.wait();
-    result
+    match result {
+        Ok((gre, stream)) => Ok((gre, stream, child)),
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            Err(error)
+        }
+    }
 }
 
 /// Invoked before the GUI, logging, profiles or vault are initialized.
@@ -300,7 +396,7 @@ fn helper(args: &[String]) -> io::Result<()> {
     if !metadata.is_dir() || metadata.uid() != uid || metadata.mode() & 0o777 != 0o700 {
         return Err(io::Error::other("Invalid helper directory"));
     }
-    let stream = UnixStream::connect(path)?;
+    let mut stream = UnixStream::connect(path)?;
     if peer_uid(&stream)? != uid {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
@@ -308,7 +404,11 @@ fn helper(args: &[String]) -> io::Result<()> {
         ));
     }
     stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-    // SAFETY: the only privileged operation is creation of one raw GRE socket.
+    serve_socket_requests(&mut stream, cfg!(target_os = "macos"), create_gre_socket)
+}
+
+fn create_gre_socket() -> io::Result<OwnedFd> {
+    // SAFETY: the only privileged operation is creation of a raw GRE socket.
     // It sends no packets; the normal app binds and connects the received FD.
     #[cfg(target_os = "linux")]
     let kind = libc::SOCK_RAW | libc::SOCK_CLOEXEC;
@@ -320,12 +420,208 @@ fn helper(args: &[String]) -> io::Result<()> {
     }
     // SAFETY: exclusive newly created descriptor, closed immediately after send.
     let fd = unsafe { OwnedFd::from_raw_fd(fd) };
-    send_fd(&stream, &fd)
+    // SAFETY: this exclusively owned socket must not leak into child processes.
+    if unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_SETFD, libc::FD_CLOEXEC) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(fd)
+}
+
+/// Fixed one-byte protocol. EOF ends retained authority. No paths, addresses,
+/// passwords, or shell commands are accepted over this channel.
+fn serve_socket_requests(
+    stream: &mut UnixStream,
+    retain: bool,
+    mut create: impl FnMut() -> io::Result<OwnedFd>,
+) -> io::Result<()> {
+    loop {
+        let fd = create()?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        send_fd(stream, &fd)?;
+        let mut acknowledgement = [0];
+        stream.read_exact(&mut acknowledgement)?;
+        if acknowledgement != [2] {
+            return Err(io::Error::other("Invalid GRE handoff acknowledgement"));
+        }
+        drop(fd);
+        if !retain {
+            return Ok(());
+        }
+        // The app's close-on-exec socket closes on exit or crash. The helper
+        // has no listener and exits on EOF, without installing a root service.
+        stream.set_read_timeout(None)?;
+        let mut request = [0];
+        match stream.read_exact(&mut request) {
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(error) => return Err(error),
+            Ok(()) if request == [3] => {}
+            Ok(()) => return Err(io::Error::other("Invalid GRE socket request")),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Unix-pair fixtures exercise the retained macOS protocol without root,
+    // raw sockets, network traffic, or an authorization prompt.
+    fn fixture_helper() -> (UnixStream, std::thread::JoinHandle<io::Result<()>>) {
+        let (mut server, client) = UnixStream::pair().unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        client
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let worker = std::thread::spawn(move || {
+            serve_socket_requests(&mut server, true, || {
+                let (fd, _peer) = UnixStream::pair()?;
+                Ok(fd.into())
+            })
+        });
+        (client, worker)
+    }
+
+    #[test]
+    fn retained_helper_serves_repeated_requests_and_exits_on_eof() {
+        let (mut client, worker) = fixture_helper();
+        for index in 0..4 {
+            if index > 0 {
+                client.write_all(&[3]).unwrap();
+            }
+            receive_fd(&client).unwrap();
+            client.write_all(&[2]).unwrap();
+        }
+        drop(client);
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn retained_helper_rejects_unknown_request_and_bad_acknowledgement() {
+        for (ack, request) in [(2, 99), (99, 3)] {
+            let (mut client, worker) = fixture_helper();
+            receive_fd(&client).unwrap();
+            client.write_all(&[ack]).unwrap();
+            if ack == 2 {
+                client.write_all(&[request]).unwrap();
+            }
+            assert!(worker.join().unwrap().is_err());
+        }
+    }
+
+    #[test]
+    fn retained_helper_exits_if_client_dies_before_acknowledgement() {
+        let (client, worker) = fixture_helper();
+        receive_fd(&client).unwrap();
+        drop(client);
+        assert!(worker.join().unwrap().is_err());
+    }
+
+    #[test]
+    fn named_handoff_checks_identity_timeout_and_descriptor() {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let rendezvous = Rendezvous(directory);
+        let path = rendezvous.0.join("socket");
+        let listener = UnixListener::bind(&path).expect("bind listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let sender = UnixStream::connect(&path).expect("connect sender");
+        let (receiver, _) = listener.accept().expect("accept sender");
+        assert_eq!(peer_uid(&receiver).expect("sender credentials"), unsafe {
+            libc::geteuid()
+        });
+        assert_eq!(peer_uid(&sender).expect("listener credentials"), unsafe {
+            libc::geteuid()
+        });
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("receive timeout");
+        let (data, _peer) = UnixStream::pair().unwrap();
+        send_fd(&sender, &data.into()).expect("send descriptor");
+        drop(sender);
+        receive_fd(&receiver).expect("receive after helper exit");
+    }
+
+    #[test]
+    #[ignore = "Child entry for the explicitly invoked sudo loopback fixture"]
+    fn privileged_sender_child() {
+        let Ok(path) = std::env::var("CONXOL_PPTP_FIXTURE_SOCKET") else {
+            return;
+        };
+        let uid = std::env::var("CONXOL_PPTP_FIXTURE_UID").unwrap();
+        helper(&[MODE.into(), path, uid]).expect("privileged GRE helper");
+    }
+
+    #[test]
+    #[ignore = "Requires passwordless sudo; creates only a loopback GRE socket"]
+    fn privileged_descriptor_handoff_to_unprivileged_app() {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let rendezvous = Rendezvous(directory);
+        let path = rendezvous.0.join("socket");
+        let listener = UnixListener::bind(&path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut child = Command::new("/usr/bin/sudo")
+            .args(["-n", "/usr/bin/env"])
+            .arg(format!("CONXOL_PPTP_FIXTURE_SOCKET={}", path.display()))
+            .arg(format!("CONXOL_PPTP_FIXTURE_UID={}", unsafe {
+                libc::geteuid()
+            }))
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "elevation::tests::privileged_sender_child",
+                "--nocapture",
+            ])
+            .spawn()
+            .unwrap();
+        let result = (|| -> io::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        assert_eq!(peer_uid(&stream).expect("root peer identity"), 0);
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .expect("timeout");
+                        let fd = receive_fd(&stream).expect("receive root GRE descriptor");
+                        Gre::from_socket(fd, Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1)
+                            .expect("configure transferred GRE socket");
+                        stream.write_all(&[2]).expect("acknowledge handoff");
+                        return Ok(());
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(e),
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::other("fixture timed out"));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })();
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let exit = child.wait().unwrap();
+        result.unwrap();
+        assert!(exit.success());
+    }
+
     #[test]
     fn descriptor_round_trip_is_owned_and_cloexec() {
         let (sender, receiver) = UnixStream::pair().unwrap();

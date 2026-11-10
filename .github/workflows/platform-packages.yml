@@ -5,10 +5,16 @@ on:
   workflow_dispatch:
     inputs:
       source_ref:
-        description: Existing release tag to build
+        description: Release tag, branch, or commit SHA to build
         required: true
         default: v0.1.60
         type: string
+
+      test_build:
+        description: Build test artifacts from a branch or commit without publishing
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -62,12 +68,19 @@ jobs:
       - name: Check source version and frontend
         env:
           SOURCE_REF: ${{ inputs.source_ref }}
+          TEST_BUILD: ${{ inputs.test_build }}
         run: |
-          GITHUB_REF_NAME="$SOURCE_REF" node tools/release-assets.mjs check-version
+          version_ref="$SOURCE_REF"
+          if [ "$TEST_BUILD" = "true" ]; then
+            version_ref="v$(node -p "require('./apps/desktop/package.json').version")"
+          fi
+          GITHUB_REF_NAME="$version_ref" node tools/release-assets.mjs check-version
           pnpm --dir apps/desktop check
           pnpm --dir apps/desktop lint
           pnpm --dir apps/desktop test:unit
           node --test tools/release-assets.test.mjs
+      - name: Test vault and PPTP engine
+        run: cargo test --locked -p conxol-vault -p conxol-pptp
       - name: Fetch verified AppRun through GitHub API
         if: runner.os == 'Linux'
         env:

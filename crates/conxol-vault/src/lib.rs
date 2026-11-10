@@ -19,8 +19,6 @@ use thiserror::Error;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-// Conxol credentials use their own namespace without legacy lookup or migration.
-const DEFAULT_SERVICE: &str = "com.othmane.conxol";
 const PORTABLE_MAGIC: &[u8; 8] = b"MRPVLT01";
 const PORTABLE_SALT_BYTES: usize = 16;
 const PORTABLE_NONCE_BYTES: usize = 12;
@@ -42,7 +40,7 @@ const PORTABLE_ARGON_PARALLELISM: u32 = 1;
 pub struct CredentialId(String);
 
 impl CredentialId {
-    /// Validate an identifier before it reaches a platform credential store.
+    /// Validate an identifier before it reaches the encrypted credential store.
     pub fn new(value: impl Into<String>) -> Result<Self, VaultError> {
         let value = value.into();
         let valid = !value.is_empty()
@@ -120,8 +118,6 @@ impl Drop for SecretMaterial {
 pub enum VaultError {
     #[error("credential reference must contain only letters, numbers, '.', '_' or '-'")]
     InvalidCredentialId,
-    #[error("native credential store error")]
-    Backend(#[from] keyring::Error),
     #[error("portable vault passphrase cannot be empty")]
     EmptyPassphrase,
     #[error("portable vault file is too large")]
@@ -163,20 +159,6 @@ impl VaultError {
     /// credential identifiers, stored bytes, or local filesystem paths.
     pub fn diagnostic_kind(&self) -> &'static str {
         match self {
-            Self::Backend(error) => match error {
-                keyring::Error::NoEntry => "keyring::Error::NoEntry",
-                keyring::Error::NoStorageAccess(_) => "keyring::Error::NoStorageAccess",
-                keyring::Error::PlatformFailure(_) => "keyring::Error::PlatformFailure",
-                keyring::Error::BadEncoding(_) => "keyring::Error::BadEncoding",
-                keyring::Error::BadDataFormat(_, _) => "keyring::Error::BadDataFormat",
-                keyring::Error::BadStoreFormat(_) => "keyring::Error::BadStoreFormat",
-                keyring::Error::TooLong(_, _) => "keyring::Error::TooLong",
-                keyring::Error::Invalid(_, _) => "keyring::Error::Invalid",
-                keyring::Error::Ambiguous(_) => "keyring::Error::Ambiguous",
-                keyring::Error::NoDefaultStore => "keyring::Error::NoDefaultStore",
-                keyring::Error::NotSupportedByStore(_) => "keyring::Error::NotSupportedByStore",
-                _ => "keyring::Error::<unknown>",
-            },
             Self::InvalidCredentialId => "VaultError::InvalidCredentialId",
             Self::PortableCredentialMissing(_) => "VaultError::PortableCredentialMissing",
             Self::PortableStateUnavailable(_) => "VaultError::PortableStateUnavailable",
@@ -195,126 +177,11 @@ impl fmt::Debug for VaultError {
     }
 }
 
-/// Access to the platform credential store selected by `keyring`.
-///
-/// On macOS this is Keychain, on Windows Credential Manager, and on supported
-/// Unix desktops Secret Service. Portable encrypted storage is intentionally a
-/// separate backend and is not silently substituted here.
-#[derive(Clone, Debug)]
-pub struct PlatformVault {
-    service: String,
-}
-
-impl Default for PlatformVault {
-    fn default() -> Self {
-        Self::new(DEFAULT_SERVICE)
-    }
-}
-
-impl PlatformVault {
-    pub fn new(service: impl Into<String>) -> Self {
-        Self {
-            service: service.into(),
-        }
-    }
-
-    pub fn put(
-        &self,
-        credential_id: &CredentialId,
-        secret: &SecretMaterial,
-    ) -> Result<(), VaultError> {
-        validate_secret_size(secret)?;
-        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
-        entry.set_password(secret.as_str())?;
-        Ok(())
-    }
-
-    pub fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
-        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
-        let value = entry.get_password()?;
-        let secret = SecretMaterial::new(value);
-        validate_secret_size(&secret)?;
-        Ok(secret)
-    }
-
-    pub fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
-        let entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(error) => Err(VaultError::Backend(error)),
-        }
-    }
-
-    /// Enumerate only this application's namespace; never return secret values.
-    pub fn list_ids(&self) -> Result<Vec<String>, VaultError> {
-        self.entry(&CredentialId::new("backup-probe")?)?;
-        #[cfg(windows)]
-        {
-            let pattern = format!(r".*\.{}$", self.service.replace('.', r"\."));
-            let spec = std::collections::HashMap::from([("pattern", pattern.as_str())]);
-            let entries = keyring_core::Entry::search(&spec).map_err(VaultError::Backend)?;
-            let mut ids = Vec::new();
-            for entry in entries {
-                // Legacy Windows targets are `<id>.<service>`. The store's generic
-                // splitter is ambiguous when the service itself contains dots.
-                let attributes = entry.get_attributes().map_err(VaultError::Backend)?;
-                if let Some(id) = attributes
-                    .get("target_name")
-                    .and_then(|target| target.strip_suffix(&format!(".{}", self.service)))
-                    && CredentialId::new(id).is_ok()
-                {
-                    ids.push(id.to_owned());
-                }
-            }
-            Ok(ids)
-        }
-        #[cfg(not(windows))]
-        {
-            Ok(Vec::new())
-        }
-    }
-
-    /// Check whether the platform store can be constructed without retrieving
-    /// any user credential. This deliberately does not expose a secret.
-    pub fn entry(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
-        let _entry = keyring::Entry::new(&self.service, credential_id.as_str())?;
-        Ok(())
-    }
-}
-
-/// A narrowly-scoped interface that keeps vault access mockable in higher
-/// layers without making the frontend aware of platform credential APIs.
-pub trait CredentialStore {
-    fn put(&self, credential_id: &CredentialId, secret: &SecretMaterial) -> Result<(), VaultError>;
-    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError>;
-    fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError>;
-}
-
 /// Read-only credential lookup used by native protocol adapters. Keeping this
 /// trait separate lets an explicitly unlocked portable vault participate in a
 /// connection without widening the frontend IPC surface.
 pub trait CredentialLookup: Send + Sync {
     fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError>;
-}
-
-impl CredentialStore for PlatformVault {
-    fn put(&self, credential_id: &CredentialId, secret: &SecretMaterial) -> Result<(), VaultError> {
-        Self::put(self, credential_id, secret)
-    }
-
-    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
-        Self::get(self, credential_id)
-    }
-
-    fn delete(&self, credential_id: &CredentialId) -> Result<(), VaultError> {
-        Self::delete(self, credential_id)
-    }
-}
-
-impl CredentialLookup for PlatformVault {
-    fn get(&self, credential_id: &CredentialId) -> Result<SecretMaterial, VaultError> {
-        Self::get(self, credential_id)
-    }
 }
 
 impl CredentialLookup for PortableVault {
@@ -881,7 +748,7 @@ fn ensure_portable_path_is_safe(path: &Path, allow_missing: bool) -> Result<bool
 #[cfg(test)]
 mod tests {
     use super::{
-        CredentialId, MAX_SECRET_BYTES, PlatformVault, PortableVault, SecretMaterial, VaultError,
+        CredentialId, MAX_SECRET_BYTES, PortableVault, SecretMaterial, VaultError,
         decode_portable_entries, validate_secret_size,
     };
     use std::fs;
@@ -1003,14 +870,6 @@ mod tests {
             Err(VaultError::PortableFileTooLarge)
         ));
         assert!(fs::metadata(&path).unwrap().len() <= super::PORTABLE_MAX_FILE_BYTES as u64);
-    }
-
-    #[test]
-    fn default_vault_uses_conxol_service_namespace() {
-        assert_eq!(
-            format!("{:?}", PlatformVault::default()),
-            "PlatformVault { service: \"com.othmane.conxol\" }"
-        );
     }
 
     #[test]
@@ -1139,23 +998,6 @@ mod diagnostic_tests {
     #[test]
     fn diagnostic_error_kind_keeps_categories_without_credential_bytes() {
         let cases = [
-            (
-                VaultError::Backend(keyring::Error::NoEntry),
-                "keyring::Error::NoEntry",
-            ),
-            (
-                VaultError::Backend(keyring::Error::BadEncoding(
-                    b"fixture-secret-password".to_vec(),
-                )),
-                "keyring::Error::BadEncoding",
-            ),
-            (
-                VaultError::Backend(keyring::Error::Invalid(
-                    "fixture-user".into(),
-                    "fixture-secret-password".into(),
-                )),
-                "keyring::Error::Invalid",
-            ),
             (
                 VaultError::PortableCredentialMissing("fixture-credential-id".into()),
                 "VaultError::PortableCredentialMissing",

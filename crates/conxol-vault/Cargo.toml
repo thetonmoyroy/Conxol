@@ -12,8 +12,6 @@ aes-gcm = "0.11.1"
 argon2 = "0.6.0"
 libc.workspace = true
 getrandom = "0.4.3"
-keyring = "4.1.6"
-keyring-core = "1.0.0"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -24,5 +22,4 @@ zeroize.workspace = true
 tempfile = "3.23.0"
 
 [target.'cfg(windows)'.dependencies]
-windows-native-keyring-store = { version = "1.1.0", features = ["search"] }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
