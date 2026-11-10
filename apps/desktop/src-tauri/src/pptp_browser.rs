@@ -327,6 +327,7 @@ fn remove_tab(snapshot: &mut BrowserSnapshot, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show_active(app: &tauri::AppHandle, state: &Shared) -> Result<(), String> {
     let (tabs, active, diagnostics) = {
         let state = state.lock().unwrap();
@@ -725,6 +726,7 @@ pub fn pptp_browser_snapshot(
     Ok(snapshot)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub async fn pptp_browser_control(
     app: tauri::AppHandle,
@@ -919,5 +921,12 @@ fn resize_content(_child: &tauri::Webview, _diagnostics: bool) -> tauri::Result<
 }
 #[cfg(any(target_os = "android", target_os = "ios"))]
 fn create_tab(_app: &tauri::AppHandle, _label: &str, _state: &Shared, _destination: &str) -> Result<(), String> {
+    Err("PPTP browser requires Windows WebView2".into())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub async fn pptp_browser_control(app: tauri::AppHandle, webview: tauri::Webview, action: String, tab_id: Option<String>) -> Result<(), String> {
+    let _ = (app, webview, action, tab_id);
     Err("PPTP browser requires Windows WebView2".into())
 }
