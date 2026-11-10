@@ -434,3 +434,9 @@ fixtures remain ignored. macOS native approval/reconnect acceptance is pending:
 approve the first connection, disconnect/reconnect and connect a second profile
 without another prompt, then quit/restart and confirm approval is requested.
 No release package was built.
+
+The accepted app-side handoff stream explicitly restores blocking mode before
+applying receive/send timeouts. Darwin can inherit O_NONBLOCK from the listener;
+leaving that flag set causes immediate EAGAIN (error 35) on reconnect before the
+helper responds, discarding authorization. A regression simulates inherited
+nonblocking mode and delays every descriptor across four socket lifetimes.

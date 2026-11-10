@@ -246,10 +246,18 @@ pub fn open_gre(
         };
         if let Some(active) = helper.as_mut() {
             let result = (|| {
-                active.stream.write_all(&[3])?;
-                let fd = receive_fd(&active.stream)?;
-                let gre = Gre::from_socket(fd, local, remote, call)?;
-                active.stream.write_all(&[2])?;
+                active
+                    .stream
+                    .write_all(&[3])
+                    .map_err(context("request retained GRE socket"))?;
+                let fd = receive_fd(&active.stream)
+                    .map_err(context("receive retained GRE descriptor"))?;
+                let gre = Gre::from_socket(fd, local, remote, call)
+                    .map_err(context("configure retained GRE socket"))?;
+                active
+                    .stream
+                    .write_all(&[2])
+                    .map_err(context("acknowledge retained GRE descriptor"))?;
                 Ok(gre)
             })();
             if result.is_err() {
@@ -269,6 +277,22 @@ pub fn open_gre(
         let _ = child.wait();
         Ok(gre)
     }
+}
+
+/// Darwin inherits O_NONBLOCK from a nonblocking Unix listener on accept.
+/// Restore blocking mode before installing bounded I/O timeouts; otherwise a
+/// retained channel's next recvmsg races the helper and returns EAGAIN.
+fn configure_handoff(stream: &UnixStream) -> io::Result<()> {
+    stream
+        .set_nonblocking(false)
+        .map_err(context("configure blocking handoff channel"))?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(context("configure handoff receive timeout"))?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(context("configure handoff send timeout"))?;
+    Ok(())
 }
 
 fn open_new(
@@ -324,14 +348,9 @@ fn open_new(
                             "Unexpected GRE helper identity",
                         ));
                     }
-                    stream
-                        .set_read_timeout(Some(Duration::from_secs(2)))
-                        .map_err(context("configure handoff timeout"))?;
+                    configure_handoff(&stream)?;
                     let fd = receive_fd(&stream).map_err(context("receive GRE descriptor"))?;
                     let gre = Gre::from_socket(fd, local, remote, call)?;
-                    stream
-                        .set_write_timeout(Some(Duration::from_secs(2)))
-                        .map_err(context("configure handoff acknowledgement timeout"))?;
                     stream
                         .write_all(&[2])
                         .map_err(context("acknowledge GRE descriptor"))?;
@@ -521,6 +540,37 @@ mod tests {
             }
             receive_fd(&client).unwrap();
             client.write_all(&[2]).unwrap();
+        }
+        drop(client);
+        worker.join().unwrap().unwrap();
+    }
+
+    #[test]
+    fn inherited_nonblocking_channel_waits_for_delayed_reconnect_descriptors() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        // Explicitly simulate Darwin's accepted socket flags on every Unix OS.
+        client.set_nonblocking(true).unwrap();
+        configure_handoff(&client).unwrap();
+        assert_eq!(
+            unsafe { libc::fcntl(client.as_raw_fd(), libc::F_GETFL) } & libc::O_NONBLOCK,
+            0
+        );
+        let worker = std::thread::spawn(move || {
+            serve_socket_requests(&mut server, true, || {
+                // Ensure recvmsg runs before each descriptor is ready, including
+                // after disconnecting (dropping) each previous socket.
+                std::thread::sleep(Duration::from_millis(30));
+                let (fd, _peer) = UnixStream::pair()?;
+                Ok(fd.into())
+            })
+        });
+        for index in 0..4 {
+            if index > 0 {
+                client.write_all(&[3]).unwrap();
+            }
+            let fd = receive_fd(&client).expect("wait for delayed helper response");
+            client.write_all(&[2]).unwrap();
+            drop(fd);
         }
         drop(client);
         worker.join().unwrap().unwrap();
