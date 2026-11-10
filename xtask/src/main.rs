@@ -29,6 +29,9 @@ fn main() {
         "test-store-updates" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "store_updates::", "--", "--nocapture"], None),
         "test-settings" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "settings::tests", "--", "--nocapture"], None),
         "test-network" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-network", "--", "--nocapture"], None),
+        "test-pptp-browser" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "pptp_browser::tests", "--", "--nocapture"], None),
+        "test-web-sessions" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "-p", "conxol-store", "web_sessions", "--", "--nocapture"], None),
+        "test-retired-sessions" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "-p", "conxol-store", "--lib"], None),
         "test-pptp-diagnostics" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp_diagnostics::tests", "--", "--nocapture"], None),
         "test-pptp" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "--", "--nocapture"], None)
             .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp::tests", "--", "--nocapture"], None)),
@@ -67,17 +70,12 @@ fn main() {
             None,
         ),
         "check-fuzz" => check_fuzz(),
-        "check-rdp-helper" => check_rdp_helper(),
-        "check-rdp-fixture" => check_rdp_fixture(),
-        "check-vnc-helper" => check_vnc_helper(),
         "benchmark" => benchmark(),
         "benchmark-app" => benchmark_app(arguments.collect()),
         "package-check" => package_check(),
         "package-layout-check" => package_layout_check(),
         "verify-platform-layout" => verify_platform_layout_command(arguments.collect()),
         "portable-check" => portable_check(),
-        "stage-helpers" => stage_helpers(),
-        "stage-rdp-helper" => stage_experimental_rdp_helper(),
         "pre-push-check" => pre_push_check(),
         "license-check" => license_check(),
         "verify-checksum" => verify_checksum_command(arguments.collect()),
@@ -97,11 +95,6 @@ fn main() {
                 "cargo xtask test-backup    Run isolated encrypted workspace backup regressions"
             );
             println!("cargo xtask check-fuzz    Compile and format-check isolated fuzz targets");
-            println!("cargo xtask check-rdp-helper    Validate the isolated RDP helper locally");
-            println!(
-                "cargo xtask check-rdp-fixture    Exercise the opt-in real loopback RDP fixture"
-            );
-            println!("cargo xtask check-vnc-helper    Validate the isolated VNC helper locally");
             println!("cargo xtask benchmark    Run synthetic local performance probes");
             println!(
                 "cargo xtask benchmark-app <path>    Measure the explicit local app --version startup path"
@@ -117,12 +110,6 @@ fn main() {
             );
             println!(
                 "cargo xtask portable-check    Assemble and inspect an unsigned current-platform portable archive"
-            );
-            println!(
-                "cargo xtask stage-helpers    Build and stage ignored desktop helper resources"
-            );
-            println!(
-                "cargo xtask stage-rdp-helper    Explicitly stage the isolated RDP candidate for local development"
             );
             println!(
                 "cargo xtask pre-push-check    Audit the local Git payload without network access"
@@ -145,145 +132,6 @@ fn main() {
         eprintln!("xtask: {error}");
         std::process::exit(1);
     }
-}
-
-fn stage_helpers() -> Result<(), String> {
-    let repository_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .ok_or_else(|| "xtask manifest has no repository parent".to_owned())?
-        .to_path_buf();
-    let staging_directory = repository_root.join("apps/desktop/src-tauri/helpers");
-    fs::create_dir_all(&staging_directory)
-        .map_err(|error| format!("could not create helper staging directory: {error}"))?;
-    let executable_suffix = if cfg!(windows) { ".exe" } else { "" };
-    // The isolated IronRDP candidate currently pulls rsa 0.10.0-rc.18 through
-    // picky and fails the local RUSTSEC-2023-0071 audit. Keep it available for
-    // isolated development checks, but never put that candidate in a normal
-    // application bundle until its dependency chain is fixed and re-audited.
-    let helpers = [("tools/vnc-helper/Cargo.toml", "conxol-vnc-helper")];
-    remove_unshippable_rdp_helper(&staging_directory, executable_suffix)?;
-
-    for (manifest, binary) in helpers {
-        build_and_stage_helper(
-            &repository_root,
-            &staging_directory,
-            manifest,
-            binary,
-            executable_suffix,
-        )?;
-    }
-    Ok(())
-}
-
-/// Explicitly stage the isolated RDP candidate for a local development run.
-///
-/// Normal application preparation never calls this path: the candidate has a
-/// separate dependency audit and is intentionally excluded from distributable
-/// bundles until that gate and real interoperability evidence are complete.
-fn stage_experimental_rdp_helper() -> Result<(), String> {
-    let repository_root = repository_root()?;
-    let staging_directory = repository_root.join("apps/desktop/src-tauri/helpers");
-    fs::create_dir_all(&staging_directory)
-        .map_err(|error| format!("could not create helper staging directory: {error}"))?;
-    let executable_suffix = if cfg!(windows) { ".exe" } else { "" };
-    build_and_stage_helper(
-        &repository_root,
-        &staging_directory,
-        "tools/rdp-helper/Cargo.toml",
-        "conxol-rdp-helper",
-        executable_suffix,
-    )?;
-    println!(
-        "staged experimental RDP helper for local development only; normal bundles still exclude it"
-    );
-    Ok(())
-}
-
-fn build_and_stage_helper(
-    repository_root: &Path,
-    staging_directory: &Path,
-    manifest: &str,
-    binary: &str,
-    executable_suffix: &str,
-) -> Result<(), String> {
-    let manifest_path = repository_root.join(manifest);
-    let mut command = Command::new("cargo");
-    sanitize_process_environment(&mut command);
-    let isolated_home = create_sanitized_test_home()?;
-    apply_isolated_home(&mut command, &isolated_home);
-    let package_target = std::env::var("CONXOL_PACKAGE_TARGET").ok();
-    command.args(["build", "--locked", "--release"]);
-    if let Some(target) = &package_target {
-        command.args(["--target", target]);
-    }
-    let status = command
-        .arg("--manifest-path")
-        .arg(&manifest_path)
-        .current_dir(repository_root)
-        .status()
-        .map_err(|error| format!("could not build {binary}: {error}"));
-    let cleanup = fs::remove_dir_all(&isolated_home)
-        .map_err(|error| format!("could not remove temporary helper home: {error}"));
-    cleanup?;
-    let status = status?;
-    if !status.success() {
-        return Err(format!(
-            "cargo failed while building {binary} with {status}"
-        ));
-    }
-    let mut source = manifest_path
-        .parent()
-        .ok_or_else(|| format!("helper manifest has no parent: {}", manifest_path.display()))?
-        .join("target");
-    if let Some(target) = package_target {
-        source.push(target);
-    }
-    let source = source
-        .join("release")
-        .join(format!("{binary}{executable_suffix}"));
-    let source_metadata = fs::symlink_metadata(&source).map_err(|error| {
-        format!(
-            "could not inspect built {binary} at {}: {error}",
-            source.display()
-        )
-    })?;
-    if !source_metadata.file_type().is_file() {
-        return Err(format!(
-            "built {binary} is not a regular file: {}",
-            source.display()
-        ));
-    }
-    let destination = staging_directory.join(format!("{binary}{executable_suffix}"));
-    fs::copy(&source, &destination).map_err(|error| {
-        format!(
-            "could not stage {binary} from {} to {}: {error}",
-            source.display(),
-            destination.display()
-        )
-    })?;
-    println!("staged {}", destination.display());
-    Ok(())
-}
-
-fn remove_unshippable_rdp_helper(
-    staging_directory: &std::path::Path,
-    executable_suffix: &str,
-) -> Result<(), String> {
-    let path = staging_directory.join(format!("conxol-rdp-helper{executable_suffix}"));
-    match fs::remove_file(&path) {
-        Ok(()) => println!(
-            "removed unshippable experimental RDP helper {}",
-            path.display()
-        ),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => {
-            return Err(format!(
-                "could not remove unshippable experimental RDP helper {}: {error}",
-                path.display()
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn package_check() -> Result<(), String> {
@@ -336,21 +184,7 @@ impl PackagePlatform {
         }
     }
 
-    fn vnc_helper(self) -> &'static str {
-        match self {
-            Self::Macos => "Contents/Resources/helpers/conxol-vnc-helper",
-            Self::Windows => "helpers/conxol-vnc-helper.exe",
-            Self::Linux => "helpers/conxol-vnc-helper",
-        }
-    }
 
-    fn rdp_helper(self) -> &'static str {
-        match self {
-            Self::Macos => "Contents/Resources/helpers/conxol-rdp-helper",
-            Self::Windows => "helpers/conxol-rdp-helper.exe",
-            Self::Linux => "helpers/conxol-rdp-helper",
-        }
-    }
 }
 
 /// Validate the platform-specific runtime shape without building or signing
@@ -358,33 +192,8 @@ impl PackagePlatform {
 /// macOS, and the unpacked application directory on Windows/Linux. Keeping
 /// this contract separate from the host build lets CI validate each target
 /// later without weakening the current Mac-only smoke test.
-fn verify_platform_package_layout(
-    package_root: &Path,
-    platform: PackagePlatform,
-) -> Result<(), String> {
-    let executable = package_root.join(platform.executable());
-    require_executable_file(
-        &executable,
-        &format!("{} runtime executable", platform.label()),
-    )?;
-
-    let vnc_helper = package_root.join(platform.vnc_helper());
-    require_executable_file(&vnc_helper, &format!("{} VNC helper", platform.label()))?;
-
-    let rdp_helper = package_root.join(platform.rdp_helper());
-    match fs::symlink_metadata(&rdp_helper) {
-        Ok(_) => Err(format!(
-            "{} package contains the unshippable RDP helper: {}",
-            platform.label(),
-            rdp_helper.display()
-        )),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "could not verify {} RDP helper absence {}: {error}",
-            platform.label(),
-            rdp_helper.display()
-        )),
-    }
+fn verify_platform_package_layout(package_root: &Path, platform: PackagePlatform) -> Result<(), String> {
+    require_executable_file(&package_root.join(platform.executable()), &format!("{} runtime executable", platform.label()))
 }
 
 fn require_regular_file(path: &Path, description: &str) -> Result<(), String> {
@@ -444,57 +253,19 @@ fn mark_fixture_executable(_path: &Path) -> Result<(), String> {
 fn package_layout_check() -> Result<(), String> {
     let root = repository_root()?.join("target/debug/package-layout-check");
     remove_generated_path(&root)?;
-
-    let result =
-        (|| {
-            for platform in [
-                PackagePlatform::Macos,
-                PackagePlatform::Windows,
-                PackagePlatform::Linux,
-            ] {
-                let package = root.join(platform.label().to_ascii_lowercase());
-                fs::create_dir_all(package.join(platform.vnc_helper()).parent().ok_or_else(
-                    || format!("{} package helper path has no parent", platform.label()),
-                )?)
-                .map_err(|error| {
-                    format!(
-                        "could not create {} package fixture: {error}",
-                        platform.label()
-                    )
-                })?;
-                fs::create_dir_all(package.join(platform.executable()).parent().ok_or_else(
-                    || format!("{} executable path has no parent", platform.label()),
-                )?)
-                .map_err(|error| {
-                    format!(
-                        "could not create {} executable fixture: {error}",
-                        platform.label()
-                    )
-                })?;
-                fs::write(package.join(platform.executable()), b"runtime").map_err(|error| {
-                    format!(
-                        "could not write {} runtime fixture: {error}",
-                        platform.label()
-                    )
-                })?;
-                fs::write(package.join(platform.vnc_helper()), b"vnc-helper").map_err(|error| {
-                    format!("could not write {} VNC fixture: {error}", platform.label())
-                })?;
-                mark_fixture_executable(&package.join(platform.executable()))?;
-                mark_fixture_executable(&package.join(platform.vnc_helper()))?;
-                verify_platform_package_layout(&package, platform)?;
-            }
-            Ok(())
-        })();
-    let cleanup = remove_generated_path(&root);
-    match (result, cleanup) {
-        (Err(error), _) => Err(error),
-        (Ok(()), Err(error)) => Err(error),
-        (Ok(()), Ok(())) => {
-            println!("verified unsigned runtime package layouts for macOS, Windows, and Linux");
-            Ok(())
+    let result = (|| {
+        for platform in [PackagePlatform::Macos, PackagePlatform::Windows, PackagePlatform::Linux] {
+            let package = root.join(platform.label().to_ascii_lowercase());
+            let executable = package.join(platform.executable());
+            fs::create_dir_all(executable.parent().ok_or("Runtime parent missing")?).map_err(|e| e.to_string())?;
+            fs::write(&executable, b"runtime").map_err(|e| e.to_string())?;
+            mark_fixture_executable(&executable)?;
+            verify_platform_package_layout(&package, platform)?;
         }
-    }
+        Ok(())
+    })();
+    let cleanup = remove_generated_path(&root);
+    result.and(cleanup)
 }
 
 fn verify_platform_layout_command(arguments: Vec<String>) -> Result<(), String> {
@@ -799,7 +570,6 @@ fn validate_portable_archive_listing(listing: &str, package_name: &str) -> Resul
         format!("{package_name}/Conxol.sha256"),
         format!("{package_name}/Conxol.app/Contents/MacOS/conxol"),
         format!("{package_name}/Conxol.app/Contents/MacOS/portable.flag"),
-        format!("{package_name}/Conxol.app/Contents/Resources/helpers/conxol-vnc-helper"),
     ] {
         if !entries.iter().any(|entry| *entry == required) {
             return Err(format!(
@@ -1076,7 +846,7 @@ fn verify_current_platform_bundle() -> Result<(), String> {
     if cfg!(target_os = "macos") {
         let bundle = bundle_root.join("macos/Conxol.app");
         verify_platform_package_layout(&bundle, PackagePlatform::Macos)?;
-        println!("verified macOS app bundle and the shippable VNC helper resource");
+        println!("verified macOS app bundle");
     } else {
         println!(
             "verified current-platform Tauri bundle directory: {}",
@@ -1489,7 +1259,6 @@ fn test_ssh() -> Result<(), String> {
 
 fn check_rust() -> Result<(), String> {
     run("cargo", ["fmt", "--all", "--", "--check"], None)?;
-    stage_helpers()?;
     test_sftp_dependency()?;
     run_sanitized_test(
         "cargo",
@@ -1531,11 +1300,6 @@ fn check() -> Result<(), String> {
         ],
         None,
     )?;
-    check_rdp_helper()?;
-    if cfg!(target_os = "macos") {
-        check_rdp_fixture()?;
-    }
-    check_vnc_helper()?;
     package_layout_check()?;
     check_fuzz()?;
     Ok(())
@@ -1550,99 +1314,6 @@ fn check_fuzz() -> Result<(), String> {
     run(
         "cargo",
         ["check", "--locked", "--manifest-path", "fuzz/Cargo.toml"],
-        None,
-    )
-}
-
-fn check_rdp_helper() -> Result<(), String> {
-    run(
-        "cargo",
-        [
-            "fmt",
-            "--manifest-path",
-            "tools/rdp-helper/Cargo.toml",
-            "--",
-            "--check",
-        ],
-        None,
-    )?;
-    run_sanitized_test(
-        "cargo",
-        [
-            "test",
-            "--locked",
-            "--manifest-path",
-            "tools/rdp-helper/Cargo.toml",
-        ],
-        None,
-    )?;
-    run(
-        "cargo",
-        [
-            "clippy",
-            "--locked",
-            "--manifest-path",
-            "tools/rdp-helper/Cargo.toml",
-            "--all-targets",
-            "--",
-            "-D",
-            "warnings",
-        ],
-        None,
-    )
-}
-
-fn check_rdp_fixture() -> Result<(), String> {
-    run_sanitized_test(
-        "cargo",
-        [
-            "test",
-            "--locked",
-            "--manifest-path",
-            "tools/rdp-helper/Cargo.toml",
-            "--features",
-            "local-rdp-fixture",
-            "--test",
-            "local_rdp",
-        ],
-        None,
-    )
-}
-
-fn check_vnc_helper() -> Result<(), String> {
-    run(
-        "cargo",
-        [
-            "fmt",
-            "--manifest-path",
-            "tools/vnc-helper/Cargo.toml",
-            "--",
-            "--check",
-        ],
-        None,
-    )?;
-    run_sanitized_test(
-        "cargo",
-        [
-            "test",
-            "--locked",
-            "--manifest-path",
-            "tools/vnc-helper/Cargo.toml",
-        ],
-        None,
-    )?;
-    run(
-        "cargo",
-        [
-            "clippy",
-            "--locked",
-            "--manifest-path",
-            "tools/vnc-helper/Cargo.toml",
-            "--all-targets",
-            "--",
-            "-D",
-            "warnings",
-        ],
         None,
     )
 }
@@ -2158,73 +1829,21 @@ mod tests {
 
     #[test]
     fn platform_package_contract_covers_mac_windows_and_linux_layouts() {
-        let root = std::env::temp_dir().join(format!(
-            "conxol-xtask-platform-layout-test-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .expect("system clock")
-                .as_nanos()
-        ));
-
-        for platform in [
-            PackagePlatform::Macos,
-            PackagePlatform::Windows,
-            PackagePlatform::Linux,
-        ] {
-            let package = root.join(platform.label().to_ascii_lowercase());
-            fs::create_dir_all(
-                package
-                    .join(platform.executable())
-                    .parent()
-                    .expect("runtime parent"),
-            )
-            .expect("create runtime directory");
-            fs::create_dir_all(
-                package
-                    .join(platform.vnc_helper())
-                    .parent()
-                    .expect("helper parent"),
-            )
-            .expect("create helper directory");
-            fs::write(package.join(platform.executable()), b"runtime").expect("write runtime");
-            fs::write(package.join(platform.vnc_helper()), b"vnc helper")
-                .expect("write VNC helper");
-            mark_fixture_executable(&package.join(platform.executable()))
-                .expect("make runtime executable");
-            mark_fixture_executable(&package.join(platform.vnc_helper()))
-                .expect("make VNC helper executable");
-
-            verify_platform_package_layout(&package, platform)
-                .expect("complete platform layout should pass");
-
-            #[cfg(unix)]
-            {
-                let runtime = package.join(platform.executable());
-                fs::set_permissions(&runtime, fs::Permissions::from_mode(0o644))
-                    .expect("make runtime non-executable");
-                let error = verify_platform_package_layout(&package, platform)
-                    .expect_err("a non-executable runtime must be rejected");
-                assert!(error.contains("runtime executable is not executable"));
-                mark_fixture_executable(&runtime).expect("restore runtime executable bit");
-
-                let vnc_helper = package.join(platform.vnc_helper());
-                fs::set_permissions(&vnc_helper, fs::Permissions::from_mode(0o644))
-                    .expect("make VNC helper non-executable");
-                let error = verify_platform_package_layout(&package, platform)
-                    .expect_err("a non-executable VNC helper must be rejected");
-                assert!(error.contains("VNC helper is not executable"));
-                mark_fixture_executable(&vnc_helper).expect("restore VNC helper executable bit");
+        let root = std::env::temp_dir().join(format!("conxol-layout-{}-{}", std::process::id(), SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()));
+        for platform in [PackagePlatform::Macos, PackagePlatform::Windows, PackagePlatform::Linux] {
+            let package = root.join(platform.label());
+            assert!(verify_platform_package_layout(&package, platform).is_err());
+            let executable = package.join(platform.executable());
+            fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            fs::write(&executable, b"runtime").unwrap();
+            mark_fixture_executable(&executable).unwrap();
+            verify_platform_package_layout(&package, platform).unwrap();
+            #[cfg(unix)] {
+                fs::set_permissions(&executable, fs::Permissions::from_mode(0o644)).unwrap();
+                assert!(verify_platform_package_layout(&package, platform).is_err());
             }
-
-            fs::write(package.join(platform.rdp_helper()), b"RDP candidate")
-                .expect("write forbidden RDP helper");
-            let error = verify_platform_package_layout(&package, platform)
-                .expect_err("the RDP candidate must remain excluded");
-            assert!(error.contains("unshippable RDP helper"));
         }
-
-        fs::remove_dir_all(root).expect("remove platform layout fixture");
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -2314,7 +1933,7 @@ mod tests {
     fn portable_archive_listing_rejects_escape_and_requires_runtime_entries() {
         let package_name = "Conxol-macos-arm64";
         let valid = format!(
-            "{package_name}/\n{package_name}/LICENSE\n{package_name}/NOTICE\n{package_name}/PORTABLE-UNSIGNED.txt\n{package_name}/Conxol.sha256\n{package_name}/Conxol.app/Contents/MacOS/conxol\n{package_name}/Conxol.app/Contents/MacOS/portable.flag\n{package_name}/Conxol.app/Contents/Resources/helpers/conxol-vnc-helper\n"
+            "{package_name}/\n{package_name}/LICENSE\n{package_name}/NOTICE\n{package_name}/PORTABLE-UNSIGNED.txt\n{package_name}/Conxol.sha256\n{package_name}/Conxol.app/Contents/MacOS/conxol\n{package_name}/Conxol.app/Contents/MacOS/portable.flag\n"
         );
         validate_portable_archive_listing(&valid, package_name)
             .expect("complete portable listing should pass");

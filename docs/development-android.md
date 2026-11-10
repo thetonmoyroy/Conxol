@@ -56,10 +56,8 @@ app data. Subsequent previews signed with this key can update in place.
   Upload/download pickers and workspace backup import/export are unavailable:
   Android content URIs need a Storage Access Framework transfer bridge. These
   commands return explicit errors rather than treating a URI as a file path.
-- RDP/VNC desktop helper executables and desktop serial adapters have not
-  been ported to Android. RDP/VNC connection options and saved profiles are
-  hidden in the Android interface; stored profiles are preserved. Desktop
-  helper binaries are excluded from the APK.
+- RDP/VNC support is removed on all platforms. Desktop serial adapters have
+  not been ported to Android. Legacy saved session records remain readable.
 - Local shell access, where Android permits it, runs `/system/bin/sh` inside
   the application sandbox. It is not a root shell or a full Linux environment.
 - Connections currently follow the application lifecycle. There is no Android

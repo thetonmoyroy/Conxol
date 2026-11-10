@@ -13,9 +13,6 @@ if (process.argv[2] === 'check-version') {
 } else if (process.argv[2] === 'collect') {
   const platform = process.argv[3];
   if (!['windows-x64', 'linux-x64', 'macos-arm64', 'macos-x64'].includes(platform)) throw new Error('Unknown platform');
-  const helperDir = 'apps/desktop/src-tauri/helpers';
-  const helper = `conxol-vnc-helper${platform.startsWith('windows') ? '.exe' : ''}`;
-  if (!existsSync(join(helperDir, helper)) || readdirSync(helperDir).some(name => name.includes('rdp'))) throw new Error('Invalid helper staging');
   const extensions = platform.startsWith('windows') ? ['.exe'] : platform.startsWith('linux') ? ['.deb', '.AppImage'] : ['.dmg'];
   function walk(dir) {
     return readdirSync(dir, { withFileTypes: true }).flatMap(entry => entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]);

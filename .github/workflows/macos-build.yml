@@ -38,7 +38,6 @@ jobs:
           cache-on-failure: true
           workspaces: |
             . -> target
-            tools/vnc-helper -> target
       - name: Install frontend dependencies
         run: pnpm install --dir apps/desktop --frozen-lockfile
       - name: Check frontend and release tooling
@@ -52,7 +51,7 @@ jobs:
         run: pnpm --dir apps/desktop tauri icon src-tauri/icons/icon.png
       - name: Build macOS DMG
         run: pnpm --dir apps/desktop tauri build --bundles dmg --config src-tauri/tauri.release.conf.json -- --locked
-      - name: Verify app and helper
+      - name: Verify app
         env:
           EXPECTED_ARCH: ${{ matrix.arch }}
         run: |
@@ -62,10 +61,8 @@ jobs:
           trap 'hdiutil detach "$mount"; rmdir "$mount"' EXIT
           app="$mount/Conxol.app"
           test "$(lipo -archs "$app/Contents/MacOS/conxol")" = "$EXPECTED_ARCH"
-          test "$(lipo -archs "$app/Contents/Resources/helpers/conxol-vnc-helper")" = "$EXPECTED_ARCH"
           codesign --verify --deep --strict "$app"
           "$app/Contents/MacOS/conxol" --version
-          test ! -e "$app/Contents/Resources/helpers/conxol-rdp-helper"
       - name: Collect DMG and checksum
         run: node tools/release-assets.mjs collect ${{ matrix.platform }}
       - uses: actions/upload-artifact@v4

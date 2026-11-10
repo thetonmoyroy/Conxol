@@ -1,5 +1,9 @@
 # Interrupted SFTP/SCP streams — 2026-10-03
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## Reproduced failure and correction
 
 A disposable OpenSSH test cut an established loopback relay after an SFTP

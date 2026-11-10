@@ -4,31 +4,13 @@ use uuid::Uuid;
 
 pub const MAX_SERVER_ALIVE_INTERVAL_SECONDS: u64 = 86_400;
 pub const MAX_SSH_JUMP_HOSTS: usize = 8;
-pub const DEFAULT_VNC_QUALITY: &str = "balanced";
-pub const DEFAULT_REMOTE_DESKTOP_RECONNECT_ENABLED: bool = true;
-pub const DEFAULT_REMOTE_DESKTOP_RECONNECT_ATTEMPTS: u8 = 3;
-pub const DEFAULT_RDP_CLIPBOARD_ENABLED: bool = false;
-pub const MAX_REMOTE_DESKTOP_RECONNECT_ATTEMPTS: u8 = 10;
 pub const MAX_SESSION_ENVIRONMENT_ENTRIES: usize = 64;
 pub const MAX_SESSION_ENVIRONMENT_NAME_BYTES: usize = 128;
 pub const MAX_SESSION_ENVIRONMENT_VALUE_BYTES: usize = 4096;
 pub const MAX_SESSION_ENVIRONMENT_TOTAL_BYTES: usize = 64 * 1024;
 pub const MAX_SESSION_STARTUP_DIRECTORY_BYTES: usize = 4096;
 pub const MAX_SESSION_STARTUP_COMMAND_BYTES: usize = 16 * 1024;
-pub const MAX_RDP_GATEWAY_ENDPOINT_BYTES: usize = 512;
 pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 128;
-
-fn default_vnc_quality() -> String {
-    DEFAULT_VNC_QUALITY.into()
-}
-
-fn default_remote_desktop_reconnect_enabled() -> bool {
-    DEFAULT_REMOTE_DESKTOP_RECONNECT_ENABLED
-}
-
-fn default_remote_desktop_reconnect_attempts() -> u8 {
-    DEFAULT_REMOTE_DESKTOP_RECONNECT_ATTEMPTS
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
@@ -36,11 +18,13 @@ pub enum Protocol {
     Ssh,
     Sftp,
     Scp,
+    // Deserialization-only compatibility for retired saved-session types.
     Rdp,
     Vnc,
     Telnet,
     Serial,
     Local,
+    Web,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,127 +126,6 @@ impl TelnetProfile {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RdpGatewayProfile {
-    pub endpoint: String,
-    pub username: String,
-    pub credential_ref: String,
-}
-
-impl RdpGatewayProfile {
-    pub fn validate(&self) -> Result<(), SessionValidationError> {
-        let valid_metadata = |value: &str, max_bytes: usize| {
-            !value.trim().is_empty()
-                && value.len() <= max_bytes
-                && !value.chars().any(char::is_control)
-        };
-        let (host, port) = if let Some(rest) = self.endpoint.strip_prefix('[') {
-            let Some(close) = rest.find(']') else {
-                return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-            };
-            let Some(port) = rest
-                .get(close + 1..)
-                .and_then(|value| value.strip_prefix(':'))
-            else {
-                return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-            };
-            (&rest[..close], port)
-        } else {
-            let Some((host, port)) = self.endpoint.rsplit_once(':') else {
-                return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-            };
-            if host.contains(':') {
-                return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-            }
-            (host, port)
-        };
-        if !valid_metadata(&self.endpoint, MAX_RDP_GATEWAY_ENDPOINT_BYTES)
-            || host.trim().is_empty()
-            || port.parse::<u16>().ok().is_none_or(|port| port == 0)
-            || !valid_metadata(&self.username, 256)
-            || !valid_metadata(&self.credential_ref, MAX_CREDENTIAL_REFERENCE_BYTES)
-        {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RemoteDesktopProfile {
-    pub domain: Option<String>,
-    #[serde(default)]
-    pub gateway: Option<RdpGatewayProfile>,
-    pub width: u16,
-    pub height: u16,
-    pub color_depth: u16,
-    pub audio_enabled: bool,
-    /// Clipboard redirection is opt-in. RDP currently has a native backend
-    /// only on Windows; VNC uses its negotiated helper text channel. Older
-    /// profiles remain disabled by default.
-    #[serde(default)]
-    pub clipboard_enabled: bool,
-    #[serde(default = "default_vnc_quality")]
-    pub vnc_quality: String,
-    /// VNC is loopback-only unless the operator explicitly opts into its
-    /// unencrypted TCP transport. The flag is ignored by no other protocol.
-    #[serde(default)]
-    pub allow_insecure_vnc: bool,
-    #[serde(default = "default_remote_desktop_reconnect_enabled")]
-    pub reconnect_enabled: bool,
-    #[serde(default = "default_remote_desktop_reconnect_attempts")]
-    pub reconnect_attempts: u8,
-}
-
-impl RemoteDesktopProfile {
-    pub fn validate(&self) -> Result<(), SessionValidationError> {
-        if !(320..=16_384).contains(&self.width)
-            || !(200..=16_384).contains(&self.height)
-            || self.color_depth == 0
-            || !matches!(
-                self.vnc_quality.as_str(),
-                "balanced" | "low-latency" | "low-bandwidth"
-            )
-            || self
-                .domain
-                .as_deref()
-                .is_some_and(|domain| domain.chars().any(char::is_control))
-            || self.reconnect_attempts > MAX_REMOTE_DESKTOP_RECONNECT_ATTEMPTS
-        {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if let Some(gateway) = self.gateway.as_ref() {
-            gateway.validate()?;
-        }
-        Ok(())
-    }
-
-    pub fn validate_for_protocol(&self, protocol: Protocol) -> Result<(), SessionValidationError> {
-        self.validate()?;
-        if !matches!(protocol, Protocol::Rdp | Protocol::Vnc) {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if protocol == Protocol::Rdp && !matches!(self.color_depth, 16 | 32) {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if self.audio_enabled {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if protocol == Protocol::Vnc && self.domain.is_some() {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if protocol == Protocol::Vnc && self.gateway.is_some() {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        if protocol != Protocol::Vnc && self.allow_insecure_vnc {
-            return Err(SessionValidationError::InvalidRemoteDesktopProfile);
-        }
-        Ok(())
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
 pub struct JumpHostRecord {
     pub host: String,
     pub port: u16,
@@ -326,8 +189,9 @@ pub struct SessionRecord {
     pub serial_profile: Option<SerialProfile>,
     #[serde(default)]
     pub telnet_profile: Option<TelnetProfile>,
+    /// Opaque metadata from retired RDP/VNC records; preserved, never executed.
     #[serde(default)]
-    pub remote_desktop_profile: Option<RemoteDesktopProfile>,
+    pub remote_desktop_profile: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -348,10 +212,12 @@ pub enum SessionValidationError {
     InvalidSerialProfile,
     #[error("Telnet profile is invalid")]
     InvalidTelnetProfile,
-    #[error("PPTP attachment is only supported for SSH and Telnet sessions")]
+    #[error("PPTP attachment is only supported for SSH, Telnet and Web sessions")]
     InvalidPptpAttachment,
-    #[error("remote desktop profile is invalid")]
-    InvalidRemoteDesktopProfile,
+    #[error(
+        "Web sessions require an HTTP/HTTPS URL without embedded credentials and an assigned PPTP profile"
+    )]
+    InvalidWebSession,
     #[error("X11 display target is invalid")]
     InvalidX11Display,
     #[error("SSH server-alive interval is invalid")]
@@ -404,7 +270,10 @@ impl std::fmt::Debug for SessionRecord {
             .field("notes_present", &self.notes.is_some())
             .field("serial_profile", &self.serial_profile)
             .field("telnet_profile", &self.telnet_profile)
-            .field("remote_desktop_profile", &self.remote_desktop_profile)
+            .field(
+                "legacy_profile_present",
+                &self.remote_desktop_profile.is_some(),
+            )
             .finish()
     }
 }
@@ -444,9 +313,33 @@ impl SessionRecord {
 
     pub fn validate(&self) -> Result<(), SessionValidationError> {
         if self.pptp_profile_id.is_some()
-            && !matches!(self.protocol, Protocol::Ssh | Protocol::Telnet)
+            && !matches!(
+                self.protocol,
+                Protocol::Ssh | Protocol::Telnet | Protocol::Web
+            )
         {
             return Err(SessionValidationError::InvalidPptpAttachment);
+        }
+        if self.protocol == Protocol::Web {
+            let url = url::Url::parse(&self.hostname)
+                .map_err(|_| SessionValidationError::InvalidWebSession)?;
+            if self.hostname.len() > 8192
+                || !matches!(url.scheme(), "http" | "https")
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || self.pptp_profile_id.is_none()
+                || url.port_or_known_default() != Some(self.port)
+                || self.auth != AuthMethod::None
+                || self.username.is_some()
+                || self.startup_command.is_some()
+                || self.startup_directory.is_some()
+                || !self.environment.is_empty()
+                || !self.jump_hosts.is_empty()
+                || !self.jump_host_profiles.is_empty()
+            {
+                return Err(SessionValidationError::InvalidWebSession);
+            }
         }
         if self.name.trim().is_empty() {
             return Err(SessionValidationError::EmptyName);
@@ -486,9 +379,6 @@ impl SessionRecord {
             (Protocol::Telnet, None) => return Err(SessionValidationError::InvalidTelnetProfile),
             (_, Some(profile)) => profile.validate()?,
             (_, None) => {}
-        }
-        if let Some(profile) = &self.remote_desktop_profile {
-            profile.validate_for_protocol(self.protocol)?
         }
         if self.x11_display.as_deref().is_some_and(|display| {
             display.trim().is_empty() || display.chars().any(char::is_control)
@@ -638,6 +528,48 @@ mod tests {
     }
 
     #[test]
+    fn web_sessions_require_valid_urls_and_an_explicit_pptp_route() {
+        let mut session = SessionRecord::local_terminal("Switch web interface");
+        session.protocol = Protocol::Web;
+        session.hostname = "http://192.0.2.6/login?next=%2F".into();
+        session.port = 80;
+        session.pptp_profile_id = Some(Uuid::new_v4());
+        session.validate().unwrap();
+        assert_eq!(serde_json::to_value(&session).unwrap()["protocol"], "WEB");
+        session.pptp_profile_id = None;
+        assert_eq!(
+            session.validate(),
+            Err(SessionValidationError::InvalidWebSession)
+        );
+        session.pptp_profile_id = Some(Uuid::new_v4());
+        for url in [
+            "file:///etc/passwd",
+            "javascript:alert(1)",
+            "ftp://192.0.2.6/",
+            "http://user:secret@192.0.2.6/",
+            "192.0.2.6",
+        ] {
+            session.hostname = url.into();
+            assert_eq!(
+                session.validate(),
+                Err(SessionValidationError::InvalidWebSession)
+            );
+        }
+        session.hostname = "https://router.example.test:8443/".into();
+        assert_eq!(
+            session.validate(),
+            Err(SessionValidationError::InvalidWebSession)
+        );
+        session.port = 8443;
+        session.validate().unwrap();
+        session.auth = AuthMethod::Agent;
+        assert_eq!(
+            session.validate(),
+            Err(SessionValidationError::InvalidWebSession)
+        );
+    }
+
+    #[test]
     fn remote_sessions_require_a_port() {
         let session = SessionRecord {
             id: SessionId::new(),
@@ -733,111 +665,6 @@ mod tests {
         assert_eq!(
             invalid.validate(),
             Err(SessionValidationError::InvalidTelnetProfile)
-        );
-    }
-
-    #[test]
-    fn remote_desktop_profile_rejects_unsafe_dimensions() {
-        let profile = RemoteDesktopProfile {
-            domain: Some("LAB".into()),
-            gateway: None,
-            width: 1280,
-            height: 800,
-            color_depth: 32,
-            audio_enabled: false,
-            clipboard_enabled: false,
-            vnc_quality: "balanced".into(),
-            allow_insecure_vnc: false,
-            reconnect_enabled: true,
-            reconnect_attempts: 3,
-        };
-        profile.validate().unwrap();
-
-        let mut invalid = profile.clone();
-        invalid.width = 319;
-        assert_eq!(
-            invalid.validate(),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-
-        let mut invalid_depth = profile.clone();
-        invalid_depth.color_depth = 24;
-        assert!(invalid_depth.validate().is_ok());
-        assert_eq!(
-            invalid_depth.validate_for_protocol(Protocol::Rdp),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-        invalid_depth.domain = None;
-        invalid_depth.validate_for_protocol(Protocol::Vnc).unwrap();
-
-        let mut invalid_vnc_domain = profile.clone();
-        invalid_vnc_domain.domain = Some("LAB".into());
-        assert_eq!(
-            invalid_vnc_domain.validate_for_protocol(Protocol::Vnc),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-
-        let mut vnc_clipboard = profile.clone();
-        vnc_clipboard.domain = None;
-        vnc_clipboard.clipboard_enabled = true;
-        vnc_clipboard.validate_for_protocol(Protocol::Vnc).unwrap();
-
-        let mut invalid_audio = profile.clone();
-        invalid_audio.audio_enabled = true;
-        assert_eq!(
-            invalid_audio.validate_for_protocol(Protocol::Rdp),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-        assert_eq!(
-            invalid_audio.validate_for_protocol(Protocol::Vnc),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-
-        assert_eq!(
-            profile.validate_for_protocol(Protocol::Ssh),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-
-        let mut invalid_quality = profile;
-        invalid_quality.vnc_quality = "unbounded".into();
-        assert_eq!(
-            invalid_quality.validate(),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-    }
-
-    #[test]
-    fn rdp_gateway_profile_is_bounded_and_protocol_scoped() {
-        let mut profile = RemoteDesktopProfile {
-            domain: Some("LAB".into()),
-            gateway: Some(RdpGatewayProfile {
-                endpoint: "gateway.example:443".into(),
-                username: "gateway-user".into(),
-                credential_ref: "gateway-password".into(),
-            }),
-            width: 1280,
-            height: 800,
-            color_depth: 32,
-            audio_enabled: false,
-            clipboard_enabled: false,
-            vnc_quality: "balanced".into(),
-            allow_insecure_vnc: false,
-            reconnect_enabled: true,
-            reconnect_attempts: 3,
-        };
-        profile.validate_for_protocol(Protocol::Rdp).unwrap();
-        assert_eq!(
-            profile.validate_for_protocol(Protocol::Vnc),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
-        );
-
-        profile.gateway.as_mut().unwrap().endpoint = "[::1]:443".into();
-        profile.validate_for_protocol(Protocol::Rdp).unwrap();
-
-        profile.gateway.as_mut().unwrap().endpoint = "gateway.example".into();
-        assert_eq!(
-            profile.validate(),
-            Err(SessionValidationError::InvalidRemoteDesktopProfile)
         );
     }
 

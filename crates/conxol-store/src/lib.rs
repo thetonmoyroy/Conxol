@@ -1363,7 +1363,7 @@ mod tests {
     use tempfile::tempdir;
     use conxol_core::{
         AuthMethod, JumpHostRecord, MacroAction, MacroKey, MacroRecord, Protocol,
-        RdpGatewayProfile, RemoteDesktopProfile, SessionRecord, SnippetRecord, TelnetProfile,
+        SessionRecord, SnippetRecord, TelnetProfile,
     };
 
     #[cfg(unix)]
@@ -1582,76 +1582,6 @@ mod tests {
     }
 
     #[test]
-    fn remote_desktop_profiles_persist_metadata_and_opaque_credentials_only() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("sessions.json");
-        let mut store = SessionStore::open(&path).unwrap();
-        let mut session = remote_session();
-        session.protocol = Protocol::Vnc;
-        session.auth = AuthMethod::Password {
-            credential_ref: "vnc-password-ref".into(),
-        };
-        session.remote_desktop_profile = Some(RemoteDesktopProfile {
-            domain: None,
-            gateway: None,
-            width: 1280,
-            height: 800,
-            color_depth: 32,
-            audio_enabled: false,
-            clipboard_enabled: false,
-            vnc_quality: "balanced".into(),
-            allow_insecure_vnc: false,
-            reconnect_enabled: true,
-            reconnect_attempts: 3,
-        });
-        store.save(session.clone()).unwrap();
-
-        let json = fs::read_to_string(&path).unwrap();
-        assert!(json.contains("remote_desktop_profile"));
-        assert!(json.contains("vnc-password-ref"));
-        assert!(!json.contains("super-secret"));
-        assert_eq!(SessionStore::open(&path).unwrap().list(), &[session]);
-    }
-
-    #[test]
-    fn rdp_gateway_profiles_round_trip_without_plaintext_credentials() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("sessions.json");
-        let mut store = SessionStore::open(&path).unwrap();
-        let mut session = remote_session();
-        session.protocol = Protocol::Rdp;
-        session.auth = AuthMethod::Password {
-            credential_ref: "rdp-session-password-ref".into(),
-        };
-        session.remote_desktop_profile = Some(RemoteDesktopProfile {
-            domain: Some("LAB".into()),
-            gateway: Some(RdpGatewayProfile {
-                endpoint: "gateway.invalid:443".into(),
-                username: "gateway-user".into(),
-                credential_ref: "rdp-gateway-password-ref".into(),
-            }),
-            width: 1280,
-            height: 800,
-            color_depth: 32,
-            audio_enabled: false,
-            clipboard_enabled: false,
-            vnc_quality: "balanced".into(),
-            allow_insecure_vnc: false,
-            reconnect_enabled: true,
-            reconnect_attempts: 3,
-        });
-        store.save(session.clone()).unwrap();
-
-        let json = fs::read_to_string(&path).unwrap();
-        assert!(json.contains("gateway.invalid:443"));
-        assert!(json.contains("rdp-session-password-ref"));
-        assert!(json.contains("rdp-gateway-password-ref"));
-        assert!(!json.contains("session-plaintext-secret"));
-        assert!(!json.contains("gateway-plaintext-secret"));
-        assert_eq!(SessionStore::open(&path).unwrap().list(), &[session]);
-    }
-
-    #[test]
     fn telnet_profiles_round_trip_without_authentication_material() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("sessions.json");
@@ -1675,6 +1605,61 @@ mod tests {
         assert!(json.contains("xterm-256color"));
         assert!(!json.contains("password"));
         assert_eq!(SessionStore::open(&path).unwrap().list(), &[session]);
+    }
+
+    #[test]
+    fn web_sessions_persist_urls_folders_and_pptp_routes_alongside_existing_sessions() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("sessions.json");
+        let mut store = SessionStore::open(&path).unwrap();
+        let existing = remote_session();
+        store.save(existing.clone()).unwrap();
+        let mut web = SessionRecord::local_terminal("Switch management");
+        web.protocol = Protocol::Web;
+        web.hostname = "http://192.0.2.6:8080/login?next=%2F".into();
+        web.port = 8080;
+        web.folder = Some("Office/Web".into());
+        web.pptp_profile_id = Some(uuid::Uuid::new_v4());
+        store.save(web.clone()).unwrap();
+        let loaded = SessionStore::open(&path).unwrap();
+        assert!(loaded.list().contains(&existing));
+        assert!(loaded.list().contains(&web));
+        web.hostname = "https://switch.example.test/".into();
+        web.port = 443;
+        web.name = "Renamed switch".into();
+        store.save(web.clone()).unwrap();
+        assert_eq!(SessionStore::open(&path).unwrap().list().len(), 2);
+        assert!(SessionStore::open(&path).unwrap().list().contains(&web));
+    }
+
+    #[test]
+    fn retired_desktop_sessions_round_trip_opaque_metadata_without_losing_other_sessions() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("sessions.json");
+        let mut store = SessionStore::open(&path).unwrap();
+        let active = remote_session();
+        store.save(active.clone()).unwrap();
+        for protocol in [Protocol::Rdp, Protocol::Vnc] {
+            let mut legacy = remote_session();
+            legacy.id = SessionId::new();
+            legacy.protocol = protocol;
+            legacy.remote_desktop_profile = Some(serde_json::json!({
+                "width": 1280, "height": 720, "color_depth": 32,
+                "clipboard_enabled": true, "audio_enabled": false,
+                "gateway": {"endpoint": "gateway.example.test:443", "username": "fixture", "credential_ref": "opaque-fixture-reference"},
+                "previous_engine_metadata": {"quality": "original"}
+            }));
+            store.save(legacy.clone()).unwrap();
+            let mut reopened = SessionStore::open(&path).unwrap();
+            let saved = reopened.list().iter().find(|session| session.id == legacy.id).unwrap();
+            assert_eq!(saved.remote_desktop_profile, legacy.remote_desktop_profile);
+            legacy.name = "Retired connection".into();
+            legacy.folder = Some("Archived sessions".into());
+            reopened.save(legacy.clone()).unwrap();
+            assert!(SessionStore::open(&path).unwrap().list().contains(&legacy));
+            store = reopened;
+        }
+        assert!(SessionStore::open(&path).unwrap().list().contains(&active));
     }
 
     #[test]
@@ -1788,44 +1773,6 @@ mod tests {
         assert_eq!(reopened.list()[0].known_hosts_path, None);
         assert_eq!(reopened.list()[0].pinned_fingerprint, None);
         assert_eq!(reopened.list()[0].last_used_at, None);
-    }
-
-    #[test]
-    fn legacy_remote_desktop_profiles_default_vnc_quality_safely() {
-        let directory = tempdir().unwrap();
-        let path = directory.path().join("sessions.json");
-        let mut session = remote_session();
-        session.protocol = Protocol::Vnc;
-        session.remote_desktop_profile = Some(RemoteDesktopProfile {
-            domain: None,
-            gateway: None,
-            width: 1280,
-            height: 800,
-            color_depth: 32,
-            audio_enabled: false,
-            clipboard_enabled: false,
-            vnc_quality: "balanced".into(),
-            allow_insecure_vnc: false,
-            reconnect_enabled: true,
-            reconnect_attempts: 3,
-        });
-        let mut serialized = serde_json::to_value(&session).unwrap();
-        serialized["remote_desktop_profile"]
-            .as_object_mut()
-            .unwrap()
-            .remove("vnc_quality");
-        let file = serde_json::json!({ "schema_version": 1, "sessions": [serialized] });
-        fs::write(&path, serde_json::to_vec(&file).unwrap()).unwrap();
-
-        let reopened = SessionStore::open(&path).unwrap();
-        assert_eq!(
-            reopened.list()[0]
-                .remote_desktop_profile
-                .as_ref()
-                .unwrap()
-                .vnc_quality,
-            "balanced"
-        );
     }
 
     #[test]

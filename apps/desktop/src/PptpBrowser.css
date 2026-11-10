@@ -1,0 +1,93 @@
+.pptp-browser-window body { min-width: 0; min-height: 0; overflow: hidden; }
+.pptp-browser-shell { position: fixed; inset: 0; color: #dce7e2; background: #101614; font: 12px "Segoe UI", sans-serif; }
+.pptp-browser-shell * { box-sizing: border-box; }
+.pb-chrome { height: 100px; background: #19211e; border-bottom: 1px solid #34413b; position: relative; }
+.pb-tabstrip { height: 44px; padding: 8px 16px 0; display: flex; align-items: center; gap: 16px; background: #101713; }
+.pb-tab { height: 36px; min-width: 180px; max-width: 340px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: #19211e; border: 1px solid #34413b; border-bottom: 0; border-radius: 10px 10px 0 0; }
+.pb-tab svg { flex-shrink: 0; color: #9ac78e; }
+.pb-tab span, .pb-profile { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.pb-private { color: #9ac78e; display: flex; align-items: center; gap: 6px; font-size: 11px; }
+.pb-profile { margin-left: auto; max-width: 250px; color: #91a79b; font-size: 11px; }
+.pb-navigation { height: 56px; padding: 8px 12px; display: flex; align-items: center; gap: 5px; }
+.pb-icon { display: inline-flex; flex: 0 0 32px; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: transparent; border: 1px solid transparent; border-radius: 6px; color: #a4b5ab; cursor: pointer; }
+.pb-icon:hover { background: #2a3830; color: #ecf5ef; }
+.pb-icon:focus-visible, .pb-inspect-toggle:focus-visible, .pb-request:focus-visible, .pb-filter:focus-visible { outline: 2px solid #a1cb90; outline-offset: 1px; }
+.pb-address { display: flex; align-items: center; gap: 10px; height: 38px; min-width: 0; flex: 1; margin: 0 8px; padding-left: 13px; border: 1px solid #35483c; border-radius: 8px; background: #0e1511; color: #809989; }
+.pb-address.focused { border-color: #a1cb90; box-shadow: 0 0 0 2px #9ac78e15; }
+.pb-address input { flex: 1; min-width: 0; width: 100%; height: 100%; padding: 0; background: transparent; border: 0; outline: 0; color: #e0eae4; font: 13px "Segoe UI", sans-serif; box-shadow: none; }
+.pb-address .pb-icon { margin-right: 3px; }
+.pb-inspect-toggle { display: flex; flex-shrink: 0; gap: 7px; align-items: center; height: 34px; padding: 0 10px; background: transparent; color: #9eafa5; border: 1px solid #35483c; border-radius: 6px; font: inherit; cursor: pointer; }
+.pb-inspect-toggle.active { background: #a1cb9012; color: #afd49f; border-color: #64875a; }
+.pb-inspect-toggle b { font-size: 10px; border-radius: 4px; color: #ffb29e; background: #e2906e1a; padding: 1px 4px; }
+.pb-progress { position: absolute; bottom: 0; left: 0; width: 35%; height: 2px; background: #a1cb90; animation: pb-loading 1.6s ease-in-out infinite; }
+.pb-inspector { position: absolute; top: 100px; bottom: 28px; right: 0; width: 360px; border-left: 1px solid #34413b; background: #151d18; overflow: auto; scrollbar-width: thin; scrollbar-color: #3c5143 transparent; }
+.pb-inspector-heading { display: flex; align-items: center; justify-content: space-between; padding: 20px 18px 16px; }
+.pb-eyebrow { font-size: 9px; letter-spacing: 1.7px; font-weight: 600; color: #81998a; }
+.pb-inspector-heading h2 { font-size: 17px; font-weight: 600; margin: 5px 0 0; color: #e1eae3; }
+.pb-route { border: 1px solid #344a39; border-radius: 8px; padding: 14px; margin: 0 16px 14px; background: linear-gradient(135deg, #273b262c, #18231b); }
+.pb-route-heading { display: flex; align-items: center; gap: 8px; color: #afd49f; }
+.pb-route-heading strong { font-size: 12px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pb-route-heading > span { font: 10px var(--mono); background: #a1cb9012; border: 1px solid #465c3e; padding: 2px 5px; border-radius: 4px; }
+.pb-route-path { display: flex; gap: 5px; align-items: center; font-size: 10px; color: #9eafa2; margin: 13px 0; }
+.pb-inspector dl { display: grid; grid-template-columns: 108px minmax(0, 1fr); gap: 8px; margin: 0; font-size: 10px; }
+.pb-inspector dt { color: #7f9587; }
+.pb-inspector dd { margin: 0; color: #becfc1; overflow-wrap: anywhere; font-family: var(--mono); font-size: 10px; }
+.pb-page-status { padding: 14px 18px; border-top: 1px solid #2b3c30; border-bottom: 1px solid #2b3c30; }
+.pb-page-status > div { display: flex; align-items: center; gap: 8px; color: #a9bfae; }
+.pb-page-status strong { font-size: 12px; font-weight: 500; flex: 1; }
+.pb-page-status .pb-icon { height: 22px; width: 22px; flex-basis: 22px; }
+.pb-page-status > p { margin: 10px 0 12px; color: #b6c8bc; font: 10px/1.7 var(--mono); overflow-wrap: anywhere; }
+.pb-page-status.failed > div, .pb-page-status .pb-error-detail { color: #efa891; }
+.pb-error { margin: 12px 16px; display: flex; align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid #8b534548; background: #b65f3f10; border-radius: 5px; color: #e8aa94; font: 10px/1.65 var(--mono); overflow-wrap: anywhere; }
+.pb-error svg { flex-shrink: 0; margin-top: 2px; }
+.pb-requests-heading { display: flex; align-items: center; gap: 6px; padding: 12px 16px 8px; }
+.pb-requests-heading h3 { flex: 1; margin: 0; font-size: 12px; font-weight: 600; }
+.pb-requests-heading h3 span { color: #789082; margin-left: 5px; font-size: 10px; }
+.pb-filter { background: transparent; color: #8fa498; border: 1px solid #34493a; border-radius: 4px; font-size: 10px; padding: 4px 7px; cursor: pointer; }
+.pb-filter.active { border-color: #aa7059; color: #efa891; }
+.pb-request { display: flex; align-items: center; gap: 9px; padding: 12px 16px; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid #26342b; cursor: pointer; color: #b9cbbb; font: inherit; }
+.pb-request:hover, .pb-request.selected { background: #223026; }
+.pb-request-icon { color: #8fb77f; flex-shrink: 0; }
+.pb-request.failed .pb-request-icon, .pb-request.failed .pb-request-result { color: #eda58d; }
+.pb-request-text { flex: 1; min-width: 0; }
+.pb-request-text strong { display: block; font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.pb-request-text em { color: #7e9587; font-style: normal; }
+.pb-request-text small, .pb-request-result small { display: block; color: #7e9587; font: 9px var(--mono); margin-top: 5px; }
+.pb-request-result { text-align: right; font-size: 9px; flex-shrink: 0; }
+.pb-empty { display: flex; align-items: center; flex-direction: column; gap: 10px; padding: 30px 24px; color: #718c79; text-align: center; }
+.pb-empty strong { color: #a2b6a7; font-size: 12px; font-weight: 500; }
+.pb-empty p { font-size: 11px; line-height: 1.7; margin: 0; max-width: 250px; }
+.pb-timeline { margin: 12px 16px; border: 1px solid #34493a; border-radius: 6px; padding: 12px; }
+.pb-timeline h3 { display: flex; align-items: center; justify-content: space-between; font: 11px var(--mono); margin: 0 0 8px; overflow-wrap: anywhere; }
+.pb-timeline > div { padding: 9px 0 9px 10px; border-left: 2px solid #526d48; }
+.pb-timeline > div.failed { border-color: #b6795c; }
+.pb-timeline > div > span { display: flex; justify-content: space-between; font-size: 11px; }
+.pb-timeline small { color: #83998a; font: 9px var(--mono); }
+.pb-timeline p { margin: 5px 0 0; color: #8fa797; font: 10px/1.6 var(--mono); overflow-wrap: anywhere; }
+.pb-inspector-footnote { padding: 14px 18px; color: #718777; font-size: 10px; line-height: 1.7; margin: 0; }
+.pb-statusbar { position: absolute; bottom: 0; left: 0; right: 0; height: 28px; display: flex; align-items: center; gap: 18px; padding: 0 14px; border-top: 1px solid #34413b; background: #121b15; color: #819c89; font-size: 10px; }
+.pb-statusbar > span { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.pb-statusbar .pb-status-route { margin-left: auto; overflow: hidden; text-overflow: ellipsis; }
+.pb-statusbar .pb-status-error { color: #eda58d; }
+.pb-statusbar button { padding: 0; border: 0; background: transparent; color: #eda58d; font: inherit; cursor: pointer; }
+.pb-preview { position: absolute; inset: 100px 360px 28px 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #8faa94; text-align: center; padding: 30px; }
+.pb-preview h2 { font-size: 20px; font-weight: 500; color: #d0dfd3; }
+.pb-preview p { max-width: 360px; line-height: 1.8; }
+.pb-spin { animation: pb-spin 1.2s linear infinite; }
+@keyframes pb-spin { to { transform: rotate(360deg); } }
+@keyframes pb-loading { 0% { left: 0; width: 0; } 50% { width: 35%; } 100% { left: 100%; width: 0; } }
+@media (prefers-reduced-motion: reduce) { .pb-spin, .pb-progress { animation: none; } }
+.pb-tabs { display: flex; align-self: stretch; align-items: flex-end; flex: 0 1 auto; min-width: 0; overflow-x: auto; scrollbar-width: none; gap: 3px; }
+.pb-tabs .pb-tab { min-width: 112px; max-width: 220px; flex: 0 1 200px; padding: 0 5px 0 0; background: transparent; border-color: transparent; color: #849b8c; }
+.pb-tabs .pb-tab.active { background: #19211e; border-color: #34413b; color: #e1eae3; }
+.pb-tab > button[role="tab"] { display: flex; gap: 8px; align-items: center; min-width: 0; flex: 1; height: 100%; padding: 0 10px; border: 0; background: transparent; color: inherit; font: 11px "Segoe UI", sans-serif; cursor: pointer; }
+.pb-tab > button[role="tab"]:focus-visible { outline: 1px solid #a1cb90; outline-offset: -3px; border-radius: 8px; }
+.pb-tab-close { display: grid; place-items: center; width: 22px; height: 22px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: #819888; cursor: pointer; }
+.pb-tab-close:hover { background: #34483a; color: #e1eae3; }
+.pb-new-tab { align-self: center; margin-left: -10px; }
+.pb-private { flex-shrink: 0; }
+.pptp-browser-shell button:disabled { opacity: .4; cursor: default; }
+@media (max-width: 1000px) { .pb-profile { display: none; } .pb-private { font-size: 0; gap: 0; } .pb-tabstrip { gap: 10px; } }
+.pb-devtools { display: flex; align-items: center; gap: 8px; margin: 14px 16px 0; padding: 10px; width: calc(100% - 32px); background: #24362b; border: 1px solid #3b5542; border-radius: 5px; color: #b6cdbd; cursor: pointer; font: 11px "Segoe UI", sans-serif; }
+.pb-devtools small { margin-left: auto; font-size: 9px; color: #8ca794; }
+.pb-devtools:hover { background: #2c4533; }

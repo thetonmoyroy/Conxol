@@ -27,10 +27,9 @@ try {
     $output = Join-Path $repoRoot 'target/release/bundle/msix'
     New-Item -ItemType Directory -Path $output -Force | Out-Null
     $stage = Join-Path $output ("staging-" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path "$stage/Assets", "$stage/helpers", "$stage/licenses" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$stage/Assets", "$stage/licenses" -Force | Out-Null
     $payload = @{
         'target/release/conxol.exe' = 'conxol.exe'
-        'apps/desktop/src-tauri/helpers/conxol-vnc-helper.exe' = 'helpers/conxol-vnc-helper.exe'
         'LICENSE' = 'LICENSE'
         'NOTICE' = 'NOTICE'
         'apps/desktop/src/assets/fonts/JetBrainsMono-OFL.txt' = 'licenses/JetBrainsMono-OFL.txt'

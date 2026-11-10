@@ -60,5 +60,5 @@ try canvas("outro") {
     text("Free. Open source. Local-first.", x: 112, y: 392, size: 38, ink: 0xa8b9af)
     text("DOWNLOAD FOR MAC, WINDOWS & LINUX", x: 112, y: 245, size: 25, ink: 0x98bca2, bold: true)
     text("othmaneblial.github.io/Conxol", x: 112, y: 184, size: 34, ink: 0xf2f0e8)
-    text("Mac v0.1.17 preview · Windows/Linux v0.1.12 · no publisher signing · RDP excluded", x: 112, y: 80, size: 22, ink: 0xa8b9af)
+    text("Mac v0.1.17 preview · Windows/Linux v0.1.12 · no publisher signing", x: 112, y: 80, size: 22, ink: 0xa8b9af)
 }

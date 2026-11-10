@@ -35,7 +35,6 @@ test('release rejects inconsistent versions', () => fixture(({ put, invoke }) =>
 }));
 
 test('Linux release requires both installers and hashes the delivered bytes', () => fixture(({ cwd, put, invoke }) => {
-  put('apps/desktop/src-tauri/helpers/conxol-vnc-helper', 'helper');
   put('target/release/bundle/deb/Conxol_0.1.0_amd64.deb', 'debian-package');
   assert.notEqual(invoke('collect', 'linux-x64').status, 0);
   put('target/release/bundle/appimage/Conxol_0.1.0_amd64.AppImage', 'appimage-package');
@@ -46,12 +45,9 @@ test('Linux release requires both installers and hashes the delivered bytes', ()
     const bytes = readFileSync(join(cwd, 'target/release-assets', name));
     assert.equal(hash, createHash('sha256').update(bytes).digest('hex'));
   }
-  put('apps/desktop/src-tauri/helpers/conxol-rdp-helper', 'must-not-ship');
-  assert.notEqual(invoke('collect', 'linux-x64').status, 0);
 }));
 
 test('Windows collector preserves installer bytes and hashes the delivered file', () => fixture(({ cwd, put, invoke }) => {
-  put('apps/desktop/src-tauri/helpers/conxol-vnc-helper.exe', 'helper');
   put('target/release/bundle/nsis/Conxol_0.1.0_x64-setup.exe', 'windows-package');
   assert.equal(invoke('collect', 'windows-x64').status, 0);
   const name = 'Conxol-0.1.0-windows-x64.exe';
@@ -73,7 +69,6 @@ test('collector rejects source product, version and architecture mismatches befo
         : name.endsWith('.dmg') || name.endsWith('.AppImage') ? 'aarch64' : 'arm64');
       for (const wrongName of [name.replace('0.1.0', '0.0.9'), name.replace('Conxol', 'OtherApp'), wrongArch]) {
         fixture(({ cwd, put, invoke }) => {
-          put(`apps/desktop/src-tauri/helpers/conxol-vnc-helper${platform === 'windows-x64' ? '.exe' : ''}`, 'helper');
           for (const original of names) put(`target/release/bundle/${original === name ? wrongName : original}`, 'package-bytes');
           const result = invoke('collect', platform);
           assert.notEqual(result.status, 0, `${platform} must refuse ${wrongName}`);
@@ -87,7 +82,6 @@ test('collector rejects source product, version and architecture mismatches befo
 });
 
 test('macOS collector rejects an ARM DMG labeled as Intel', () => fixture(({ cwd, put, invoke }) => {
-  put('apps/desktop/src-tauri/helpers/conxol-vnc-helper', 'helper');
   put('target/release/bundle/dmg/Conxol_0.1.0_aarch64.dmg', 'arm-package');
   assert.notEqual(invoke('collect', 'macos-x64').status, 0);
   assert.equal(invoke('collect', 'macos-arm64').status, 0);
@@ -99,7 +93,6 @@ test('macOS collector rejects an ARM DMG labeled as Intel', () => fixture(({ cwd
 
 test('Linux collector rejects duplicate formats before writing output', () => {
   for (const extension of ['.deb', '.AppImage']) fixture(({ cwd, put, invoke }) => {
-    put('apps/desktop/src-tauri/helpers/conxol-vnc-helper', 'helper');
     put(`target/release/bundle/first${extension}`, 'first-package');
     put(`target/release/bundle/second${extension}`, 'second-package');
     const result = invoke('collect', 'linux-x64');
@@ -112,7 +105,6 @@ test('Linux collector rejects duplicate formats before writing output', () => {
 });
 
 test('collector refuses stale installers without deleting them', () => fixture(({ cwd, put, invoke }) => {
-  put('apps/desktop/src-tauri/helpers/conxol-vnc-helper', 'helper');
   put('target/release/bundle/dmg/Conxol_0.1.0_aarch64.dmg', 'current-package');
   put('target/release-assets/Conxol-0.0.9-macos-arm64.dmg', 'old-package');
   assert.notEqual(invoke('collect', 'macos-arm64').status, 0);

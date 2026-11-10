@@ -1,5 +1,9 @@
 # Conxol v0.1.12 — Desktop Preview
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 These are the historical v0.1.12 notes, still relevant to the Windows/Linux
 downloads. For current Mac installers, use the [v0.1.30 preview](v0.1.30.md).
 

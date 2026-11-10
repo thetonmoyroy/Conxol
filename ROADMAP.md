@@ -96,7 +96,6 @@ A checked item means its stated implementation or test exists. It does not imply
 | **Core workstation** | Rust/Tauri shell, xterm.js, tabs, nested splits, settings, session organization, and native PTY | Complete the shell/platform and GUI evidence matrix. |
 | **SSH and files** | Interactive SSH, jump chains, reconnect, SFTP/SCP, recursive transfers, tunnels, and remote editing | Broader authentication/server matrix, restart recovery, and sustained workloads. |
 | **Quality checks** | Full local macOS ARM64 suite; one completed green Ubuntu/macOS/Windows run | GitHub workflows are disabled by request. New Linux shell variants and repeated Windows startups still need runtime evidence. |
-| **Remote desktop** | Isolated RDP/VNC helpers and controlled loopback fixtures | RDP dependency/certificate gates; real-server sessions; platform packaging and long-run stability. |
 | **Hardware and distribution** | Unix serial PTY fixtures and unsigned package-layout checks | Real serial adapters, external X servers, GUI behavior, and trusted installers. |
 
 Sources: [native/platform evidence](docs/testing/hardware-interoperability.md), [SSH lab](docs/testing/ssh-lab.md), [dependency audit](docs/security/dependency-audit.md), and [release notes](docs/release/v0.1.31.md).
@@ -131,15 +130,9 @@ At that v0.1.17 milestone, the SSH lab had **42 unit tests, eight Rust authentic
 - [x] Verify native paste and per-action macro refusal across real loopback SSH reconnects, exact selected-target broadcast delivery, emergency shortcuts, session JSON import and startup-command approval on macOS ARM64.
 - [x] Handle emergency stops before terminal/modal event propagation; clear stale import errors after a successful retry.
 - [x] Bind file actions and editor documents to their original SSH connection generation; verify native stale approval refusal for transfers/retry, mkdir, rename, delete, chmod and editor Save/Save as after real reconnects.
-- [x] Diagnose the VNC fixture disconnects as server input deadlines expiring during large JSON framebuffer processing; use a minimum-size resize canvas and retain the original deadlines and protocol assertions. All 17 parallel fixture cases and the ordinary local `cargo xtask check` passed. [Diagnosis and limits](docs/research/vnc.md#local-fixture-deadline-diagnosis--2026-10-02).
-- [x] Measure native framebuffer encoding/decoding in debug and release; fix JSON expansion that rejected valid HD images, retain the 8 MiB limit with wire version 2, and exercise 1920×1080 through the real loopback VNC helper before input/clipboard checks. [Measurements and limits](benchmarks/2026-10-02-framebuffer-ipc.md).
-- [x] Replace native-to-WebView JSON pixel arrays with a bounded latest-frame binary pull; test coalescing and stale reconnect replies, and observe Full-HD rendering plus keyboard input before/after reconnect in a disposable macOS ARM64 app. [Native receipt and limits](docs/testing/remote-desktop-renderer.md).
-- [x] Resolve native fullscreen rejection on macOS ARM64 with Tauri 2.12.1; observe Full-HD canvas entry, focused keyboard input, button/Escape exit and unchanged server geometry in the disposable native app. [Receipt](docs/testing/remote-desktop-renderer.md#fullscreen-recheck-with-tauri-2121).
-- [x] Rebuild matching wire-version-2 Mac app/helper DMGs; verify ARM64 release-copy rendering, keyboard/reconnect, settings rejection and native Quit releasing zsh plus VNC helper. [Release receipt](docs/testing/remote-desktop-renderer.md#v0118-release-bundle-recheck).
 - [ ] Verify fullscreen keyboard/button/Escape acceptance in the Mac release and the updated runtime on Windows/Linux; release entry accessibility and Mac debug results do not establish all these gates.
 - [ ] Measure sustained native pipe/Tauri/rendering throughput and end-to-end input latency under large-frame workloads; codec timings and bounded fixture success do not establish GUI responsiveness. Mac v0.1.18 contains matching version-2 app/helper cohorts; Windows/Linux packaging remains pending.
 - [x] Verify macOS ARM64 settings JSON cancellation, malformed/out-of-range rejection, valid multiline import, unchanged persisted bytes and visible error focus in light/dark mode; also reject conflicting shortcut saves. [Receipt](docs/testing/text-input-dialogs.md#settings-error-visibility-and-normal-shutdown--2026-10-02).
-- [x] Observe native macOS menu Quit exiting successfully and releasing an active local zsh PTY in the isolated debug app. The v0.1.18 ARM64 release copy additionally released its active VNC helper; active SSH/transfer shutdown remains separate.
 - [ ] Finish in-flight native transfer cancellation/collision recovery, cross-platform editor discard and dialogue acceptance. [Checks and next acceptance gate](docs/testing/text-input-dialogs.md) separate completed observations from pending evidence. Mac v0.1.18 includes these source changes; Windows/Linux v0.1.12 does not.
 
 ### Included in the v0.1.19 Mac preview, after v0.1.18
@@ -372,8 +365,6 @@ remain pending.
 
 | Area | Already implemented | Gate before broader support claims |
 | --- | --- | --- |
-| **RDP** | Isolated IronRDP helper, credential/IPC boundaries, framebuffer/input/resize/reconnect loopback tests | Resolve the RSA advisory and certificate-validation boundary; authenticate against a controlled Windows desktop; verify framebuffer, keyboard/mouse, resize, failure recovery, and a 30-minute session. Keep it out of normal bundles until security gates pass. |
-| **VNC** | Native helper, controlled RFB/password/JPEG fixtures, input, clipboard opt-in, quality controls, and reconnect | Validate a real controlled VNC server, explicit transport policy, unsupported capability diagnostics, a 30-minute session, and helper packaging on each target. TCP remains unencrypted. |
 | **X11** | Opt-in SSH channel bridge to an explicitly selected external display; loopback tests and optional Xvfb fixture | Run real external X-server cases on Linux, macOS, and Windows; verify authentication, DISPLAY setup, cancellation, and cleanup. |
 | **Serial** | Native configuration, refresh, sessions, and Unix pseudo-terminal lifecycle/device-loss tests | Test dedicated physical adapters, drivers/permissions, baud/parity/flow control, removal, and explicit reconnection per OS. |
 
@@ -406,7 +397,6 @@ These existing capabilities should be improved rather than recreated:
 
 - [ ] Repeat terminal batching and 10K-profile benchmarks under comparable idle conditions; record hardware, compiler, samples, medians, and load.
 - [ ] Measure sustained native terminal rendering and UI responsiveness before claiming throughput improvements.
-- [ ] Recheck advisories at release time; keep RDP's known-vulnerable dependency path isolated and track the remaining GTK/glib warnings.
 
 The [2026-10-02 benchmark receipt](benchmarks/2026-10-02-local.md) was measured under high CPU contention. It is reproducible evidence of that run, not a before/after performance claim.
 
@@ -415,3 +405,5 @@ min/median/max alongside means. [The methodology](benchmarks/README.md) records
 the separate timer boundaries and optimizer barriers; historical aggregate
 timers are not directly comparable. Quiet-machine and native GUI measurements
 remain open gates.
+
+RDP/VNC support is retired; see [the removal decision](docs/adr/0036-retire-remote-desktop-support.md).

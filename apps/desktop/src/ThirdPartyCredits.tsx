@@ -14,10 +14,6 @@ const groups: { title: string; entries: Credit[] }[] = [
     { name: "Zsh", author: "The Zsh developers and contributors", use: "Optional installed shell for local terminal sessions; not bundled.", license: "See the installed Zsh distribution", url: "https://www.zsh.org/" },
     { name: "fish", author: "The fish-shell developers and contributors", use: "Optional installed shell for local terminal sessions; not bundled.", license: "See the installed fish distribution", url: "https://fishshell.com/" },
   ] },
-  { title: "Projects used by Conxol’s bundled VNC helper", entries: [
-    { name: "vnc-rs", author: "HsuJv and vnc-rs contributors", use: "VNC protocol implementation compiled into conxol-vnc-helper. The helper itself is part of Conxol.", license: "MIT OR Apache-2.0", url: "https://github.com/HsuJv/vnc-rs" },
-    { name: "jpeg-decoder", author: "The image-rs Developers", use: "JPEG decoding compiled into the VNC helper.", license: "MIT OR Apache-2.0", url: "https://github.com/image-rs/jpeg-decoder" },
-  ] },
   { title: "Installer tooling", entries: [
     { name: "NSIS", author: "The NSIS developers and contributors", use: "Installer engine used when building Conxol’s Windows NSIS installer. It is not required by the portable app.", license: "See the NSIS distribution’s component licenses", url: "https://nsis.sourceforge.io/License" },
   ] },
@@ -47,7 +43,7 @@ export function ThirdPartyCredits() {
         <div className="help-credit-source"><a href={entry.url} target="_blank" rel="noopener noreferrer">Project / license</a><button type="button" onClick={() => { void writeClipboardText(entry.url).then(() => setNotice(`Copied ${entry.name} link.`), () => setNotice("Could not copy the link.")); }}>Copy link</button></div>
       </article>)}
     </section>)}
-    <p className="help-note">Other commands you run inside a terminal and software inside WSL distributions are provided by their own publishers. The experimental RDP helper is excluded from normal application bundles.</p>
+    <p className="help-note">Other commands you run inside a terminal and software inside WSL distributions are provided by their own publishers.</p>
     {notice && <p className="help-note" role="status">{notice}</p>}
   </>;
 }

@@ -31,7 +31,7 @@ configuration.
   original process environment. Stop a copy that fails this check. Keep the app
   launch in a live foreground session; any `LSEnvironment` safeguard belongs
   only in the copied test bundle. See the
-  [native renderer receipt](../testing/remote-desktop-renderer.md#fullscreen-recheck-with-tauri-2121).
+  [native workflow receipt](../testing/native-workflow.md).
 - SSH connection setup never falls back to `~/.ssh/known_hosts`. An explicit
   known-hosts path or pinned fingerprint is required by the transport. The
   desktop can inspect an unknown direct host without credentials and ask the
@@ -39,10 +39,6 @@ configuration.
   the authenticated handshake then verifies that exact pin. Changed stored
   keys remain rejected. Tests use synthetic pins and temporary trust stores,
   never real-server approval or personal files.
-- RDP/VNC tests use protocol-independent fixtures or an explicitly approved
-  disposable server. The isolated RDP helper can be compiled and exercised on
-  EOF without opening a socket; the VNC integration fixture binds only to
-  `127.0.0.1` and an OS-assigned port.
 - The optional real X11 fixture uses an already-installed Xvfb binary with
   `-nolisten tcp` and `-nolock`, using only the system Unix-socket directory
   when it already exists. It does not install an X server, inspect `DISPLAY` or
@@ -123,33 +119,6 @@ When CARGO_HOME or RUSTUP_HOME is unset, the command explicitly retains the
 corresponding tool directory under the caller's OS profile before replacing
 HOME. This keeps rustup-installed compilers usable on clean CI runners.
 
-The isolated RDP helper check is also repository-scoped:
-
-```text
-cargo xtask check-rdp-helper
-```
-
-The real RDP protocol fixture is opt-in and remains loopback-only:
-
-```text
-cargo xtask check-rdp-fixture
-```
-
-It starts the official IronRDP server implementation inside a current-thread
-test, generates a short-lived CA and server identity under a disposable
-temporary directory, and passes the CA only to the test-feature helper. It
-does not modify the macOS trust store, inspect personal certificates, read SSH
-files, or connect to a remote host. The test-only CA feature is excluded from
-the normal helper and package paths; the fixture proves one local TLS/Hybrid
-engine/server pairing, a bounded monitor-layout request, and one controlled
-loss/recovery cycle, not cross-platform or production interoperability.
-
-The isolated VNC helper check is repository-scoped:
-
-```text
-cargo xtask check-vnc-helper
-```
-
 The isolated fuzz package can be format- and compile-checked without running
 the fuzzers or contacting a protocol server:
 
@@ -214,27 +183,8 @@ It does not inspect SSH files, the SSH agent, Keychain entries, or remote
 hosts. RSA support is disabled in the main SSH dependency until its known
 Marvin timing advisory has a maintained fixed implementation.
 
-The isolated RDP candidate has a separate lockfile and is audited separately:
-
-```text
-cargo audit --no-fetch --file tools/rdp-helper/Cargo.lock
-```
-
-At present this intentionally reports `RUSTSEC-2023-0071` through IronRDP's
-pinned `picky` chain; the candidate is therefore not staged into normal
-bundles.
-
-The helper EOF smoke test below emits its native handshake and exits without
-connecting:
-
-```text
-cargo run --manifest-path tools/rdp-helper/Cargo.toml -- \
-  --conxol-protocol rdp --host 127.0.0.1 --port 3389 \
-  --username fixture-user < /dev/null
-```
-
 `cargo xtask check` gives every validation subprocess, including formatters,
-linters, frontend commands, helper builds, and tests, an ephemeral `HOME` and
+linters, frontend commands, and tests, an ephemeral `HOME` and
 isolated XDG configuration/data/cache directories (and the corresponding
 Windows profile variables). The normal Cargo, rustup, and package caches remain
 available for build performance, but validation commands cannot resolve a
@@ -245,7 +195,7 @@ On Unix, the test shell is forced to `/bin/sh`; shell and interpreter startup
 variables such as `ZDOTDIR`, `BASH_ENV`, `ENV`, and `PYTHONSTARTUP` are removed
 so a personal startup file cannot be loaded indirectly.
 
-The `xtask` build, helper-staging, packaging, and test subprocesses also remove
+The `xtask` build, packaging, and test subprocesses also remove
 ambient SSH agent, askpass, Git SSH, Git global/system configuration, package
 registry authentication, compiler-wrapper, and dynamic-loader injection
 variables. This prevents a dependency or build hook from selecting a personal

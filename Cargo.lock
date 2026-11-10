@@ -783,20 +783,20 @@ checksum = "a6ef517f0926dd24a1582492c791b6a4818a4d94e789a334894aa15b0d12f55c"
 
 [[package]]
 name = "conxol"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "anyhow",
  "argon2",
  "conxol-core",
  "conxol-network",
  "conxol-pptp",
- "conxol-remote-desktop",
  "conxol-serial",
  "conxol-ssh",
  "conxol-store",
  "conxol-telnet",
  "conxol-vault",
  "getrandom 0.4.3",
+ "hickory-proto",
  "libc",
  "portable-pty",
  "rfd",
@@ -815,6 +815,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "webview2-com",
  "windows",
  "windows-collections",
  "windows-sys 0.61.2",
@@ -823,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-benchmarks"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-core",
  "serde_json",
@@ -831,18 +832,19 @@ dependencies = [
 
 [[package]]
 name = "conxol-core"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "proptest",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "url",
  "uuid",
 ]
 
 [[package]]
 name = "conxol-mtr"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-ping",
  "serde",
@@ -851,7 +853,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-network"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-mtr",
  "conxol-ping",
@@ -867,7 +869,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-ping"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "libc",
  "rand 0.9.5",
@@ -879,7 +881,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-pptp"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "des 0.8.1",
  "getrandom 0.4.3",
@@ -894,19 +896,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "conxol-remote-desktop"
-version = "0.1.64"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
- "zeroize",
-]
-
-[[package]]
 name = "conxol-serial"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-core",
  "libc",
@@ -918,7 +909,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-ssh"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "anyhow",
  "conxol-core",
@@ -938,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-store"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-core",
  "libc",
@@ -952,7 +943,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-telnet"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "conxol-core",
  "encoding_rs",
@@ -963,7 +954,7 @@ dependencies = [
 
 [[package]]
 name = "conxol-vault"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -7067,7 +7058,7 @@ checksum = "ea6fc2961e4ef194dcbfe56bb845534d0dc8098940c7e5c012a258bfec6701bd"
 
 [[package]]
 name = "xtask"
-version = "0.1.64"
+version = "0.1.65"
 dependencies = [
  "sha2 0.11.0",
 ]

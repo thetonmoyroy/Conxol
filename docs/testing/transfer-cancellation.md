@@ -1,5 +1,9 @@
 # Transfer cancellation before file promotion — 2026-10-02
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 A cancellation could arrive after the byte copy had finished, while fsync or
 SFTP metadata/close operations were still pending. The desktop then promoted
 the complete temporary file without checking the request again. This could

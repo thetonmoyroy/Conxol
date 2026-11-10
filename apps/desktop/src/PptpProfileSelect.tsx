@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown } from "lucide-react";
 
 type Profile = { id: string; name: string; folder: string };
-export function PptpProfileSelect({ value, profiles, disabled, onChange, labelId }: { value: string; profiles: Profile[]; disabled: boolean; onChange: (id: string) => void; labelId: string }) {
+export function PptpProfileSelect({ value, profiles, disabled, onChange, labelId, required = false }: { value: string; profiles: Profile[]; disabled: boolean; onChange: (id: string) => void; labelId: string; required?: boolean }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
@@ -14,9 +14,9 @@ export function PptpProfileSelect({ value, profiles, disabled, onChange, labelId
   const id = useId();
   const selected = profiles.find(p => p.id === value);
   const name = (p: Profile) => p.folder ? `${p.folder} / ${p.name}` : p.name;
-  const label = selected ? name(selected) : value ? "Assigned profile unavailable" : "Direct connection";
+  const label = selected ? name(selected) : value ? "Assigned profile unavailable" : required ? "Choose a PPTP profile" : "Direct connection";
   const matches = profiles.filter(p => `${p.folder} ${p.name}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a, b) => name(a).localeCompare(name(b)));
-  const options = [{ id: "", name: "Direct connection", folder: "" }, ...matches.slice(0, 100)];
+  const options = [{ id: "", name: required ? "Choose a PPTP profile" : "Direct connection", folder: "" }, ...matches.slice(0, 100)];
   const index = Math.min(active, options.length - 1);
   const place = () => {
     if (!trigger.current) return;

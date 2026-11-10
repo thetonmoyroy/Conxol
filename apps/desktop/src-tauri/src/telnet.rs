@@ -133,17 +133,17 @@ impl TelnetManager {
         let password = if let Some(password) = request.password {
             Some(SecretMaterial::from_zeroizing(password))
         } else if let Some(id) = &credential_id {
-            Some(
-                vault
-                    .get(&CredentialId::new(id.clone()).map_err(|_| {
-                        TelnetManagerError::InvalidRequest("invalid credential reference".into())
-                    })?)
-                    .map_err(|_| {
-                        TelnetManagerError::InvalidRequest(
-                            "saved Telnet password is unavailable".into(),
-                        )
-                    })?,
-            )
+            let id = CredentialId::new(id.clone()).map_err(|_| {
+                TelnetManagerError::InvalidRequest("invalid credential reference".into())
+            })?;
+            // Missing or unreadable saved secrets must not prevent interactive login.
+            match vault.get(&id) {
+                Ok(password) => Some(password),
+                Err(_) => {
+                    credential_id = None;
+                    None
+                }
+            }
         } else {
             None
         };

@@ -1,5 +1,9 @@
 # Text-input dialogue checks — 2026-10-03
 
+> Historical references to RDP/VNC describe earlier versions. Both implementations,
+> helpers and related commands have been removed; old saved entries remain readable
+> but cannot connect. See the current removal decision in `docs/adr/0036-retire-remote-desktop-support.md`.
+
 ## Saved startup command review on main
 
 **2026-10-03, after the published v0.1.20 Mac preview.** Saved local profiles
@@ -103,7 +107,7 @@ release-copy shell-setup acceptance remain pending.
 
 These changes follow v0.1.17 and are included in the v0.1.18 Mac preview.
 Windows/Linux installers remain v0.1.12. The detailed native observations below
-used isolated ARM64 debug copies; the [v0.1.18 release-copy recheck](remote-desktop-renderer.md#v0118-release-bundle-recheck)
+used isolated ARM64 debug copies; the [v0.1.18 release-copy recheck](../adr/0036-retire-remote-desktop-support.md)
 adds settings rejection/focus and PTY/VNC-helper shutdown evidence.
 
 All 19 former `window.prompt` callers now use the shared HTML `dialog` helper:
@@ -348,7 +352,7 @@ recursive transfers or cancellation of an already running transfer.
 
 Subsequent VNC work identified the fixture deadline failure and restored the
 ordinary local global check. The later binary-frame correction also passed
-that check with Full-HD VNC fixtures; see the [codec receipt](../../benchmarks/2026-10-02-framebuffer-ipc.md).
+that check with Full-HD VNC fixtures; see the [codec receipt](../adr/0036-retire-remote-desktop-support.md).
 These later results supersede the validation blocker above without expanding
 the native file-dialogue acceptance scope. Mac packaging was subsequently
 updated in v0.1.18; Windows/Linux installers remain older.

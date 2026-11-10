@@ -10,7 +10,7 @@ function attempt(overrides = {}, allowed = true, configured = false) {
 assert.deepEqual(attempt(), { handled: true, events: ['prevent', 'stop', 'open'] }, 'Ctrl+F must be consumed before opening Find');
 assert.equal(attempt({ key: 'F' }).handled, true);
 assert.equal(attempt({ ctrlKey: false, metaKey: true }).handled, true);
-assert.deepEqual(attempt({}, false), { handled: false, events: [] }, 'do not hijack dialogs, locked workspaces, other editors or remote desktops');
+assert.deepEqual(attempt({}, false), { handled: false, events: [] }, 'do not hijack dialogs, locked workspaces, other editors');
 for (const overrides of [{ ctrlKey: false }, { altKey: true }, { shiftKey: true }, { key: 'g' }]) assert.equal(attempt(overrides).handled, false);
 assert.equal(attempt({ key: 'g' }, true, true).handled, true, 'keep the configured shortcut working');
 assert.equal(attempt({}, true, false).handled, true, 'Ctrl+F stays available with a custom configured shortcut');
