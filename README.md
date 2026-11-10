@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/readme-hero.svg" alt="Conxol network workspace: SSH terminals, remote files, diagnostics and router configuration. Illustrated interface using documentation-only addresses." width="100%" />
+<img src="docs/assets/conxol-desktop-preview.jpg" alt="Conxol desktop app showing the Huawei configuration generator with interface, VLAN and BGP service rows." width="100%" />
 
 # Conxol
 
