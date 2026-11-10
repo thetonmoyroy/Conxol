@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/conxol-desktop-preview.svg" alt="SVG recreation of the Conxol Generator screen, with Huawei interface service rows, BGP peers and shared settings." width="100%" />
+<img src="docs/assets/conxol-generator-preview-v2.svg" alt="SVG recreation of the Conxol Generator screen, with Huawei interface service rows, BGP peers and shared settings." width="100%" />
 
 # Conxol
 

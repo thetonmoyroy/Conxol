@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="930" viewBox="0 0 1440 930" role="img" aria-labelledby="title desc">
+<title id="title">Conxol desktop — configuration generator</title>
+<desc id="desc">Vector recreation of the Conxol Generator screen: native title and menu bars, narrow activity bar, saved-session sidebar, Home and Generator tabs, Huawei template selector, interface service rows, BGP peers and shared settings. Example addresses are reserved for documentation.</desc>
+<rect width="1440" height="930" fill="#0e1512"/>
+
+<rect x="0" y="0" width="1440" height="29" rx="0" fill="#222622"/>
+<text x="10" y="20" fill="#cbd5cc" font-size="13" font-family="Arial, Helvetica, sans-serif">‹_  Conxol - Your network, in command</text>
+<text x="1314" y="20" fill="#cbd5cc" font-size="15" font-family="Arial, Helvetica, sans-serif">—      □      ×</text>
+<rect x="0" y="29" width="1440" height="29" rx="0" fill="#101713"/>
+<text x="10" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Sessions</text>
+<text x="86" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Generator</text>
+<text x="169" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Macros</text>
+<text x="231" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Shortcuts</text>
+<text x="314" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Notes</text>
+<text x="369" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Settings</text>
+<text x="445" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Tools</text>
+<text x="500" y="48" fill="#9da99d" font-size="14" font-family="Arial, Helvetica, sans-serif">Help</text>
+<text x="1383" y="48" fill="#81917b" font-size="10" font-family="Arial, Helvetica, sans-serif">• Conxol</text>
+<path d="M0 58H1440" stroke="#2e3932"/>
+<rect x="0" y="59" width="34" height="871" rx="0" fill="#111a15"/>
+<path d="M34 59L34 930" stroke="#2e3932"/>
+<text x="9" y="78" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">☰</text>
+<text x="9" y="108" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">☆</text>
+<text x="9" y="138" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">◷</text>
+<text x="9" y="169" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">⊞</text>
+<text x="9" y="199" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">⌁</text>
+<text x="9" y="229" fill="#8c9a85" font-size="18" font-family="Arial, Helvetica, sans-serif">▤</text>
+<rect x="35" y="59" width="164" height="871" rx="0" fill="#0b110e"/>
+<path d="M199 59L199 930" stroke="#2e3932"/>
+<text x="42" y="77" fill="#7a8777" font-size="10" font-family="Arial, Helvetica, sans-serif">Quick connect / find session…</text>
+<text x="43" y="101" fill="#b3c2aa" font-size="12" font-family="Arial, Helvetica, sans-serif">User sessions</text>
+<text x="143" y="101" fill="#899680" font-size="12" font-family="Arial, Helvetica, sans-serif">↑  ↓  ↕</text>
+<text x="48" y="125" fill="#9ca891" font-size="14" font-family="Arial, Helvetica, sans-serif">⌃    ⌄    ▱</text>
+<text x="48" y="159" fill="#74816f" font-size="11" font-family="Arial, Helvetica, sans-serif">No matching sessions</text>
+<rect x="200" y="59" width="1240" height="26" rx="0" fill="#101813"/>
+<text x="213" y="78" fill="#c9b176" font-size="20" font-family="Arial, Helvetica, sans-serif">⌂</text>
+<path d="M239 59L239 85" stroke="#2e3932"/>
+<text x="249" y="78" fill="#d1bb7b" font-size="12" font-family="Arial, Helvetica, sans-serif">Generator</text>
+<text x="305" y="78" fill="#a7ad9c" font-size="14" font-family="Arial, Helvetica, sans-serif">×</text>
+<path d="M325 59L325 85" stroke="#2e3932"/>
+<text x="336" y="78" fill="#a4af9e" font-size="20" font-family="Arial, Helvetica, sans-serif">+</text>
+<text x="1413" y="78" fill="#cbd5cc" font-size="15" font-family="Arial, Helvetica, sans-serif">···</text>
+<rect x="229" y="98" width="100" height="32" rx="0" fill="#121c16" stroke="#8da970"/>
+<text x="239" y="119" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Template + rows</text>
+<rect x="341" y="98" width="96" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="351" y="119" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Numeric loops</text>
+<text x="215" y="170" fill="#dce3d6" font-size="22" font-family="Arial, Helvetica, sans-serif" font-weight="600">Generator</text>
+<text x="215" y="192" fill="#9aa797" font-size="13" font-family="Arial, Helvetica, sans-serif">Write a template. Fill the rows. Copy the result.</text>
+<text x="215" y="231" fill="#d5decf" font-size="17" font-family="Arial, Helvetica, sans-serif" font-weight="600">Template</text>
+<rect x="295" y="212" width="312" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="304" y="231" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Huawei interfaces + policy + BGP (example)</text>
+<text x="588" y="231" fill="#cbd5cc" font-size="15" font-family="Arial, Helvetica, sans-serif">⌄</text>
+<rect x="614" y="210" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="624" y="231" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Save as</text>
+<rect x="681" y="210" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="691" y="231" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Update</text>
+<rect x="748" y="210" width="52" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="758" y="231" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Delete</text>
+<rect x="216" y="252" width="1195" height="576" rx="7" fill="#101813" stroke="#2b382e"/>
+<text x="229" y="278" fill="#d1dbca" font-size="14" font-family="Arial, Helvetica, sans-serif" font-weight="600">Interface and service variables</text>
+<text x="229" y="301" fill="#899785" font-size="12" font-family="Arial, Helvetica, sans-serif">Enter an IP/CIDR or subnet mask. Peer IP updates automatically; edit it to override.</text>
+<text x="230" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Row</text>
+<text x="269" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Interface</text>
+<text x="465" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">VLAN</text>
+<text x="659" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">VPN</text>
+<text x="853" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">IP / CIDR</text>
+<text x="1048" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Subnet mask</text>
+<text x="1241" y="326" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Actions</text>
+<path d="M229 333H1398" stroke="#2e3932"/>
+<text x="234" y="360" fill="#c6d3bf" font-size="13" font-family="Arial, Helvetica, sans-serif" font-weight="600">1</text>
+<rect x="269" y="340" width="187" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="278" y="359" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Eth-Trunk1</text>
+<rect x="465" y="340" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="474" y="359" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">200</text>
+<rect x="659" y="340" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="668" y="359" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">IPBW</text>
+<rect x="853" y="340" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="862" y="359" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.1</text>
+<rect x="1048" y="340" width="185" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1057" y="359" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">255.255.255.252</text>
+<rect x="1241" y="340" width="66" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1251" y="361" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Duplicate</text>
+<rect x="1316" y="340" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1326" y="361" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Remove</text>
+<path d="M229 375H1398" stroke="#2e3932"/>
+<text x="234" y="401" fill="#c6d3bf" font-size="13" font-family="Arial, Helvetica, sans-serif" font-weight="600">2</text>
+<rect x="269" y="381" width="187" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="278" y="400" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Eth-Trunk1</text>
+<rect x="465" y="381" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="474" y="400" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">201</text>
+<rect x="659" y="381" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="668" y="400" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">GGC</text>
+<rect x="853" y="381" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="862" y="400" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.5</text>
+<rect x="1048" y="381" width="185" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1057" y="400" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">255.255.255.252</text>
+<rect x="1241" y="381" width="66" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1251" y="402" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Duplicate</text>
+<rect x="1316" y="381" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1326" y="402" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Remove</text>
+<path d="M229 416H1398" stroke="#2e3932"/>
+<text x="234" y="442" fill="#c6d3bf" font-size="13" font-family="Arial, Helvetica, sans-serif" font-weight="600">3</text>
+<rect x="269" y="422" width="187" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="278" y="441" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Eth-Trunk1</text>
+<rect x="465" y="422" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="474" y="441" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">202</text>
+<rect x="659" y="422" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="668" y="441" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">FNA</text>
+<rect x="853" y="422" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="862" y="441" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.9</text>
+<rect x="1048" y="422" width="185" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1057" y="441" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">255.255.255.252</text>
+<rect x="1241" y="422" width="66" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1251" y="443" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Duplicate</text>
+<rect x="1316" y="422" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1326" y="443" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Remove</text>
+<path d="M229 457H1398" stroke="#2e3932"/>
+<text x="234" y="483" fill="#c6d3bf" font-size="13" font-family="Arial, Helvetica, sans-serif" font-weight="600">4</text>
+<rect x="269" y="463" width="187" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="278" y="482" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Eth-Trunk1</text>
+<rect x="465" y="463" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="474" y="482" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">203</text>
+<rect x="659" y="463" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="668" y="482" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">CDN</text>
+<rect x="853" y="463" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="862" y="482" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.13</text>
+<rect x="1048" y="463" width="185" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1057" y="482" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">255.255.255.252</text>
+<rect x="1241" y="463" width="66" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1251" y="484" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Duplicate</text>
+<rect x="1316" y="463" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1326" y="484" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Remove</text>
+<path d="M229 498H1398" stroke="#2e3932"/>
+<text x="234" y="524" fill="#c6d3bf" font-size="13" font-family="Arial, Helvetica, sans-serif" font-weight="600">5</text>
+<rect x="269" y="504" width="187" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="278" y="523" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">Eth-Trunk1</text>
+<rect x="465" y="504" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="474" y="523" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">204</text>
+<rect x="659" y="504" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="668" y="523" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">BDIX</text>
+<rect x="853" y="504" width="186" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="862" y="523" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.17</text>
+<rect x="1048" y="504" width="185" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1057" y="523" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">255.255.255.252</text>
+<rect x="1241" y="504" width="66" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1251" y="525" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Duplicate</text>
+<rect x="1316" y="504" width="59" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="1326" y="525" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Remove</text>
+<path d="M229 539H1398" stroke="#2e3932"/>
+<rect x="229" y="545" width="61" height="32" rx="0" fill="#121c16" stroke="#303d34"/>
+<text x="239" y="566" fill="#b7c8b0" font-size="12" font-family="Arial, Helvetica, sans-serif">Add row</text>
+<text x="229" y="598" fill="#c6d3bf" font-size="14" font-family="Arial, Helvetica, sans-serif" font-weight="600">BGP peers and policies</text>
+<text x="230" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Service</text>
+<text x="292" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Peer IP</text>
+<text x="549" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Peer ASN</text>
+<text x="901" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Import policy</text>
+<text x="1113" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Export policy</text>
+<text x="1309" y="621" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">Default route</text>
+<text x="232" y="652" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">IPBW</text>
+<rect x="292" y="633" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="301" y="652" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.2</text>
+<rect x="505" y="641" width="11" height="11" rx="2" fill="#81a7d4"/>
+<text x="506" y="650" fill="#10232e" font-size="10" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="521" y="651" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Auto</text>
+<rect x="549" y="633" width="225" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="558" y="652" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<rect x="810" y="641" width="11" height="11" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="849" y="652" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Override</text>
+<rect x="901" y="633" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="910" y="652" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1113" y="633" width="188" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1122" y="652" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">deny-all</text>
+<rect x="1314" y="638" width="17" height="17" rx="2" fill="#81a7d4" stroke="#697366"/>
+<text x="1316" y="652" fill="#10232e" font-size="16" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="232" y="688" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">GGC</text>
+<rect x="292" y="669" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="301" y="688" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.6</text>
+<rect x="505" y="677" width="11" height="11" rx="2" fill="#81a7d4"/>
+<text x="506" y="686" fill="#10232e" font-size="10" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="521" y="687" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Auto</text>
+<rect x="549" y="669" width="225" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="558" y="688" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<rect x="810" y="677" width="11" height="11" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="849" y="688" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Override</text>
+<rect x="901" y="669" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="910" y="688" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1113" y="669" width="188" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1122" y="688" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">CLIENT-GGC-OUT</text>
+<rect x="1314" y="674" width="17" height="17" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="232" y="724" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">FNA</text>
+<rect x="292" y="705" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="301" y="724" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.10</text>
+<rect x="505" y="713" width="11" height="11" rx="2" fill="#81a7d4"/>
+<text x="506" y="722" fill="#10232e" font-size="10" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="521" y="723" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Auto</text>
+<rect x="549" y="705" width="225" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="558" y="724" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<rect x="810" y="713" width="11" height="11" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="849" y="724" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Override</text>
+<rect x="901" y="705" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="910" y="724" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1113" y="705" width="188" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1122" y="724" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">CLIENT-FNA-OUT</text>
+<rect x="1314" y="710" width="17" height="17" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="232" y="760" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">CDN</text>
+<rect x="292" y="741" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="301" y="760" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.14</text>
+<rect x="505" y="749" width="11" height="11" rx="2" fill="#81a7d4"/>
+<text x="506" y="758" fill="#10232e" font-size="10" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="521" y="759" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Auto</text>
+<rect x="549" y="741" width="225" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="558" y="760" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<rect x="810" y="749" width="11" height="11" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="849" y="760" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Override</text>
+<rect x="901" y="741" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="910" y="760" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1113" y="741" width="188" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1122" y="760" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">CLIENT-CDN-OUT</text>
+<rect x="1314" y="746" width="17" height="17" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="232" y="796" fill="#c6d3bf" font-size="12" font-family="Arial, Helvetica, sans-serif" font-weight="600">BDIX</text>
+<rect x="292" y="777" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="301" y="796" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">192.0.2.18</text>
+<rect x="505" y="785" width="11" height="11" rx="2" fill="#81a7d4"/>
+<text x="506" y="794" fill="#10232e" font-size="10" font-family="Arial, Helvetica, sans-serif">✓</text>
+<text x="521" y="795" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Auto</text>
+<rect x="549" y="777" width="225" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="558" y="796" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<rect x="810" y="785" width="11" height="11" rx="2" fill="#29342c" stroke="#697366"/>
+<text x="849" y="796" fill="#81917c" font-size="10" font-family="Arial, Helvetica, sans-serif">Override</text>
+<rect x="901" y="777" width="205" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="910" y="796" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1113" y="777" width="188" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="1122" y="796" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">CLIENT-BDIX-OUT</text>
+<rect x="1314" y="782" width="17" height="17" rx="2" fill="#29342c" stroke="#697366"/>
+<rect x="216" y="840" width="1195" height="90" rx="7" fill="#101813" stroke="#2b382e"/>
+<text x="229" y="865" fill="#c6d3bf" font-size="14" font-family="Arial, Helvetica, sans-serif" font-weight="600">Shared settings</text>
+<text x="229" y="888" fill="#b9c6b1" font-size="12" font-family="Arial, Helvetica, sans-serif">Local BGP AS</text>
+<rect x="229" y="895" width="198" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="238" y="914" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64496</text>
+<text x="438" y="888" fill="#b9c6b1" font-size="12" font-family="Arial, Helvetica, sans-serif">Remote BGP AS</text>
+<rect x="438" y="895" width="198" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="447" y="914" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">64497</text>
+<text x="648" y="888" fill="#b9c6b1" font-size="12" font-family="Arial, Helvetica, sans-serif">Prefix / policy name</text>
+<rect x="648" y="895" width="198" height="29" rx="4" fill="#19241e" stroke="#334038"/>
+<text x="657" y="914" fill="#cbd5cc" font-size="13" font-family="Consolas, monospace">MGMT_RTR</text>
+<rect x="1428" y="89" width="10" height="837" rx="5" fill="#202820"/>
+<rect x="1429" y="104" width="8" height="384" rx="4" fill="#687060"/>
+</svg>

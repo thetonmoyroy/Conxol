@@ -101,21 +101,21 @@ export function templateFields(text: string): TemplateField[] {
   return [...new Set(Array.from(text.matchAll(placeholder), match => match[1]))];
 }
 export const huaweiText = `interface {{interface}}.{{vlan}}
-description MGMT_RTR-{{vpn}}
-ip binding vpn-instance {{vpn}}
+{{#interface_description}}description {{interface_description}}
+{{/interface_description}}ip binding vpn-instance {{vpn}}
 ip address {{ip}} {{mask}}
 dot1q termination vid {{vlan}}
 statistics enable
 #`;
 export const huaweiTemplate: ConfigTemplate = { id: "huawei-subinterface", name: "Huawei subinterfaces", text: huaweiText, fields: templateFields(huaweiText) };
 export function huaweiRows(): ConfigRow[] {
-  return ["IPBW", "GGC", "FNA", "CDN", "BDIX"].map((vpn, index) => ({ interface: "Eth-Trunk1", vlan: String(200 + index), vpn, ip: `192.0.2.${1 + index * 4}`, mask: "255.255.255.252" }));
+  return ["IPBW", "GGC", "FNA", "CDN", "BDIX"].map((vpn, index) => ({ interface: "Eth-Trunk1", vlan: String(200 + index), vpn, interface_description: `MGMT_RTR-${vpn}`, client_description: "", ip: `192.0.2.${1 + index * 4}`, mask: "255.255.255.252" }));
 }
 export const combinedTemplate: ConfigTemplate = {
   id: "huawei-combined", name: "Huawei interfaces + policy + BGP", text: huaweiText, fields: templateFields(huaweiText),
   combined: {
     header: "bgp {{local_as}}\n #\n ipv4-family unicast\n #",
-    peer: " ipv4-family vpn-instance {{vpn}}\n  peer {{peer_ip}} as-number {{peer_as}}\n  peer {{peer_ip}} route-policy {{import_policy}} import\n  peer {{peer_ip}} route-policy {{export_policy}} export\n{{#advertise_default}}  peer {{peer_ip}} default-route-advertise\n{{/advertise_default}} #",
+    peer: " ipv4-family vpn-instance {{vpn}}\n  peer {{peer_ip}} as-number {{peer_as}}\n{{#client_description}}  peer {{peer_ip}} description {{client_description}}\n{{/client_description}}  peer {{peer_ip}} route-policy {{import_policy}} import\n  peer {{peer_ip}} route-policy {{export_policy}} export\n{{#advertise_default}}  peer {{peer_ip}} default-route-advertise\n{{/advertise_default}} #",
     localAs: "64496", remoteAs: "64497", checkboxFields: ["advertise_default"], policyName: "MGMT_RTR",
     prefixes: "ip ip-prefix {{policy_name}} index {{index}} {{action}} {{network}} {{length}}{{#ge}} greater-equal {{ge}}{{/ge}}{{#le}} less-equal {{le}}{{/le}}",
     policy: "route-policy {{policy_name}} permit node 10\n if-match ip-prefix {{policy_name}}\n#",

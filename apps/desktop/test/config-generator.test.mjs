@@ -384,3 +384,17 @@ for (const [start, end, step, expected] of [
   assert.equal(result.text.split('\n')[0], `interface eth 0/${start}`);
   assert.equal(result.text.split('\n').at(-2), `interface eth 0/${Number(start) + (expected - 1) * Number(step)}`);
 }
+
+// Description fields must affect the generated commands on every built-in platform.
+for (const template of builtinTemplates) {
+  assert.ok(serviceFields(template).includes('interface_description'));
+  if (template.combined) assert.ok(serviceFields(template).includes('client_description'));
+  const rows = builtinRows(template.id).map(row => ({ ...row, interface_description: 'Customer uplink', client_description: 'Customer BGP' }));
+  const result = renderCombined(template, rows, prefixRows());
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.text.includes('Customer uplink'));
+  if (template.combined) assert.ok(result.text.includes('Customer BGP'));
+  const blank = renderCombined(template, rows.map(row => ({ ...row, interface_description: '', client_description: '' })), prefixRows());
+  assert.deepEqual(blank.errors, []);
+  assert.ok(!blank.text.includes('Customer'));
+}

@@ -21,7 +21,7 @@ export function TemplateGenerator() {
   const current = normalizeConfigTemplate({ id: selected, name: "", text: rawText, fields: templateFields(rawText), ...(rawCombined ? { combined: rawCombined } : {}) });
   const { text, combined } = current;
   const sectionInputs = useRef(new Map<string, HTMLTextAreaElement>());
-  const fieldOrder = ["interface", "logical_system", "vlan", "vpn", "ip", "mask", "peer_ip", "peer_as", "import_policy", "export_policy", "advertise_default"];
+  const fieldOrder = ["interface", "interface_description", "client_description", "logical_system", "vlan", "vpn", "ip", "mask", "peer_ip", "peer_as", "import_policy", "export_policy", "advertise_default"];
   const fields = serviceFields(current).sort((a, b) => (fieldOrder.includes(a) ? fieldOrder.indexOf(a) : 99) - (fieldOrder.includes(b) ? fieldOrder.indexOf(b) : 99));
   const result = renderCombined(current, rows, prefixes);
   const signature = JSON.stringify([text, combined]);
@@ -82,7 +82,7 @@ export function TemplateGenerator() {
   }
   const bgpFields = combined ? fields.filter(field => ["peer_ip", "peer_as", "import_policy", "export_policy", ...(combined.checkboxFields ?? [])].includes(field)) : [];
   const interfaceFields = fields.filter(field => !bgpFields.includes(field));
-  const labels: Record<string, string> = { interface: "Interface", vlan: "VLAN", vpn: "VPN", ip: "IP / CIDR", mask: "Subnet mask", logical_system: "Logical system", peer_ip: "Peer IP", peer_as: "Peer ASN", import_policy: "Import policy", export_policy: "Export policy", advertise_default: "Default route" };
+  const labels: Record<string, string> = { interface: "Interface", interface_description: "Interface description", client_description: "Client description", vlan: "VLAN", vpn: "VPN", ip: "IP / CIDR", mask: "Subnet mask", logical_system: "Logical system", peer_ip: "Peer IP", peer_as: "Peer ASN", import_policy: "Import policy", export_policy: "Export policy", advertise_default: "Default route" };
   function renderServiceInput(row: ConfigRow, index: number, field: string) {
     const change = (value: string) => setRows(values => values.map((item, at) => at === index ? editServiceValue(item, field, value) : item));
     if (field === "peer_as" && combined) {

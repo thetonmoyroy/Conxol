@@ -6,8 +6,8 @@ const ciscoText = `vrf definition {{vpn}}
  exit-address-family
 exit
 interface {{interface}}.{{vlan}}
- description MGMT_RTR-{{vpn}}
- encapsulation dot1Q {{vlan}}
+{{#interface_description}} description {{interface_description}}
+{{/interface_description}} encapsulation dot1Q {{vlan}}
  vrf forwarding {{vpn}}
  ip address {{ip}} {{mask}}
 exit
@@ -19,19 +19,19 @@ export const ciscoTemplate: ConfigTemplate = {
     prefixes: "ip prefix-list {{policy_name}} seq {{index}} {{action}} {{network}}/{{length}}{{#ge}} ge {{ge}}{{/ge}}{{#le}} le {{le}}{{/le}}",
     policy: "route-map {{policy_name}} permit 10\n match ip address prefix-list {{policy_name}}\nexit\nroute-map deny-all deny 10\nexit\n!",
     header: "router bgp {{local_as}}\n no bgp default ipv4-unicast\n!",
-    peer: " address-family ipv4 vrf {{vpn}}\n  neighbor {{peer_ip}} remote-as {{peer_as}}\n  neighbor {{peer_ip}} activate\n  neighbor {{peer_ip}} route-map {{import_policy}} in\n  neighbor {{peer_ip}} route-map {{export_policy}} out\n{{#advertise_default}}  neighbor {{peer_ip}} default-originate\n{{/advertise_default}} exit-address-family\n!",
+    peer: " address-family ipv4 vrf {{vpn}}\n  neighbor {{peer_ip}} remote-as {{peer_as}}\n{{#client_description}}  neighbor {{peer_ip}} description {{client_description}}\n{{/client_description}}  neighbor {{peer_ip}} activate\n  neighbor {{peer_ip}} route-map {{import_policy}} in\n  neighbor {{peer_ip}} route-map {{export_policy}} out\n{{#advertise_default}}  neighbor {{peer_ip}} default-originate\n{{/advertise_default}} exit-address-family\n!",
   },
 };
 const juniperText = `set interfaces {{interface}} vlan-tagging
-set interfaces {{interface}} unit {{vlan}} description MGMT_RTR-{{vpn}}
-set interfaces {{interface}} unit {{vlan}} vlan-id {{vlan}}
+set interfaces {{interface}} unit {{vlan}}{{#interface_description}} description {{interface_description}}
+{{/interface_description}}set interfaces {{interface}} unit {{vlan}} vlan-id {{vlan}}
 set interfaces {{interface}} unit {{vlan}} family inet address {{ip}}/{{prefix_length}}
 set routing-instances {{vpn}} instance-type virtual-router
 set routing-instances {{vpn}} interface {{interface}}.{{vlan}}`;
 
 const iosxrText = `interface {{interface}}.{{vlan}}
- description MGMT_RTR-{{vpn}}
- vrf {{vpn}}
+{{#interface_description}} description {{interface_description}}
+{{/interface_description}} vrf {{vpn}}
  ipv4 address {{ip}} {{mask}}
  encapsulation dot1q {{vlan}}
 exit
@@ -48,7 +48,8 @@ export const iosxrTemplate: ConfigTemplate = {
   exit
   neighbor {{peer_ip}}
    remote-as {{peer_as}}
-   address-family ipv4 unicast
+{{#client_description}}   description {{client_description}}
+{{/client_description}}   address-family ipv4 unicast
     route-policy {{import_policy}} in
     route-policy {{export_policy}} out
 {{#advertise_default}}    default-originate
@@ -59,9 +60,9 @@ export const iosxrTemplate: ConfigTemplate = {
   },
 };
 
-const routerosText = `/interface/vlan add name="vlan{{vlan}}-{{vpn}}" interface="{{interface}}" vlan-id={{vlan}} comment="MGMT_RTR-{{vpn}}"
+const routerosText = `/interface/vlan add name="vlan{{vlan}}-{{vpn}}" interface="{{interface}}" vlan-id={{vlan}}{{#interface_description}} comment="{{interface_description}}"{{/interface_description}}
 /ip/vrf add name="{{vpn}}" interfaces="vlan{{vlan}}-{{vpn}}" place-before=[find where name="main"]
-/ip/address add address={{ip}}/{{prefix_length}} interface="vlan{{vlan}}-{{vpn}}" comment="MGMT_RTR-{{vpn}}"`;
+/ip/address add address={{ip}}/{{prefix_length}} interface="vlan{{vlan}}-{{vpn}}"{{#interface_description}} comment="{{interface_description}}"{{/interface_description}}`;
 export const routerosTemplate: ConfigTemplate = {
   id: "mikrotik-routeros7-combined", name: "MikroTik v7 VLAN + VRF + BGP", text: routerosText, fields: templateFields(routerosText),
   combined: {
@@ -72,11 +73,11 @@ export const routerosTemplate: ConfigTemplate = {
     peer: `{{#advertise_default}}/routing/filter/rule add chain="MGMT-OUT-{{vpn}}" rule="if (dst == 0.0.0.0/0) { accept; }"
 {{/advertise_default}}/routing/filter/rule add chain="MGMT-OUT-{{vpn}}" rule="jump {{export_policy}};"
 /routing/bgp/instance add name="BGP-{{vpn}}" as={{local_as}} router-id={{ip}} routing-table="{{vpn}}" vrf="{{vpn}}"
-/routing/bgp/connection add name="MGMT_RTR-{{vpn}}" instance="BGP-{{vpn}}" local.address={{ip}} local.role=ebgp remote.address={{peer_ip}}/32 remote.as={{peer_as}} input.filter="{{import_policy}}" output.filter-chain="MGMT-OUT-{{vpn}}" output.default-originate={{default_originate}} disabled=no`,
+/routing/bgp/connection add name="MGMT_RTR-{{vpn}}" instance="BGP-{{vpn}}" local.address={{ip}} local.role=ebgp remote.address={{peer_ip}}/32 remote.as={{peer_as}} input.filter="{{import_policy}}" output.filter-chain="MGMT-OUT-{{vpn}}" output.default-originate={{default_originate}}{{#client_description}} comment="{{client_description}}"{{/client_description}} disabled=no`,
   },
 };
-const routerosMainText = `/interface/vlan add name="vlan{{vlan}}-{{vpn}}" interface="{{interface}}" vlan-id={{vlan}} comment="MGMT_RTR-{{vpn}}"
-/ip/address add address={{ip}}/{{prefix_length}} interface="vlan{{vlan}}-{{vpn}}" comment="MGMT_RTR-{{vpn}}"`;
+const routerosMainText = `/interface/vlan add name="vlan{{vlan}}-{{vpn}}" interface="{{interface}}" vlan-id={{vlan}}{{#interface_description}} comment="{{interface_description}}"{{/interface_description}}
+/ip/address add address={{ip}}/{{prefix_length}} interface="vlan{{vlan}}-{{vpn}}"{{#interface_description}} comment="{{interface_description}}"{{/interface_description}}`;
 export const routerosMainTemplate: ConfigTemplate = {
   id: "mikrotik-routeros7-main-combined", name: "MikroTik v7 VLAN + BGP (no VRF)", text: routerosMainText, fields: templateFields(routerosMainText),
   combined: {
@@ -84,7 +85,7 @@ export const routerosMainTemplate: ConfigTemplate = {
     header: '# MikroTik v7: shared BGP instance in the main routing table\n/routing/bgp/instance add name="BGP-MAIN" as={{local_as}}',
     peer: `{{#advertise_default}}/routing/filter/rule add chain="MGMT-OUT-{{vpn}}" rule="if (dst == 0.0.0.0/0) { accept; }"
 {{/advertise_default}}/routing/filter/rule add chain="MGMT-OUT-{{vpn}}" rule="jump {{export_policy}};"
-/routing/bgp/connection add name="MGMT_RTR-{{vpn}}" instance="BGP-MAIN" local.address={{ip}} local.role=ebgp remote.address={{peer_ip}}/32 remote.as={{peer_as}} input.filter="{{import_policy}}" output.filter-chain="MGMT-OUT-{{vpn}}" output.default-originate={{default_originate}} disabled=no`,
+/routing/bgp/connection add name="MGMT_RTR-{{vpn}}" instance="BGP-MAIN" local.address={{ip}} local.role=ebgp remote.address={{peer_ip}}/32 remote.as={{peer_as}} input.filter="{{import_policy}}" output.filter-chain="MGMT-OUT-{{vpn}}" output.default-originate={{default_originate}}{{#client_description}} comment="{{client_description}}"{{/client_description}} disabled=no`,
   },
 };
 export const juniperTemplate: ConfigTemplate = {
@@ -97,7 +98,8 @@ export const juniperTemplate: ConfigTemplate = {
     peer: `set routing-instances {{vpn}} routing-options autonomous-system {{local_as}}
 set routing-instances {{vpn}} protocols bgp group MGMT_RTR type external
 set routing-instances {{vpn}} protocols bgp group MGMT_RTR family inet unicast
-set routing-instances {{vpn}} protocols bgp group MGMT_RTR neighbor {{peer_ip}} peer-as {{peer_as}}
+{{#client_description}}set routing-instances {{vpn}} protocols bgp group MGMT_RTR neighbor {{peer_ip}} description "{{client_description}}"
+{{/client_description}}set routing-instances {{vpn}} protocols bgp group MGMT_RTR neighbor {{peer_ip}} peer-as {{peer_as}}
 set routing-instances {{vpn}} protocols bgp group MGMT_RTR neighbor {{peer_ip}} import {{import_policy}}
 set routing-instances {{vpn}} protocols bgp group MGMT_RTR neighbor {{peer_ip}} export [ {{export_chain}} ]
 {{#advertise_default}}set routing-instances {{vpn}} routing-options static route 0.0.0.0/0 discard
