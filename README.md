@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/readme-hero.svg" alt="Conxol network workspace: SSH terminals, remote files, diagnostics and router configuration. Illustrated interface using documentation-only addresses." width="100%" />
+<img src="docs/assets/conxol-desktop-preview.jpg" alt="Conxol desktop app showing the Huawei configuration generator with interface, VLAN and BGP service rows." width="100%" />
 
 # Conxol
 
@@ -18,22 +18,23 @@ Conxol brings **SSH, SFTP/SCP, serial consoles, SSH tunnels and network diagnost
 
 <a id="download"></a>
 
-## Download Conxol 0.1.60
+<!-- Release versions and links are synchronized by tools/sync-public-release.mjs. -->
+## Download Conxol 0.1.65
 
 **Windows users: [Get Conxol from the Microsoft Store](https://apps.microsoft.com/store/detail/9NZVQ7W665BH?cid=DevShareMCLPCS)** or choose a standalone installer below.
 
 | Your platform | Package | Download |
 | :--- | :--- | :--- |
-| **Windows x64** | Installer | [Download EXE](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-windows-x64.exe) |
-| **macOS · Apple Silicon** | M1 and newer | [Download ARM64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-arm64.dmg) |
-| **macOS · Intel** | x64 | [Download Intel DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-macos-x64.dmg) |
-| **Linux · Debian / Ubuntu** | x64 | [Download DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.deb) |
-| **Linux · AppImage** | x64 portable | [Download AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60/Conxol-0.1.60-linux-x64.AppImage) |
-| **Android preview · ARM64** | Signed APK · Android 7+ | [Download preview APK](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.60-android-preview.1/Conxol-0.1.60-android-preview.1-aarch64.apk) |
+| **Windows x64** | Installer | [Download EXE](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-windows-x64.exe) |
+| **macOS · Apple Silicon** | M1 and newer | [Download ARM64 DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-macos-arm64.dmg) |
+| **macOS · Intel** | x64 | [Download Intel DMG](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-macos-x64.dmg) |
+| **Linux · Debian / Ubuntu** | x64 | [Download DEB](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-linux-x64.deb) |
+| **Linux · AppImage** | x64 portable | [Download AppImage](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-linux-x64.AppImage) |
+| **Android preview · ARM64** | Signed APK · Android 7+ | [Download preview APK](https://github.com/thetonmoyroy/Conxol/releases/download/v0.1.65/Conxol-0.1.65-android-arm64.apk) |
 
-[Release notes & SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.60) · [What changed in 0.1.60](docs/release/v0.1.60.md)
+[Release notes & SHA-256 checksums](https://github.com/thetonmoyroy/Conxol/releases/tag/v0.1.65) · [What changed in 0.1.65](docs/release/v0.1.65.md)
 
-[Android preview notes, limitations & signing information](docs/release/v0.1.60-android-preview.1.md). Older debug APKs use a different signing certificate; read the installation note before replacing one.
+[Android preview notes, limitations & signing information](docs/release/v0.1.60-android-preview.1.md) (initial preview). Older debug APKs use a different signing certificate; read the installation note before replacing one.
 
 <details>
 <summary>Installation notes</summary>
@@ -55,12 +56,19 @@ Conxol brings **SSH, SFTP/SCP, serial consoles, SSH tunnels and network diagnost
 | **SFTP and SCP file transfers.** Browse remote directories, move files with progress and cancellation, and edit remote text with conflict checks. | **Huawei, Cisco and Juniper configuration templates.** Fill shared service rows, preview the commands, then copy or export the result. |
 | **Saved sessions that stay organized.** Use nested folders, favorites, recent sessions, search, and custom device icons and colors. | **Commands within reach.** Double-tap Shift to find shared or device-specific shortcuts. Keep notes, snippets and reviewed macros nearby. |
 
+### Current workspace improvements
+
+- **Appearance settings:** unified app and terminal themes, eight additional palettes and Dark/Light previews in Settings > Appearance. Syntax highlighting lives in Settings > Terminal.
+- **Faster session layouts:** drag a saved session onto a terminal for a fresh connection in a right split, or onto an empty workspace to connect.
+- **Saved Web sessions:** optional PPTP routing; the PPTP Web browser requires Windows WebView2.
+- **Telnet login recovery:** unreadable saved passwords fall back to interactive login; replace them in Edit session.
+
 ### More than an SSH client
 
 - **Console access:** local shells, Windows WSL, Telnet and serial terminals.
 - **SSH port forwarding:** local and remote tunnels, SOCKS5 proxies, bind controls and traffic counters.
 - **File-transfer tools:** FTP / explicit FTPS, a TFTP client, and an explicitly started read-only TFTP server for a selected file.
-- **Terminal customization:** light and dark themes, adjustable fonts, search, keyboard shortcuts and editable network-output highlighting.
+- **Terminal customization:** unified app and terminal palettes, adjustable fonts, search, keyboard shortcuts and editable network-output highlighting.
 - **Controlled automation:** snippet previews, macro review and broadcast input for selected targets.
 - **Workspace protection:** 4–12 digit numeric PINs and password-encrypted workspace backups with a restore preview.
 
@@ -94,7 +102,7 @@ Conxol keeps settings and saved connection data locally. Rust handles connection
 <summary>Platform and protocol limits</summary>
 
 - Native Ping/MTR currently support IPv4 on Windows, macOS, and the Android preview. IPv6 and Linux probing are not implemented; other diagnostic tools have their own supported transports.
-- RDP is experimental and excluded from normal release bundles. VNC uses the packaged native helper; VNC TCP and Telnet are unencrypted.
+- RDP/VNC support has been removed. Existing saved entries are preserved as unsupported. Telnet traffic is unencrypted.
 - RSA private-key authentication is unsupported. RSA-SHA2 server host-signature verification is supported.
 - FTP/FTPS client support depends on the system curl build. External X11 forwarding requires an X server.
 - Package verification does not establish clean-machine installation or interoperability with every network device.
@@ -110,7 +118,7 @@ Conxol keeps settings and saved connection data locally. Rust handles connection
 | Learn the workspace and implementation | [Architecture guide](docs/architecture.md) |
 | Find keyboard controls | [Keyboard shortcuts](docs/keyboard-shortcuts.md) |
 | Run Conxol from source | [Development guide](docs/development.md) |
-| See recent changes | [0.1.60 release notes](docs/release/v0.1.60.md) |
+| See recent changes | [0.1.65 release notes](docs/release/v0.1.65.md) |
 | See what's planned | [Roadmap](ROADMAP.md) |
 | Report a problem or suggest a feature | [GitHub Issues](https://github.com/thetonmoyroy/Conxol/issues/new/choose) |
 
@@ -129,6 +137,8 @@ pnpm --dir apps/desktop tauri dev
 For validation, use `pnpm --dir apps/desktop test:unit`, `cargo xtask check-rust`, or the broader `cargo xtask check`. Protocol fixtures use disposable local state; see [safe testing](docs/security/safe-testing.md).
 
 </details>
+
+Front-page release maintenance: run `node tools/sync-public-release.mjs` after publishing all packages, or `node tools/sync-public-release.mjs --check` to detect stale versions. GitHub Pages runs this synchronization on front-page pushes, published releases, a daily schedule and manual dispatch; package builds remain manual. Feature descriptions still require review when functionality changes.
 
 ## Open source, with credit
 

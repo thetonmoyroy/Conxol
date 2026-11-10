@@ -2,9 +2,20 @@ name: Deploy GitHub Pages
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * *'
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - 'README.md'
+      - 'tools/sync-public-release.mjs'
+      - '.github/workflows/pages.yml'
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -21,6 +32,24 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: main
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+      - name: Sync public release details
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node tools/sync-public-release.mjs
+      - name: Save synchronized front pages
+        run: |
+          git add README.md site/index.html site/docs.html
+          if ! git diff --cached --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git commit -m 'docs: sync front pages with published release'
+            git push origin HEAD:main
+          fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v4
         with:
