@@ -21,6 +21,14 @@ on:
         required: false
         default: false
         type: boolean
+      platform:
+        description: Platforms to publish
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - macos-arm64
 permissions:
   actions: read
   contents: write
@@ -45,13 +53,21 @@ jobs:
         with:
           github-token: ${{ github.token }}
           run-id: ${{ inputs.run_id }}
-          pattern: installers-*
+          pattern: ${{ inputs.platform == 'macos-arm64' && 'installers-macos-arm64' || 'installers-*' }}
           merge-multiple: true
           path: release-assets
       - name: Verify expected files and checksums
+        env:
+          PLATFORM: ${{ inputs.platform }}
         working-directory: release-assets
         run: |
           version="${RELEASE_TAG#v}"
+          if [[ "$PLATFORM" == macos-arm64 ]]; then
+            test "$(find . -maxdepth 1 -type f | wc -l)" -eq 2
+            test -f "Conxol-$version-macos-arm64.dmg"
+            sha256sum -c SHA256SUMS-macos-arm64.txt
+            exit 0
+          fi
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq 7
           test -f "Conxol-$version-macos-arm64.dmg"
           test -f "Conxol-$version-macos-x64.dmg"
@@ -67,9 +83,9 @@ jobs:
           REPLACE_ASSETS: ${{ inputs.replace_assets }}
         run: |
           if [[ "$REPLACE_ASSETS" == true ]]; then
-            gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt --clobber
+            gh release upload "$RELEASE_TAG" ./* --clobber
           else
-            gh release upload "$RELEASE_TAG" ./*.dmg ./*.deb ./*.AppImage ./SHA256SUMS-*.txt
+            gh release upload "$RELEASE_TAG" ./*
           fi
       - name: Verify uploaded asset hashes
         working-directory: release-assets

@@ -427,6 +427,38 @@ fn create_gre_socket() -> io::Result<OwnedFd> {
     Ok(fd)
 }
 
+/// Poll for the single acknowledgement byte instead of changing SO_RCVTIMEO
+/// between requests. Darwin rejects setsockopt after the client has closed,
+/// even if its final acknowledgement is still queued.
+fn read_acknowledgement(stream: &mut UnixStream, byte: &mut [u8; 1]) -> io::Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "GRE acknowledgement timed out",
+            ));
+        }
+        let mut descriptor = libc::pollfd {
+            fd: stream.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        // SAFETY: one initialized pollfd remains live throughout the call.
+        let ready = unsafe { libc::poll(&mut descriptor, 1, remaining.as_millis().max(1) as i32) };
+        if ready > 0 {
+            return stream.read_exact(byte);
+        }
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() != io::ErrorKind::Interrupted {
+                return Err(error);
+            }
+        }
+    }
+}
+
 /// Fixed one-byte protocol. EOF ends retained authority. No paths, addresses,
 /// passwords, or shell commands are accepted over this channel.
 fn serve_socket_requests(
@@ -436,10 +468,9 @@ fn serve_socket_requests(
 ) -> io::Result<()> {
     loop {
         let fd = create()?;
-        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         send_fd(stream, &fd)?;
         let mut acknowledgement = [0];
-        stream.read_exact(&mut acknowledgement)?;
+        read_acknowledgement(stream, &mut acknowledgement)?;
         if acknowledgement != [2] {
             return Err(io::Error::other("Invalid GRE handoff acknowledgement"));
         }
@@ -449,7 +480,6 @@ fn serve_socket_requests(
         }
         // The app's close-on-exec socket closes on exit or crash. The helper
         // has no listener and exits on EOF, without installing a root service.
-        stream.set_read_timeout(None)?;
         let mut request = [0];
         match stream.read_exact(&mut request) {
             Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
