@@ -7,6 +7,10 @@ rust-version.workspace = true
 description = "Private native PPTP/MPPE transport without host VPN routes"
 
 [dependencies]
+aes = { version = "0.9.3", features = ["zeroize"] }
+cbc = { version = "0.2.1", features = ["alloc", "zeroize"] }
+crypto-bigint = { version = "0.7.5", features = ["zeroize"] }
+subtle = "2.6"
 des = "0.8.1"
 md4 = "0.10.2"
 sha1 = "0.10.6"

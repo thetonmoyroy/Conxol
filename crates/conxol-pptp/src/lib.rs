@@ -5,6 +5,7 @@ pub mod control;
 pub mod elevation;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod gre;
+pub mod l2tp;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub mod link;
 #[cfg(any(windows, target_os = "linux", target_os = "macos", test))]
@@ -21,3 +22,5 @@ pub mod diagnostic;
 pub mod elevation;
 
 pub const SUPPORTED: bool = cfg!(any(windows, target_os = "linux", target_os = "macos"));
+
+pub mod ipsec;

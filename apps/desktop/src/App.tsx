@@ -4121,7 +4121,7 @@ function App() {
         <details name="desktop-menu"><summary>Tools</summary><div className="desktop-menu">
           <button onClick={() => setActiveView("files")}>Remote files</button>
           <button onClick={() => setFileTransferOpen(true)}>FTP / TFTP…</button>
-          {!IS_ANDROID && <button onClick={() => setPptpManagerOpen(true)}>PPTP manager…</button>}
+          {!IS_ANDROID && <button onClick={() => setPptpManagerOpen(true)}>PPTP / L2TP manager…</button>}
           <button onClick={() => setDiagnosticsOpen(true)}>Network diagnostics</button>
           <button onClick={() => setActiveView("tunnels")}>SSH tunnels</button>
           <button onClick={() => setActiveView("transfers")}>Transfers</button>
@@ -6166,7 +6166,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           {protocol === "web" ? <>
             <label className="quick-connect-wide">Website URL<input autoFocus required maxLength={8192} value={host} onChange={event => setHost(event.target.value)} placeholder="192.168.88.1 or https://example.com" /><small>Bare IP addresses use HTTP. An explicit HTTP or HTTPS scheme is preserved.</small></label>
             <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} required disabled={connecting || webBusy} />
-            <div className="quick-connect-wide quick-connect-hint"><ShieldCheck size={16} /><span>Open this saved Web session from the sidebar. Its assigned PPTP connection starts automatically using its saved password; traffic stays inside that tunnel.</span></div>
+            <div className="quick-connect-wide quick-connect-hint"><ShieldCheck size={16} /><span>Open this saved Web session from the sidebar. Its assigned PPTP / L2TP connection starts automatically using its saved password; traffic stays inside that tunnel.</span></div>
           </> : protocol === "local" ? <p className="quick-connect-wide">Local shell profile</p> : protocol === "serial" ? (
             <>
               <label className="quick-connect-wide">

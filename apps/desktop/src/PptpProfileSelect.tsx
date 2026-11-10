@@ -14,9 +14,9 @@ export function PptpProfileSelect({ value, profiles, disabled, onChange, labelId
   const id = useId();
   const selected = profiles.find(p => p.id === value);
   const name = (p: Profile) => p.folder ? `${p.folder} / ${p.name}` : p.name;
-  const label = selected ? name(selected) : value ? "Assigned profile unavailable" : required ? "Choose a PPTP profile" : "Direct connection";
+  const label = selected ? name(selected) : value ? "Assigned profile unavailable" : required ? "Choose a PPTP / L2TP profile" : "Direct connection";
   const matches = profiles.filter(p => `${p.folder} ${p.name}`.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase())).sort((a, b) => name(a).localeCompare(name(b)));
-  const options = [{ id: "", name: required ? "Choose a PPTP profile" : "Direct connection", folder: "" }, ...matches.slice(0, 100)];
+  const options = [{ id: "", name: required ? "Choose a PPTP / L2TP profile" : "Direct connection", folder: "" }, ...matches.slice(0, 100)];
   const index = Math.min(active, options.length - 1);
   const place = () => {
     if (!trigger.current) return;
@@ -47,9 +47,9 @@ export function PptpProfileSelect({ value, profiles, disabled, onChange, labelId
       else if (event.key === "Enter") { event.preventDefault(); choose(options[index].id); }
       else if (event.key === "Tab") close();
     }}>
-      <input ref={search} role="combobox" aria-label="Search PPTP profiles" aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-list`} aria-activedescendant={`${id}-option-${index}`} value={query} onChange={event => { setQuery(event.target.value); setActive(0); }} placeholder="Search PPTP profiles…" autoComplete="off" />
-      <div id={`${id}-list`} role="listbox" aria-label="PPTP profiles">{options.map((p, i) => <button key={p.id} id={`${id}-option-${i}`} type="button" role="option" aria-selected={p.id === value} className={i === index ? "active" : ""} tabIndex={-1} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => choose(p.id)}>{name(p)}</button>)}</div>
-      {!matches.length && <small>No matching PPTP profiles</small>}
+      <input ref={search} role="combobox" aria-label="Search PPTP / L2TP profiles" aria-autocomplete="list" aria-expanded="true" aria-controls={`${id}-list`} aria-activedescendant={`${id}-option-${index}`} value={query} onChange={event => { setQuery(event.target.value); setActive(0); }} placeholder="Search PPTP / L2TP profiles…" autoComplete="off" />
+      <div id={`${id}-list`} role="listbox" aria-label="PPTP / L2TP profiles">{options.map((p, i) => <button key={p.id} id={`${id}-option-${i}`} type="button" role="option" aria-selected={p.id === value} className={i === index ? "active" : ""} tabIndex={-1} onMouseDown={event => event.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => choose(p.id)}>{name(p)}</button>)}</div>
+      {!matches.length && <small>No matching PPTP / L2TP profiles</small>}
       {matches.length > 100 && <small>Showing 100 profiles. Type to narrow the list.</small>}
     </div>, document.body)}
   </>;

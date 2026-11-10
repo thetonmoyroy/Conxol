@@ -26,9 +26,46 @@ fn vault_message(error: VaultError) -> String {
         other => other.to_string(),
     }
 }
+#[derive(Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TunnelProtocol {
+    #[default]
+    Pptp,
+    L2tp,
+    L2tpIpsec,
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IpsecCredentials {
+    password: Zeroizing<String>,
+    psk: Zeroizing<String>,
+}
+fn valid_password(value: &str) -> bool {
+    !value.is_empty() && value.encode_utf16().count() <= 256 && !value.contains(['\r', '\n'])
+}
+fn pack_ipsec(
+    password: Zeroizing<String>,
+    psk: Zeroizing<String>,
+) -> Result<Zeroizing<String>, String> {
+    if !valid_password(&password)
+        || psk.is_empty()
+        || psk.len() > 1024
+        || psk.contains(['\r', '\n'])
+    {
+        return Err(
+            "Enter a password (1–256 characters) and PSK (1–1024 bytes) without line breaks."
+                .into(),
+        );
+    }
+    serde_json::to_string(&IpsecCredentials { password, psk })
+        .map(Zeroizing::new)
+        .map_err(|_| "Could not prepare IPsec credentials.".into())
+}
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Profile {
+    #[serde(default)]
+    protocol: TunnelProtocol,
     id: Uuid,
     name: String,
     server: String,
@@ -201,7 +238,11 @@ impl PptpManager {
         start_connection(
             self,
             vault,
-            ConnectRequest { id, password: None },
+            ConnectRequest {
+                id,
+                password: None,
+                psk: None,
+            },
             true,
             run_tunnel,
         )?
@@ -273,6 +314,7 @@ impl PptpManager {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProfileView {
+    protocol: TunnelProtocol,
     id: Uuid,
     name: String,
     server: String,
@@ -284,6 +326,7 @@ pub struct ProfileView {
 }
 fn view(p: &Profile, connection: ConnectionStatus) -> ProfileView {
     ProfileView {
+        protocol: p.protocol,
         id: p.id,
         name: p.name.clone(),
         server: p.server.clone(),
@@ -335,6 +378,8 @@ pub fn pptp_list(manager: State<'_, PptpManager>) -> Result<Snapshot, String> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SaveRequest {
+    #[serde(default)]
+    protocol: TunnelProtocol,
     id: Option<Uuid>,
     name: String,
     server: String,
@@ -342,6 +387,8 @@ pub struct SaveRequest {
     folder: String,
     notes: String,
     password: Option<Zeroizing<String>>,
+    #[serde(default)]
+    psk: Option<Zeroizing<String>>,
     clear_password: bool,
 }
 #[tauri::command]
@@ -371,7 +418,25 @@ fn save_profile(
         return Err("PPTP profile no longer exists. Refresh the manager.".into());
     }
     let old_ref = previous.as_ref().and_then(|p| p.credential_id.clone());
+    if previous
+        .as_ref()
+        .is_some_and(|p| p.protocol != request.protocol)
+        && old_ref.is_some()
+        && !request.clear_password
+        && request.password.is_none()
+    {
+        return Err("Replace or remove saved credentials when changing protocol.".into());
+    }
+    if request.protocol == TunnelProtocol::L2tpIpsec {
+        if request.password.is_some() != request.psk.is_some() {
+            return Err("Enter both the replacement password and PSK, or leave both blank.".into());
+        }
+    } else if request.psk.is_some() {
+        return Err("PSK is only used by L2TP/IPsec.".into());
+    }
+
     let mut p = Profile {
+        protocol: request.protocol,
         id,
         name: request.name.trim().into(),
         server: request.server.trim().into(),
@@ -395,6 +460,11 @@ fn save_profile(
         return Err("Choose a new password or remove the saved password.".into());
     }
     let new_ref = if let Some(password) = request.password {
+        let password = if request.protocol == TunnelProtocol::L2tpIpsec {
+            pack_ipsec(password, request.psk.ok_or("IPsec PSK is required.")?)?
+        } else {
+            password
+        };
         let credential = CredentialId::new(format!("pptp-{}", Uuid::new_v4()))
             .map_err(|_| "Could not prepare PPTP credential.")?;
         vault
@@ -495,6 +565,8 @@ fn delete_profile(
 pub struct ConnectRequest {
     id: Uuid,
     password: Option<Zeroizing<String>>,
+    #[serde(default)]
+    psk: Option<Zeroizing<String>>,
 }
 #[tauri::command]
 pub fn pptp_connect(
@@ -556,8 +628,20 @@ fn start_connection(
         return Err("Up to 16 PPTP tunnels can be connected at once.".into());
     }
     let password = match request.password {
-        Some(secret) => secret,
+        Some(secret) => {
+            if profile.protocol == TunnelProtocol::L2tpIpsec {
+                pack_ipsec(secret, request.psk.ok_or("IPsec PSK is required.")?)?
+            } else {
+                if request.psk.is_some() {
+                    return Err("Unexpected PSK.".into());
+                }
+                secret
+            }
+        }
         None => {
+            if request.psk.is_some() {
+                return Err("Supply password and PSK together.".into());
+            }
             let reference = profile
                 .credential_id
                 .as_deref()
@@ -568,11 +652,18 @@ fn start_connection(
                 .into_zeroizing()
         }
     };
-    if password.is_empty()
-        || password.encode_utf16().count() > 256
-        || password.contains(['\r', '\n'])
-    {
-        return Err("Invalid PPTP password.".into());
+    if profile.protocol == TunnelProtocol::L2tpIpsec {
+        let credentials: IpsecCredentials =
+            serde_json::from_str(&password).map_err(|_| "Replace the saved IPsec credentials.")?;
+        if !valid_password(&credentials.password)
+            || credentials.psk.is_empty()
+            || credentials.psk.len() > 1024
+            || credentials.psk.contains(['\r', '\n'])
+        {
+            return Err("Invalid IPsec credentials.".into());
+        }
+    } else if !valid_password(&password) {
+        return Err("Invalid tunnel password.".into());
     }
     let cancel = Arc::new(AtomicBool::new(false));
     let status = Arc::new(Mutex::new(ConnectionStatus {
@@ -660,6 +751,70 @@ fn run_tunnel(
             return Ok(());
         }
         let server: Ipv4Addr = profile.server.parse()?;
+        if profile.protocol != TunnelProtocol::Pptp {
+            set_stage("Negotiating L2TP and authenticating PPP…");
+            let credentials = if profile.protocol == TunnelProtocol::L2tpIpsec {
+                Some(serde_json::from_str::<IpsecCredentials>(&password)?)
+            } else {
+                None
+            };
+            let mut transport = if let Some(c) = &credentials {
+                set_stage("Authenticating IKEv1 and negotiating IPsec…");
+                conxol_pptp::l2tp::Tunnel::connect_ipsec(server, &c.psk, cancel.clone())?
+            } else {
+                conxol_pptp::l2tp::Tunnel::connect((server, 1701).into(), cancel.clone())?
+            };
+            let auth = ppp::authenticate_io(
+                &mut transport,
+                &profile.username,
+                credentials
+                    .as_ref()
+                    .map_or(password.as_str(), |c| c.password.as_str()),
+            )?;
+            drop(credentials);
+            drop(password);
+            let mut link = Link::negotiate_io(transport, auth, false)?;
+            let mut seed = [0; 8];
+            getrandom::fill(&mut seed)?;
+            let mut stack = Stack::new(
+                link.local_ip,
+                link.peer_ip,
+                link.mtu,
+                u64::from_ne_bytes(seed),
+            );
+            if let Ok(mut s) = status.lock() {
+                s.state = "connected".into();
+                s.message = if profile.protocol == TunnelProtocol::L2tpIpsec {
+                    "Private L2TP/IPsec connected."
+                } else {
+                    "Private L2TP connected (unencrypted)."
+                }
+                .into();
+            }
+            let start = Instant::now();
+            let mut publish = Instant::now();
+            while !cancel.load(Ordering::Acquire) {
+                router.poll(&mut stack);
+                stack.poll(start.elapsed().as_millis() as i64);
+                // Bound each drain so cancellation and incoming control keep progressing.
+                for _ in 0..64 {
+                    let Some(ip) = stack.outgoing() else { break };
+                    link.send_ipv4(&ip)?;
+                }
+                if let Some(ip) = link.poll()? {
+                    stack.ingest(ip);
+                }
+                router.poll(&mut stack);
+                if publish.elapsed() >= Duration::from_secs(1) {
+                    if let Ok(mut s) = status.lock() {
+                        s.sent = link.sent;
+                        s.received = link.received;
+                    }
+                    publish = Instant::now();
+                }
+            }
+            return Ok(());
+        }
         let mut control =
             Control::connect(server).map_err(|e| format!("PPTP TCP control connection: {e}"))?;
         control.set_cancellation(cancel.clone());
@@ -756,6 +911,133 @@ fn run_tunnel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn tunnel_protocol_legacy_default_and_l2tp_persist_without_secrets() {
+        let mut value = serde_json::to_value(profile()).unwrap();
+        value.as_object_mut().unwrap().remove("protocol");
+        let legacy: Profile = serde_json::from_value(value.clone()).unwrap();
+        assert!(legacy.protocol == TunnelProtocol::Pptp);
+        value["protocol"] = serde_json::json!("l2tp");
+        let l2tp: Profile = serde_json::from_value(value.clone()).unwrap();
+        assert!(l2tp.protocol == TunnelProtocol::L2tp);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pptp.json");
+        let mut store = ProfileStore::open(path.clone()).unwrap();
+        store.persist(vec![l2tp]).unwrap();
+        let reopened = ProfileStore::open(path).unwrap();
+        assert!(reopened.profiles[0].protocol == TunnelProtocol::L2tp);
+        assert_eq!(
+            serde_json::to_value(view(&reopened.profiles[0], ConnectionStatus::default())).unwrap()
+                ["protocol"],
+            "l2tp"
+        );
+        value["protocol"] = serde_json::json!("unsupported");
+        assert!(serde_json::from_value::<Profile>(value).is_err());
+    }
+    #[test]
+    fn ipsec_credentials_roundtrip_replacement_clear_and_protocol_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = PptpManager::open(dir.path().join("pptp.json")).unwrap();
+        let lock =
+            crate::workspace_lock::WorkspaceLock::open(dir.path().join("workspace-lock.json"))
+                .unwrap();
+        lock.configure(
+            serde_json::from_value(
+                serde_json::json!({"enabled":true,"currentPin":"","newPin":"1234","idleMinutes":5}),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let vault = NativeVault(lock);
+        let backup = BackupState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
+        let request = |id, password: Option<&str>, psk: Option<&str>, clear_password| SaveRequest {
+            protocol: TunnelProtocol::L2tpIpsec,
+            id,
+            name: "IPsec fixture".into(),
+            server: "192.0.2.1".into(),
+            username: "fixture".into(),
+            folder: "".into(),
+            notes: "".into(),
+            password: password.map(|p| Zeroizing::new(p.into())),
+            psk: psk.map(|p| Zeroizing::new(p.into())),
+            clear_password,
+        };
+        assert!(
+            save_profile(
+                &manager,
+                &vault,
+                &backup,
+                request(None, Some("fixture-password"), None, false)
+            )
+            .is_err()
+        );
+        let id = save_profile(
+            &manager,
+            &vault,
+            &backup,
+            request(None, Some("fixture-password"), Some("fixture-psk"), false),
+        )
+        .unwrap();
+        let reference = manager.store.lock().unwrap().profiles[0]
+            .credential_id
+            .clone()
+            .unwrap();
+        let secret = vault
+            .get(&CredentialId::new(&reference).unwrap())
+            .unwrap()
+            .into_zeroizing();
+        let credentials: IpsecCredentials = serde_json::from_str(&secret).unwrap();
+        assert_eq!(credentials.password.as_str(), "fixture-password");
+        assert_eq!(credentials.psk.as_str(), "fixture-psk");
+        let stored = std::fs::read_to_string(dir.path().join("pptp.json")).unwrap();
+        assert!(!stored.contains("fixture-password"));
+        assert!(!stored.contains("fixture-psk"));
+        save_profile(
+            &manager,
+            &vault,
+            &backup,
+            request(Some(id), None, None, false),
+        )
+        .unwrap();
+        assert_eq!(
+            manager.store.lock().unwrap().profiles[0]
+                .credential_id
+                .as_deref(),
+            Some(reference.as_str())
+        );
+        let mut change = request(Some(id), None, None, false);
+        change.protocol = TunnelProtocol::L2tp;
+        assert!(save_profile(&manager, &vault, &backup, change).is_err());
+        save_profile(
+            &manager,
+            &vault,
+            &backup,
+            request(
+                Some(id),
+                Some("replacement-password"),
+                Some("replacement-psk"),
+                false,
+            ),
+        )
+        .unwrap();
+        assert!(vault.get(&CredentialId::new(reference).unwrap()).is_err());
+        assert_eq!(vault.list_ids().unwrap().len(), 1);
+        save_profile(
+            &manager,
+            &vault,
+            &backup,
+            request(Some(id), None, None, true),
+        )
+        .unwrap();
+        assert!(vault.list_ids().unwrap().is_empty());
+        assert!(
+            pack_ipsec(
+                Zeroizing::new("password".into()),
+                Zeroizing::new("\n".into())
+            )
+            .is_err()
+        );
+    }
     fn simulated_tunnel(
         _: &Profile,
         _: Zeroizing<String>,
@@ -811,6 +1093,7 @@ mod tests {
         let request = || ConnectRequest {
             id: p.id,
             password: None,
+            psk: None,
         };
         let first = start_connection(&manager, &vault, request(), true, simulated_tunnel).unwrap();
         let second = start_connection(&manager, &vault, request(), true, simulated_tunnel).unwrap();
@@ -850,6 +1133,7 @@ mod tests {
             ConnectRequest {
                 id: p.id,
                 password: None,
+                psk: None,
             },
             true,
             failed_tunnel,
@@ -864,6 +1148,7 @@ mod tests {
             ConnectRequest {
                 id: p.id,
                 password: Some(Zeroizing::new("synthetic-password".into())),
+                psk: None,
             },
             true,
             failed_tunnel,
@@ -893,6 +1178,7 @@ mod tests {
             &vault,
             &backup,
             SaveRequest {
+                protocol: TunnelProtocol::Pptp,
                 id: None,
                 name: "Fixture".into(),
                 server: "192.0.2.1".into(),
@@ -900,6 +1186,7 @@ mod tests {
                 folder: "".into(),
                 notes: "".into(),
                 password: Some(Zeroizing::new("synthetic-password".into())),
+                psk: None,
                 clear_password: false,
             },
         )
@@ -918,6 +1205,7 @@ mod tests {
     }
     fn profile() -> Profile {
         Profile {
+            protocol: TunnelProtocol::Pptp,
             id: Uuid::new_v4(),
             name: "Lab".into(),
             server: "192.0.2.1".into(),
@@ -944,6 +1232,7 @@ mod tests {
         let vault = NativeVault(lock);
         let backup = BackupState::new(dir.path().to_path_buf(), dir.path().to_path_buf());
         let request = |id, password: Option<&str>, clear| SaveRequest {
+            protocol: TunnelProtocol::Pptp,
             id,
             name: "Test VPN".into(),
             server: "192.0.2.10".into(),
@@ -951,6 +1240,7 @@ mod tests {
             folder: "Testing".into(),
             notes: "".into(),
             password: password.map(|s| Zeroizing::new(s.into())),
+            psk: None,
             clear_password: clear,
         };
         let id = save_profile(

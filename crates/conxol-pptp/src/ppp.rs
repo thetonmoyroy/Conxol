@@ -93,6 +93,34 @@ pub fn authenticate(
     user: &str,
     password: &str,
 ) -> Result<Authenticated, Box<dyn Error>> {
+    authenticate_io(&mut PptpIo { control, gre, peer }, user, password)
+}
+
+pub trait PppIo {
+    fn send(&mut self, protocol: u16, body: &[u8]) -> std::io::Result<()>;
+    fn receive(&mut self) -> std::io::Result<Option<Vec<u8>>>;
+}
+pub struct PptpIo<'a> {
+    pub control: &'a mut Control,
+    pub gre: &'a mut Gre,
+    pub peer: u16,
+}
+impl PppIo for PptpIo<'_> {
+    fn send(&mut self, protocol: u16, body: &[u8]) -> std::io::Result<()> {
+        self.gre.send(self.peer, protocol, body)
+    }
+    fn receive(&mut self) -> std::io::Result<Option<Vec<u8>>> {
+        if let Some((kind, body)) = self.control.poll()? {
+            self.control.service(kind, &body)?;
+        }
+        self.gre.receive(self.peer)
+    }
+}
+pub fn authenticate_io(
+    io: &mut impl PppIo,
+    user: &str,
+    password: &str,
+) -> Result<Authenticated, Box<dyn Error>> {
     let mut magic = [0u8; 4];
     getrandom::fill(&mut magic)?;
     // 1360 IP + inner PPP protocol + MPPE header = 1364 information bytes.
@@ -111,13 +139,10 @@ pub fn authenticate(
     let mut received_packets = 0u32;
     while Instant::now() < deadline {
         if !local_ack && Instant::now() >= retry {
-            gre.send(peer, LCP, &packet(1, id, &request))?;
+            io.send(LCP, &packet(1, id, &request))?;
             retry = Instant::now() + Duration::from_secs(3);
         }
-        if let Some((kind, body)) = control.poll()? {
-            control.service(kind, &body)?;
-        }
-        let Some(bytes) = gre.receive(peer)? else {
+        let Some(bytes) = io.receive()? else {
             continue;
         };
         received_packets += 1;
@@ -138,7 +163,7 @@ pub fn authenticate(
                         return Err("LCP negotiation limit exceeded".into());
                     }
                     let (reply, options) = peer_config(body).ok_or("invalid LCP options")?;
-                    gre.send(peer, LCP, &packet(reply, remote_id, &options))?;
+                    io.send(LCP, &packet(reply, remote_id, &options))?;
                     remote_ack = reply == 2;
                     if remote_ack {
                         peer_mru = self::options(body)
@@ -186,7 +211,7 @@ pub fn authenticate(
                     retry = Instant::now();
                 }
                 5 => {
-                    gre.send(peer, LCP, &packet(6, remote_id, body))?;
+                    io.send(LCP, &packet(6, remote_id, body))?;
                     return Err("server terminated PPP link".into());
                 }
                 9 => {
@@ -194,7 +219,7 @@ pub fn authenticate(
                     if body.len() > 4 {
                         reply.extend_from_slice(&body[4..]);
                     }
-                    gre.send(peer, LCP, &packet(10, remote_id, &reply))?;
+                    io.send(LCP, &packet(10, remote_id, &reply))?;
                 }
                 _ => {}
             },
@@ -205,7 +230,7 @@ pub fn authenticate(
                     }
                     if let Some((cached_id, challenge, cached)) = &response_cache {
                         if *cached_id == remote_id && challenge == body {
-                            gre.send(peer, CHAP, cached)?;
+                            io.send(CHAP, cached)?;
                             continue;
                         }
                         return Err(
@@ -224,7 +249,7 @@ pub fn authenticate(
                     value.push(0);
                     value.extend_from_slice(user.as_bytes());
                     let reply = Zeroizing::new(packet(2, remote_id, &value));
-                    gre.send(peer, CHAP, &reply)?;
+                    io.send(CHAP, &reply)?;
                     response_cache = Some((remote_id, body.to_vec(), reply));
                     authenticated_challenge = Some((remote_id, response.expected, response.keys));
                     println!(

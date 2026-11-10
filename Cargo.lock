@@ -883,6 +883,9 @@ dependencies = [
 name = "conxol-pptp"
 version = "0.1.65"
 dependencies = [
+ "aes",
+ "cbc",
+ "crypto-bigint",
  "des 0.8.1",
  "getrandom 0.4.3",
  "libc",
@@ -890,6 +893,7 @@ dependencies = [
  "rc4",
  "sha1 0.10.7",
  "smoltcp",
+ "subtle",
  "tokio",
  "windows-sys 0.61.2",
  "zeroize",

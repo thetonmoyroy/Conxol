@@ -2,7 +2,7 @@ use crate::{
     control::Control,
     gre::Gre,
     mppe::Codec,
-    ppp::{Authenticated, decode_packet, decode_ppp, options, packet},
+    ppp::{Authenticated, PppIo, PptpIo, decode_packet, decode_ppp, options, packet},
 };
 use std::{
     error::Error,
@@ -160,11 +160,9 @@ fn ipcp_config(body: &[u8]) -> Result<(u8, Vec<u8>)> {
     }
 }
 
-pub struct Link<'a> {
-    control: &'a mut Control,
-    gre: &'a mut Gre,
-    peer: u16,
-    codec: Codec,
+pub struct Link<T: PppIo> {
+    io: T,
+    codec: Option<Codec>,
     magic: [u8; 4],
     ccp: Ncp,
     ipcp: Ncp,
@@ -176,13 +174,18 @@ pub struct Link<'a> {
     pub encrypted_received: u64,
     pub other_received: u64,
 }
-impl<'a> Link<'a> {
+impl<'a> Link<PptpIo<'a>> {
     pub fn negotiate(
         control: &'a mut Control,
         gre: &'a mut Gre,
         peer: u16,
         auth: Authenticated,
     ) -> Result<Self> {
+        Self::negotiate_io(PptpIo { control, gre, peer }, auth, true)
+    }
+}
+impl<T: PppIo> Link<T> {
+    pub fn negotiate_io(mut io: T, auth: Authenticated, mppe: bool) -> Result<Self> {
         let mut ccp = Ncp::new(CCP);
         let mut ipcp = Ncp::new(IPCP);
         let deadline = Instant::now() + Duration::from_secs(25);
@@ -190,16 +193,16 @@ impl<'a> Link<'a> {
         while Instant::now() < deadline {
             if Instant::now() >= retry {
                 for ncp in [&ccp, &ipcp] {
+                    if !mppe && ncp.protocol == CCP {
+                        continue;
+                    }
                     if !ncp.own_ack {
-                        gre.send(peer, ncp.protocol, &packet(1, ncp.id, &ncp.request))?;
+                        io.send(ncp.protocol, &packet(1, ncp.id, &ncp.request))?;
                     }
                 }
                 retry = Instant::now() + Duration::from_secs(2);
             }
-            if let Some((kind, body)) = control.poll()? {
-                control.service(kind, &body)?;
-            }
-            let Some(bytes) = gre.receive(peer)? else {
+            let Some(bytes) = io.receive()? else {
                 continue;
             };
             let Some((proto, body)) = decode_ppp(&bytes) else {
@@ -212,10 +215,13 @@ impl<'a> Link<'a> {
                 continue;
             };
             match proto {
+                CCP if !mppe => {
+                    io.send(0xc021, &packet(8, id, &[0x80, 0xfd]))?;
+                }
                 CCP | IPCP => {
                     let ncp = if proto == CCP { &mut ccp } else { &mut ipcp };
                     if let Some(reply) = ncp.handle(code, id, body)? {
-                        gre.send(peer, proto, &reply)?;
+                        io.send(proto, &reply)?;
                     }
                     println!(
                         "NCP: {} code {code}; local ack={}, peer ack={}.",
@@ -224,25 +230,25 @@ impl<'a> Link<'a> {
                         ncp.peer_ack
                     );
                 }
-                0xc021 => service_lcp(gre, peer, &auth.magic, code, id, body)?,
+                0xc021 => service_lcp(&mut io, &auth.magic, code, id, body)?,
                 0xc223 if code == 4 => {
                     return Err("server rejected authentication after link setup".into());
                 }
                 _ => {}
             }
-            if ccp.ready() && ipcp.ready() {
+            if (!mppe || ccp.ready()) && ipcp.ready() {
                 let local_ip = ipcp.local_ip().ok_or("no local IPCP address")?;
                 let peer_ip = ipcp.peer_ip.ok_or("server omitted its IPCP address")?;
                 if local_ip == peer_ip {
                     return Err("peer and local IPCP addresses are identical".into());
                 }
-                println!("PASS: stateless 128-bit MPPE negotiated in both directions.");
+                if mppe {
+                    println!("PASS: stateless 128-bit MPPE negotiated in both directions.");
+                }
                 println!("PASS: IPCP assigned private interface and peer addresses (not logged).");
                 return Ok(Self {
-                    control,
-                    gre,
-                    peer,
-                    codec: Codec::new(auth.keys),
+                    io,
+                    codec: mppe.then(|| Codec::new(auth.keys)),
                     magic: auth.magic,
                     ccp,
                     ipcp,
@@ -267,16 +273,16 @@ impl<'a> Link<'a> {
         if ip.len() < 20 || ip.len() > self.mtu || ip[12..16] != self.local_ip.octets() {
             return Err("outbound IP source/size is outside private tunnel".into());
         }
-        let encrypted = self.codec.encrypt_ipv4(ip)?;
-        self.gre.send(self.peer, 0xfd, &encrypted)?;
+        if let Some(codec) = &mut self.codec {
+            self.io.send(0xfd, &codec.encrypt_ipv4(ip)?)?;
+        } else {
+            self.io.send(0x21, ip)?;
+        }
         self.sent += 1;
         Ok(())
     }
     pub fn poll(&mut self) -> Result<Option<Vec<u8>>> {
-        if let Some((kind, body)) = self.control.poll()? {
-            self.control.service(kind, &body)?;
-        }
-        let Some(bytes) = self.gre.receive(self.peer)? else {
+        let Some(bytes) = self.io.receive()? else {
             return Ok(None);
         };
         let Some((proto, body)) = decode_ppp(&bytes) else {
@@ -284,7 +290,11 @@ impl<'a> Link<'a> {
         };
         if proto == 0xfd {
             self.encrypted_received += 1;
-            let decoded = self.codec.decrypt_ipv4(body)?;
+            let decoded = self
+                .codec
+                .as_mut()
+                .ok_or("Unexpected MPPE data")?
+                .decrypt_ipv4(body)?;
             if let Some(ip) = &decoded {
                 if ip[16..20] != self.local_ip.octets() {
                     return Ok(None);
@@ -295,20 +305,29 @@ impl<'a> Link<'a> {
         }
         self.other_received += 1;
         if proto == 0x21 {
-            return Err("unencrypted IPv4 rejected; MPPE is required".into());
+            if self.codec.is_some() {
+                return Err("unencrypted IPv4 rejected; MPPE is required".into());
+            }
+            if body.len() >= 20
+                && body.len() <= self.mtu
+                && body[0] >> 4 == 4
+                && body[16..20] == self.local_ip.octets()
+            {
+                self.received += 1;
+                return Ok(Some(body.to_vec()));
+            }
+            return Ok(None);
         }
         let Some((code, id, body)) = decode_packet(body) else {
             return Ok(None);
         };
         match proto {
-            0xc021 => service_lcp(self.gre, self.peer, &self.magic, code, id, body)?,
+            0xc021 => service_lcp(&mut self.io, &self.magic, code, id, body)?,
             CCP | IPCP => {
                 let ncp = if proto == CCP { &self.ccp } else { &self.ipcp };
                 match code {
-                    1 if ncp.repeats_peer(id, body) => {
-                        self.gre.send(self.peer, proto, &packet(2, id, body))?
-                    }
-                    14 if proto == CCP => self.gre.send(self.peer, proto, &packet(15, id, body))?,
+                    1 if ncp.repeats_peer(id, body) => self.io.send(proto, &packet(2, id, body))?,
+                    14 if proto == CCP => self.io.send(proto, &packet(15, id, body))?,
                     2 | 15 => {}
                     _ => {
                         return Err(
@@ -323,24 +342,17 @@ impl<'a> Link<'a> {
         Ok(None)
     }
 }
-fn service_lcp(
-    gre: &mut Gre,
-    peer: u16,
-    magic: &[u8; 4],
-    code: u8,
-    id: u8,
-    body: &[u8],
-) -> Result<()> {
+fn service_lcp(io: &mut impl PppIo, magic: &[u8; 4], code: u8, id: u8, body: &[u8]) -> Result<()> {
     match code {
         9 => {
             let mut reply = magic.to_vec();
             if body.len() > 4 {
                 reply.extend_from_slice(&body[4..]);
             }
-            gre.send(peer, 0xc021, &packet(10, id, &reply))?;
+            io.send(0xc021, &packet(10, id, &reply))?;
         }
         5 => {
-            gre.send(peer, 0xc021, &packet(6, id, body))?;
+            io.send(0xc021, &packet(6, id, body))?;
             return Err("server terminated PPP link".into());
         }
         1 | 6 | 7 | 8 => return Err("PPP link restarted or rejected required protocol".into()),
