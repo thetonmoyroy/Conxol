@@ -375,6 +375,77 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "Child entry for the explicitly invoked sudo loopback fixture"]
+    fn privileged_sender_child() {
+        let Ok(path) = std::env::var("CONXOL_PPTP_FIXTURE_SOCKET") else {
+            return;
+        };
+        let uid = std::env::var("CONXOL_PPTP_FIXTURE_UID").unwrap();
+        helper(&[MODE.into(), path, uid]).expect("privileged GRE helper");
+    }
+
+    #[test]
+    #[ignore = "Requires passwordless sudo; creates only a loopback GRE socket"]
+    fn privileged_descriptor_handoff_to_unprivileged_app() {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let rendezvous = Rendezvous(directory);
+        let path = rendezvous.0.join("socket");
+        let listener = UnixListener::bind(&path).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut child = Command::new("/usr/bin/sudo")
+            .args(["-n", "/usr/bin/env"])
+            .arg(format!("CONXOL_PPTP_FIXTURE_SOCKET={}", path.display()))
+            .arg(format!("CONXOL_PPTP_FIXTURE_UID={}", unsafe {
+                libc::geteuid()
+            }))
+            .arg(std::env::current_exe().unwrap())
+            .args([
+                "--ignored",
+                "--exact",
+                "elevation::tests::privileged_sender_child",
+                "--nocapture",
+            ])
+            .spawn()
+            .unwrap();
+        let result = (|| -> io::Result<()> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        assert_eq!(peer_uid(&stream).expect("root peer identity"), 0);
+                        stream
+                            .set_read_timeout(Some(Duration::from_secs(2)))
+                            .expect("timeout");
+                        let fd = receive_fd(&stream).expect("receive root GRE descriptor");
+                        Gre::from_socket(fd, Ipv4Addr::LOCALHOST, Ipv4Addr::LOCALHOST, 1)
+                            .expect("configure transferred GRE socket");
+                        return Ok(());
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
+                    Err(e) => return Err(e),
+                }
+                if Instant::now() >= deadline {
+                    return Err(io::Error::other("fixture timed out"));
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        })();
+        if result.is_err() {
+            let _ = child.kill();
+        }
+        let exit = child.wait().unwrap();
+        result.unwrap();
+        assert!(exit.success());
+    }
+
+    #[test]
     fn descriptor_round_trip_is_owned_and_cloexec() {
         let (sender, receiver) = UnixStream::pair().unwrap();
         let (data, mut peer) = UnixStream::pair().unwrap();
