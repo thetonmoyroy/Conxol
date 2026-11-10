@@ -36,6 +36,8 @@ jobs:
           workspaces: |
             . -> target
             tools/vnc-helper -> target
+      - name: Test native PPTP handoff
+        run: cargo test --locked -p conxol-pptp --lib -- --nocapture
       - name: Install frontend dependencies
         run: pnpm install --dir apps/desktop --frozen-lockfile
       - name: Check frontend and release tooling

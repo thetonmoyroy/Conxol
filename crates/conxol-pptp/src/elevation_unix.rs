@@ -21,6 +21,10 @@ use std::{
     time::{Duration, Instant},
 };
 
+fn context(operation: &'static str) -> impl FnOnce(io::Error) -> io::Error {
+    move |error| io::Error::new(error.kind(), format!("{operation}: {error}"))
+}
+
 const MODE: &str = "--conxol-pptp-gre-unix";
 
 struct Rendezvous(PathBuf);
@@ -215,11 +219,16 @@ pub fn open_gre(
     let name: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     // /tmp is shared by the GUI and elevated process (unlike macOS per-user TMPDIR).
     let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
-    fs::DirBuilder::new().mode(0o700).create(&directory)?;
+    fs::DirBuilder::new()
+        .mode(0o700)
+        .create(&directory)
+        .map_err(context("create handoff directory"))?;
     let rendezvous = Rendezvous(directory);
     let path = rendezvous.0.join("socket");
-    let listener = UnixListener::bind(&path)?;
-    listener.set_nonblocking(true)?;
+    let listener = UnixListener::bind(&path).map_err(context("bind handoff listener"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(context("configure handoff listener"))?;
     // SAFETY: geteuid has no arguments or side effects.
     let uid = unsafe { libc::geteuid() };
     let mut child = launch(&path, uid).map_err(|_| io::Error::other("Could not request PPTP permission. Linux requires pkexec and a running polkit authentication agent; macOS requires administrator approval."))?;
@@ -240,20 +249,26 @@ pub fn open_gre(
             }
             match listener.accept() {
                 Ok((stream, _)) => {
-                    if peer_uid(&stream)? != 0 {
+                    if peer_uid(&stream).map_err(context("verify helper identity"))? != 0 {
                         return Err(io::Error::new(
                             io::ErrorKind::PermissionDenied,
                             "Unexpected GRE helper identity",
                         ));
                     }
-                    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
-                    let fd = receive_fd(&stream)?;
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .map_err(context("configure handoff timeout"))?;
+                    let fd = receive_fd(&stream).map_err(context("receive GRE descriptor"))?;
                     return Gre::from_socket(fd, local, remote, call);
                 }
                 Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
-                Err(e) => return Err(e),
+                Err(e) => return Err(context("accept helper connection")(e)),
             }
-            if child.try_wait()?.is_some() {
+            if child
+                .try_wait()
+                .map_err(context("check helper process"))?
+                .is_some()
+            {
                 return Err(io::Error::new(
                     io::ErrorKind::PermissionDenied,
                     "PPTP administrator permission was cancelled or unavailable",
@@ -326,6 +341,39 @@ fn helper(args: &[String]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn named_handoff_checks_identity_timeout_and_descriptor() {
+        let mut random = [0u8; 16];
+        getrandom::fill(&mut random).unwrap();
+        let name: String = random.iter().map(|b| format!("{b:02x}")).collect();
+        let directory = PathBuf::from(format!("/tmp/conxol-gre-{name}"));
+        fs::DirBuilder::new()
+            .mode(0o700)
+            .create(&directory)
+            .unwrap();
+        let rendezvous = Rendezvous(directory);
+        let path = rendezvous.0.join("socket");
+        let listener = UnixListener::bind(&path).expect("bind listener");
+        listener
+            .set_nonblocking(true)
+            .expect("nonblocking listener");
+        let sender = UnixStream::connect(&path).expect("connect sender");
+        let (receiver, _) = listener.accept().expect("accept sender");
+        assert_eq!(peer_uid(&receiver).expect("sender credentials"), unsafe {
+            libc::geteuid()
+        });
+        assert_eq!(peer_uid(&sender).expect("listener credentials"), unsafe {
+            libc::geteuid()
+        });
+        receiver
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("receive timeout");
+        let (data, _peer) = UnixStream::pair().unwrap();
+        send_fd(&sender, &data.into()).expect("send descriptor");
+        drop(sender);
+        receive_fd(&receiver).expect("receive after helper exit");
+    }
+
     #[test]
     fn descriptor_round_trip_is_owned_and_cloexec() {
         let (sender, receiver) = UnixStream::pair().unwrap();
