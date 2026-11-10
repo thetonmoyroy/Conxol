@@ -17,9 +17,6 @@ jobs:
           - runner: macos-15
             platform: macos-arm64
             arch: arm64
-          - runner: macos-15-intel
-            platform: macos-x64
-            arch: x86_64
     runs-on: ${{ matrix.runner }}
     env:
       CI: 'true'

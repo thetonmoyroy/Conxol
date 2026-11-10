@@ -55,3 +55,19 @@ jobs:
           cd macos-assets
           for manifest in SHA256SUMS-macos-*.txt; do sha256sum -c "$manifest"; done
           gh release upload "v$version" ./*.dmg ./SHA256SUMS-macos-*.txt --clobber
+      - name: Verify uploaded asset hashes
+        working-directory: macos-assets
+        run: |
+          version=$(node -p "require('../apps/desktop/package.json').version")
+          gh api "repos/$GH_REPO/releases/tags/v$version" > release.json
+          python3 - <<'PYTHON'
+          import hashlib, json
+          from pathlib import Path
+          assets = {a['name']: a for a in json.loads(Path('release.json').read_text())['assets']}
+          for path in Path('.').iterdir():
+              if path.name == 'release.json':
+                  continue
+              expected = 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+              assert assets[path.name]['digest'] == expected, path.name
+              print('Verified uploaded bytes:', path.name)
+          PYTHON
