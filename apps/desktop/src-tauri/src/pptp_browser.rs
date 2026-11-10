@@ -90,6 +90,7 @@ fn trace(
         state.error = format!("{host}:{port}: {detail}");
     }
 }
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn resize_content(child: &tauri::Webview, diagnostics: bool) -> tauri::Result<()> {
     let size = child.window().inner_size()?;
     let scale = child.window().scale_factor()?;
@@ -326,6 +327,7 @@ fn remove_tab(snapshot: &mut BrowserSnapshot, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show_active(app: &tauri::AppHandle, state: &Shared) -> Result<(), String> {
     let (tabs, active, diagnostics) = {
         let state = state.lock().unwrap();
@@ -348,6 +350,7 @@ fn show_active(app: &tauri::AppHandle, state: &Shared) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn create_tab(
     app: &tauri::AppHandle,
     label: &str,
@@ -723,6 +726,7 @@ pub fn pptp_browser_snapshot(
     Ok(snapshot)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 #[tauri::command]
 pub async fn pptp_browser_control(
     app: tauri::AppHandle,
@@ -908,4 +912,21 @@ mod tests {
         assert_eq!(reply, [5, 4, 0, 1, 0, 0, 0, 0, 0, 0]);
         assert!(server.await.unwrap().is_err());
     }
+}
+
+// Child webviews and their proxy/bounds APIs are desktop-only in Tauri.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn resize_content(_child: &tauri::Webview, _diagnostics: bool) -> tauri::Result<()> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "PPTP browser requires Windows WebView2").into())
+}
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn create_tab(_app: &tauri::AppHandle, _label: &str, _state: &Shared, _destination: &str) -> Result<(), String> {
+    Err("PPTP browser requires Windows WebView2".into())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+#[tauri::command]
+pub async fn pptp_browser_control(app: tauri::AppHandle, webview: tauri::Webview, action: String, tab_id: Option<String>) -> Result<(), String> {
+    let _ = (app, webview, action, tab_id);
+    Err("PPTP browser requires Windows WebView2".into())
 }
