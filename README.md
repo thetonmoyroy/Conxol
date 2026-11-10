@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/assets/conxol-desktop-preview.jpg" alt="Conxol desktop app showing the Huawei configuration generator with interface, VLAN and BGP service rows." width="100%" />
+<img src="docs/assets/conxol-desktop-preview.svg" alt="Generated SVG preview of Conxol with saved sessions, split SSH terminals and router configuration. Illustrated sample data." width="100%" />
 
 # Conxol
 
