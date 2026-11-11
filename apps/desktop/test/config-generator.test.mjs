@@ -385,6 +385,22 @@ for (const [start, end, step, expected] of [
   assert.equal(result.text.split('\n').at(-2), `interface eth 0/${Number(start) + (expected - 1) * Number(step)}`);
 }
 
+// Optional Junos descriptions must preserve complete commands in both scopes.
+for (const template of [juniperTemplate, juniperLogicalTemplate]) {
+  const row = builtinRows(template.id)[0];
+  const scope = template === juniperLogicalTemplate ? `logical-systems ${row.logical_system} ` : '';
+  const unit = `set ${scope}interfaces ${row.interface} unit ${row.vlan}`;
+  for (const description of ['', 'Customer uplink']) {
+    const result = renderCombined(template, [{ ...row, interface_description: description }], prefixRows());
+    assert.deepEqual(result.errors, []);
+    const lines = result.text.split('\n');
+    assert.ok(lines.includes(`${unit} vlan-id ${row.vlan}`), 'VLAN command must remain a separate line');
+    assert.equal(lines.includes(`${unit} description ${description}`), Boolean(description));
+    assert.ok(!lines.some(line => /\dset /.test(line)), 'commands must not be joined');
+    assert.ok(!lines.includes(unit), 'empty descriptions must omit the entire command');
+  }
+}
+
 // Description fields must affect the generated commands on every built-in platform.
 for (const template of builtinTemplates) {
   assert.ok(serviceFields(template).includes('interface_description'));

@@ -23,7 +23,7 @@ export const ciscoTemplate: ConfigTemplate = {
   },
 };
 const juniperText = `set interfaces {{interface}} vlan-tagging
-set interfaces {{interface}} unit {{vlan}}{{#interface_description}} description {{interface_description}}
+{{#interface_description}}set interfaces {{interface}} unit {{vlan}} description {{interface_description}}
 {{/interface_description}}set interfaces {{interface}} unit {{vlan}} vlan-id {{vlan}}
 set interfaces {{interface}} unit {{vlan}} family inet address {{ip}}/{{prefix_length}}
 set routing-instances {{vpn}} instance-type virtual-router
