@@ -93,7 +93,12 @@ pub fn authenticate(
     user: &str,
     password: &str,
 ) -> Result<Authenticated, Box<dyn Error>> {
-    authenticate_io(&mut PptpIo { control, gre, peer }, user, password)
+    authenticate_with_mru(
+        &mut PptpIo { control, gre, peer },
+        user,
+        password,
+        crate::PPTP_MRU as u16,
+    )
 }
 
 pub trait PppIo {
@@ -121,10 +126,22 @@ pub fn authenticate_io(
     user: &str,
     password: &str,
 ) -> Result<Authenticated, Box<dyn Error>> {
+    // Preserve the existing L2TP receive limit; PPTP uses its larger MRU above.
+    authenticate_with_mru(io, user, password, 1364)
+}
+
+fn authenticate_with_mru(
+    io: &mut impl PppIo,
+    user: &str,
+    password: &str,
+    receive_mru: u16,
+) -> Result<Authenticated, Box<dyn Error>> {
     let mut magic = [0u8; 4];
     getrandom::fill(&mut magic)?;
-    // 1360 IP + inner PPP protocol + MPPE header = 1364 information bytes.
-    let mut request = vec![1, 4, 5, 0x54, 5, 6];
+    // Include the encrypted inner protocol and MPPE header in the receive MRU.
+    let mut request = vec![1, 4];
+    request.extend_from_slice(&receive_mru.to_be_bytes());
+    request.extend_from_slice(&[5, 6]);
     request.extend_from_slice(&magic);
     let mut id = 1u8;
     let mut local_ack = false;

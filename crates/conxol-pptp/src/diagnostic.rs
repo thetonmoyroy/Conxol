@@ -94,10 +94,10 @@ impl DiagnosticConnector {
         ttl: u8,
         timeout: Duration,
     ) -> io::Result<ProbeReply> {
-        if ttl == 0 || size > 1332 {
+        if ttl == 0 || size > crate::MAX_PING_PAYLOAD {
             return Err(error(
                 io::ErrorKind::InvalidInput,
-                "PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).",
+                "PPTP Ping payload must fit the tunnel MTU (at most 1422 bytes).",
             ));
         }
         self.probe(host, Kind::Echo { size, ttl }, timeout).await

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
-import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "../src/terminal-session-close.ts";
+import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionReconnectStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "../src/terminal-session-close.ts";
 
 assert.equal(remoteSessionCloseError("ssh", "closed"), null);
+for (const protocol of ["telnet", "serial"]) {
+  assert.equal(remoteSessionReconnectStatus(protocol, "remote disconnected"), "error", "manual reconnect must expose the button and R shortcut");
+  for (const reason of [undefined, null, "", "  "]) {
+    assert.equal(remoteSessionReconnectStatus(protocol, reason), "reconnecting", "a real reconnect attempt must not allow duplicate retries");
+  }
+}
+assert.equal(remoteSessionReconnectStatus("ssh", "remote disconnected"), "reconnecting", "SSH automatic retry must remain in progress");
 assert.equal(remoteSessionCloseError("serial", "closed by application"), null);
 assert.equal(remoteSessionCloseError(null, "connection failed"), null);
 assert.equal(

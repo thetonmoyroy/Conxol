@@ -126,7 +126,7 @@ probe; do not expose this launcher or legacy authentication as a supported UI.
   private default route. These routes exist exclusively inside this Rust
   object; no host interface or route API is called. Packet queues are limited
   to 32 packets; one TCP test uses fixed 64 KiB send/receive buffers. The
-  outgoing MTU respects the peer's MRU and caps at 1360 bytes. No OS DNS resolver
+  outgoing PPTP MTU respects the peer's MRU and caps at 1450 bytes. No OS DNS resolver
   is called and no unencrypted fallback socket is created for tunnel traffic.
 - Default live mode sends at most three encrypted ICMP requests to the
   negotiated VPN peer, with a random identifier/payload and a ten-second traffic
@@ -179,6 +179,16 @@ remain separate work. Windows raw GRE still requires
 administrator permission for socket creation, requested via UAC when needed.
 
 ## Desktop manager
+
+PPTP control reads use a zero-timeout socket readiness check (WSAPoll on
+Windows, poll on Linux/macOS) before reading. An idle control connection no
+longer adds its 10 ms read timeout before each GRE receive. Setup-only control
+waits sleep briefly between empty polls; GRE receive timeouts still pace idle
+tunnels. Existing bounded control writes, fragmented-frame parsing, keepalive
+responses, peer-close detection and cancellation are preserved. Local loopback
+regressions cover 100 idle polls without the accumulated read-timeout delay,
+fragmented/coalesced control messages, echo replies and peer shutdown. These
+checks do not establish live VPN throughput.
 
 Tools > PPTP manager opens a resizable React dialog inside the existing Tauri
 application. It supports up to 2000 profiles, folder organization, search over
@@ -357,7 +367,7 @@ random payloads, checksums, endpoints and quoted errors are correlated before
 accepting replies. MTR varies the inner TTL and reports cumulative per-hop
 latency/loss; this observes hops beyond the PPTP endpoint, not the outer Internet
 path to that endpoint. Devices may suppress ICMP time-exceeded/echo replies.
-Ping payloads must fit the negotiated MTU, at most 1332 bytes; fragmentation is
+Ping payloads must fit the negotiated MTU, at most 1422 bytes; fragmentation is
 not enabled. Tunnel loss fails the tool without direct-network fallback, and
 Stop cancels queued/pending work. Stopping a tool leaves the shared tunnel alive.
 

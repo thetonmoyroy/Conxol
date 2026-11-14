@@ -1,6 +1,9 @@
 import { terminalOutputText, terminalOutputFilename } from "./terminal-output-export";
 import { createSavedWebSession } from "./saved-web-session";
 import { PptpAttachment } from "./PptpAttachment";
+import { DiagnosticHistory } from "./DiagnosticHistory";
+import type { DiagnosticLog, DiagnosticLogRun } from "./diagnostic-autosave";
+import { LiveDiagnosticTabs } from "./LiveDiagnosticTabs";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { attachTerminalGpuRenderer } from "./terminal-gpu-renderer";
 import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalTouchPan } from "./terminal-mobile-layout";
@@ -63,7 +66,7 @@ import { createSshAuthHandler, type SshAuthEvent } from "./ssh-authentication";
 import { parseTunnelPort } from "./tunnel-port";
 import { retainOperationHistory } from "./operation-history";
 import { chooseOverwrite, confirmAction, confirmSessionStartup, promptText } from "./text-prompt";
-import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "./terminal-session-close";
+import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionReconnectStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "./terminal-session-close";
 import { cachedTheme, terminalThemes, themeMode, workspaceTheme, appThemeVariables, type ThemePreference, type ColorTheme } from "./theme";
 import { isRemoteMonitorRefreshInterval, REMOTE_MONITOR_REFRESH_INTERVALS } from "./remote-monitor";
 import { remoteChildPath, remoteParentPath } from "./remote-path";
@@ -86,7 +89,6 @@ import {
 } from "./macro-recording";
 import { isCurrentSessionRequest } from "./session-request";
 import { resolveSavedJumpAlias } from "./saved-jump-alias";
-import { acceptNetworkDiagnosticEvent, acceptNetworkDiagnosticResponse, beginNetworkDiagnostic, failNetworkDiagnosticStart, requestNetworkDiagnosticCancel, takePendingNetworkDiagnosticCancel, type NetworkDiagnosticRun } from "./network-diagnostic-lifecycle";
 import {
   Activity,
   LockKeyhole,
@@ -648,32 +650,6 @@ type NetworkScanEvent = {
   error?: string | null;
 };
 
-type PingResult = {
-  host: string;
-  sent: number;
-  received: number;
-  elapsedMs: number;
-  intervalMs: number;
-  packetSize: number;
-  lines: string[];
-};
-
-type TracerouteResult = {
-  host: string;
-  reached: boolean;
-  hops: string[];
-  elapsedMs: number;
-};
-
-type NetworkDiagnosticEvent = {
-  operationId: string;
-  kind: "ping" | "mtr";
-  state: "running" | "completed" | "cancelled" | "failed";
-  ping?: PingResult | null;
-  traceroute?: TracerouteResult | null;
-  error?: string | null;
-};
-
 const previewSessions: SessionListItem[] = [
   { name: "Local workstation", detail: "zsh · localhost", type: "LOCAL", folder: "Local terminals", active: true, favorite: true, tags: ["local"], lastUsedAt: 3 },
   { name: "Production bastion", detail: "ops@bastion.example", type: "SSH", folder: "Production", active: false, favorite: true, tags: ["production"], lastUsedAt: 2 },
@@ -950,9 +926,10 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
             hasReportedRemoteError = false;
             onStatusChange(workspaceId, "connected");
           } else if (state === "reconnecting") {
-            reportStateError("reconnecting", error);
+            const status = remoteSessionReconnectStatus(remoteProtocol, error);
+            reportStateError(status === "error" ? "failed" : "reconnecting", error);
             if (!error) hasReportedRemoteError = false;
-            onStatusChange(workspaceId, "reconnecting");
+            onStatusChange(workspaceId, status);
           } else if (state === "failed") {
             reportStateError("failed", error);
             onStatusChange(workspaceId, "error");
@@ -1201,6 +1178,7 @@ function App() {
 
   const [activeView, setActiveView] = useState<View>("home");
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+  const [diagnosticsStopGeneration, setDiagnosticsStopGeneration] = useState(0);
   const [terminalTabs, setTerminalTabs] = useState<WorkspaceTerminal[]>([]);
   const [activeTerminalId, setActiveTerminalId] = useState("");
   const [terminalLayout, setTerminalLayout] = useState<TerminalLayoutNode>({ kind: "pane", terminalId: "" });
@@ -1389,13 +1367,6 @@ function App() {
   const [networkResult, setNetworkResult] = useState<TcpConnectReport | null>(null);
   const [networkFingerprint, setNetworkFingerprint] = useState<SshHostKeyInspection | null>(null);
   const [networkError, setNetworkError] = useState<string | null>(null);
-  const [networkDiagnosticKind, setNetworkDiagnosticKind] = useState<"ping" | "mtr" | null>(null);
-  const [networkDiagnosticStatus, setNetworkDiagnosticStatus] = useState<"idle" | "running" | "completed" | "cancelled" | "failed">("idle");
-  const [pingInterval, setPingInterval] = useState("1000");
-  const [pingPacketSize, setPingPacketSize] = useState("32");
-  const [networkPingResult, setNetworkPingResult] = useState<PingResult | null>(null);
-  const [networkMtrResult, setNetworkMtrResult] = useState<TracerouteResult | null>(null);
-  const [networkTraceMaxHops, setNetworkTraceMaxHops] = useState("8");
   const [networkScanId, setNetworkScanId] = useState<string | null>(null);
   const [networkScanStatus, setNetworkScanStatus] = useState<"idle" | "running" | "completed" | "cancelled" | "failed">("idle");
   const [networkScanProtocol, setNetworkScanProtocol] = useState<"tcp" | "udp">("tcp");
@@ -1410,7 +1381,6 @@ function App() {
   const [networkScanTotal, setNetworkScanTotal] = useState(0);
   const [networkScanResults, setNetworkScanResults] = useState<TcpCheckResult[]>([]);
   const networkScanIdRef = useRef<string | null>(null);
-  const networkDiagnosticRunRef = useRef<NetworkDiagnosticRun>({ generation: 0, currentId: null, finishedId: null, ignoredId: null, starting: false, cancelRequested: false });
   const nativeTerminalIdsRef = useRef(new Map<string, string>());
   const terminalInputQueueRef = useRef(new TerminalInputQueue());
   const terminalInstancesRef = useRef(new Map<string, { terminal: Terminal; searchAddon: SearchAddon }>());
@@ -2838,8 +2808,8 @@ function App() {
 
   const reconnectBusyRef = useRef(false);
   const [reconnectBusy, setReconnectBusy] = useState(false);
-  const reconnectSelectedTerminal = useCallback(async () => {
-    const terminal = terminalTabsRef.current.find(item => item.id === selectedTerminalIdRef.current);
+  const reconnectSelectedTerminal = useCallback(async (terminalId?: string) => {
+    const terminal = terminalTabsRef.current.find(item => item.id === (terminalId ?? selectedTerminalIdRef.current));
     if (reconnectBusyRef.current || isWorkspaceLocked() || !terminal || !canReconnectTerminal(terminal.remoteProtocol, terminal.status, terminal.connecting)) return;
     reconnectBusyRef.current = true;
     setReconnectBusy(true);
@@ -3560,109 +3530,6 @@ function App() {
     }
   }, [networkPptpProfileId, networkHost, networkPort, networkTimeout]);
 
-  const cancelNetworkDiagnosticId = useCallback(async (operationId: string) => {
-    try {
-      await invoke("network_diagnostic_cancel", { operationId });
-    } catch (error) {
-      setNetworkError(`Diagnostic cancellation failed: ${String(error)}`);
-    }
-  }, []);
-
-  const startNetworkPing = useCallback(async () => {
-    const host = networkHost.trim();
-    const timeoutMs = Number(networkTimeout);
-    if (!host) {
-      setNetworkError("Enter an explicit hostname or IP address.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    if (!Number.isInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > 60_000) {
-      setNetworkError("Timeout must be an integer between 50 and 60000 milliseconds.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    const intervalMs = Number(pingInterval), packetSize = Number(pingPacketSize);
-    if (!Number.isInteger(intervalMs) || intervalMs < 200 || intervalMs > 60000 || !Number.isInteger(packetSize) || packetSize < 0 || packetSize > 65500 || !pingInterval.trim() || !pingPacketSize.trim()) {
-      setNetworkError("Ping interval must be 200–60000 ms and packet size must be 0–65500 payload bytes.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    if (!IS_TAURI) {
-      setNetworkError("Network diagnostics require the desktop runtime.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    const run = networkDiagnosticRunRef.current;
-    const pending = beginNetworkDiagnostic(run);
-    if (!pending) return;
-    if (pending.cancelId) await invoke("network_diagnostic_cancel", { operationId: pending.cancelId }).catch(() => undefined);
-    if (run.generation !== pending.generation) return;
-    setNetworkDiagnosticKind("ping");
-    setNetworkDiagnosticStatus("running");
-    setNetworkPingResult(null);
-    setNetworkError(null);
-    try {
-      const response = await invoke<{ operationId: string }>("network_ping_start", { request: { pptpProfileId: networkPptpProfileId || undefined, host, timeoutMs, intervalMs, packetSize } });
-      if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
-        const cancelId = takePendingNetworkDiagnosticCancel(run);
-        if (cancelId) void cancelNetworkDiagnosticId(cancelId);
-      }
-    } catch (error) {
-      if (failNetworkDiagnosticStart(run, pending.generation)) {
-        setNetworkDiagnosticStatus("failed");
-        setNetworkError(String(error));
-      }
-    }
-  }, [networkPptpProfileId, cancelNetworkDiagnosticId, networkHost, networkTimeout, pingInterval, pingPacketSize]);
-
-  const startNetworkMtr = useCallback(async () => {
-    const host = networkHost.trim();
-    const timeoutMs = Number(networkTimeout);
-    const maxHops = Number(networkTraceMaxHops);
-    if (!host) {
-      setNetworkError("Enter an explicit hostname or IP address.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    if (!Number.isInteger(timeoutMs) || timeoutMs < 50 || timeoutMs > 60_000 || !Number.isInteger(maxHops) || maxHops < 1 || maxHops > 32) {
-      setNetworkError("Timeout must be 50–60000 ms and max hops must be between 1 and 32.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    if (!IS_TAURI) {
-      setNetworkError("Network diagnostics require the desktop runtime.");
-      setNetworkDiagnosticStatus("failed");
-      return;
-    }
-    const run = networkDiagnosticRunRef.current;
-    const pending = beginNetworkDiagnostic(run);
-    if (!pending) return;
-    if (pending.cancelId) await invoke("network_diagnostic_cancel", { operationId: pending.cancelId }).catch(() => undefined);
-    if (run.generation !== pending.generation) return;
-    setNetworkDiagnosticKind("mtr");
-    setNetworkDiagnosticStatus("running");
-    setNetworkMtrResult(null);
-    setNetworkError(null);
-    try {
-      const response = await invoke<{ operationId: string }>("network_mtr_start", { request: { pptpProfileId: networkPptpProfileId || undefined, host, timeoutMs: 60000, maxHops } });
-      if (acceptNetworkDiagnosticResponse(run, pending.generation, response.operationId)) {
-        const cancelId = takePendingNetworkDiagnosticCancel(run);
-        if (cancelId) void cancelNetworkDiagnosticId(cancelId);
-      }
-    } catch (error) {
-      if (failNetworkDiagnosticStart(run, pending.generation)) {
-        setNetworkDiagnosticStatus("failed");
-        setNetworkError(String(error));
-      }
-    }
-  }, [networkPptpProfileId, cancelNetworkDiagnosticId, networkHost, networkTimeout, networkTraceMaxHops]);
-
-  const cancelNetworkDiagnostic = useCallback(async () => {
-    if (!IS_TAURI) return;
-    const operationId = requestNetworkDiagnosticCancel(networkDiagnosticRunRef.current);
-    if (operationId) await cancelNetworkDiagnosticId(operationId);
-  }, [cancelNetworkDiagnosticId]);
-
   const startNetworkScan = useCallback(async () => {
     const host = networkHost.trim();
     const startPort = Number(networkScanStart);
@@ -3800,37 +3667,7 @@ function App() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!IS_TAURI) return;
-    let disposed = false;
-    let unlisten: UnlistenFn | undefined;
-    void listen<NetworkDiagnosticEvent>("network://diagnostic", (event) => {
-      const payload = event.payload;
-      if (!acceptNetworkDiagnosticEvent(networkDiagnosticRunRef.current, payload.operationId, payload.state !== "running")) return;
-      if (payload.state === "running") {
-        const cancelId = takePendingNetworkDiagnosticCancel(networkDiagnosticRunRef.current);
-        if (cancelId) void cancelNetworkDiagnosticId(cancelId);
-      }
-      setNetworkDiagnosticKind(payload.kind);
-      setNetworkDiagnosticStatus(payload.state);
-      if (payload.ping) setNetworkPingResult(payload.ping);
-      if (payload.traceroute) setNetworkMtrResult(payload.traceroute);
-      if (payload.state === "failed") setNetworkError(payload.error ?? "Network diagnostic failed.");
-      if (payload.state === "cancelled") setNetworkError(null);
-    }).then((stop) => {
-      if (disposed) stop();
-      else unlisten = stop;
-    }).catch((error) => {
-      if (!disposed) {
-        setNetworkDiagnosticStatus("failed");
-        setNetworkError(`Network diagnostic updates are unavailable: ${String(error)}`);
-      }
-    });
-    return () => {
-      disposed = true;
-      unlisten?.();
-    };
-  }, [cancelNetworkDiagnosticId]);
+
 
   useEffect(() => {
     refreshSavedSessions();
@@ -4093,8 +3930,17 @@ function App() {
 
   const renderTerminalPane = useCallback((terminal: WorkspaceTerminal) => {
     const viewport = terminal.connecting ? null : <TerminalViewport exportHost={terminal.remoteHost} exportBookmark={savedSessions.find(item => item.id === terminal.shortcutDeviceId)?.name ?? terminal.customName ?? null} label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
-    return <div className="terminal-login-container">{viewport}{terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}</div>;
-  }, [colorTheme, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
+    return <div className="terminal-login-container">
+      {viewport}
+      {terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}
+      {canReconnectTerminal(terminal.remoteProtocol, terminal.status, terminal.connecting) && <div className="terminal-disconnect-banner" aria-label={`${terminal.label} disconnected`}>
+        <div><strong role="status">Session disconnected</strong><span>Click Reconnect or press R to reconnect.</span></div>
+        <button type="button" className="primary-button" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal(terminal.id)}>
+          <RefreshCw size={16} aria-hidden="true" />{reconnectBusy ? "Reconnecting…" : "Reconnect"}
+        </button>
+      </div>}
+    </div>;
+  }, [colorTheme, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, reconnectBusy, reconnectSelectedTerminal, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
 
   if (closing) return <main className={`app-shell shutdown-state theme-${themeMode(colorTheme)}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
@@ -4431,11 +4277,12 @@ function App() {
       </div>
 
       <FloatingDiagnostics open={diagnosticsOpen} onMinimize={() => { setDiagnosticsOpen(false); requestTerminalFocus(selectedTerminalId); }} onClose={() => {
-        void Promise.allSettled([cancelNetworkDiagnostic(), cancelNetworkScan()]);
+        void cancelNetworkScan();
+        setDiagnosticsStopGeneration(value => value + 1);
         setDiagnosticsOpen(false);
         requestTerminalFocus(selectedTerminalId);
       }}>
-        <NetworkDiagnosticsView pptpProfileId={networkPptpProfileId} onPptpProfileChange={value => { setNetworkPptpProfileId(value); setDnsReport(null); setNetworkResult(null); setNetworkFingerprint(null); setNetworkPingResult(null); setNetworkMtrResult(null); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkDiagnosticStatus("idle"); setNetworkStatus("idle"); setNetworkError(null); }} pingInterval={pingInterval} pingPacketSize={pingPacketSize} onPingIntervalChange={setPingInterval} onPingPacketSizeChange={setPingPacketSize} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} diagnosticKind={networkDiagnosticKind} diagnosticStatus={networkDiagnosticStatus} pingResult={networkPingResult} traceMaxHops={networkTraceMaxHops} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onTraceMaxHopsChange={setNetworkTraceMaxHops} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onPing={startNetworkPing} mtrResult={networkMtrResult} onMtr={startNetworkMtr} onCancelDiagnostic={cancelNetworkDiagnostic} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
+        <NetworkDiagnosticsView stopGeneration={diagnosticsStopGeneration} pptpProfileId={networkPptpProfileId} onPptpProfileChange={value => { setNetworkPptpProfileId(value); setDnsReport(null); setNetworkResult(null); setNetworkFingerprint(null); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkStatus("idle"); setNetworkError(null); }} scanProtocol={networkScanProtocol} onScanProtocolChange={value => { setNetworkScanProtocol(value); setNetworkScanResults([]); setNetworkScanStatus("idle"); setNetworkScanScanned(0); setNetworkScanTotal(0); }} host={networkHost} tcpPort={networkTcpPort} onTcpPortChange={setNetworkTcpPort} port={networkPort} timeout={networkTimeout} status={networkStatus} dnsReport={dnsReport} dnsRecordType={dnsRecordType} onDnsRecordTypeChange={setDnsRecordType} dnsServer={dnsServer} onDnsServerChange={setDnsServer} result={networkResult} fingerprint={networkFingerprint} error={networkError} scanId={networkScanId} scanStatus={networkScanStatus} scanStart={networkScanStart} scanEnd={networkScanEnd} scanConcurrency={networkScanConcurrency} scanScanned={networkScanScanned} scanTotal={networkScanTotal} scanResults={networkScanResults} onHostChange={setNetworkHost} onPortChange={setNetworkPort} onTimeoutChange={setNetworkTimeout} onResolve={resolveNetworkHost} onCheckTcp={checkNetworkTcp} onInspectFingerprint={inspectNetworkHostKey} onScanStartChange={setNetworkScanStart} onScanEndChange={setNetworkScanEnd} onScanConcurrencyChange={setNetworkScanConcurrency} onStartScan={startNetworkScan} onCancelScan={cancelNetworkScan} />
       </FloatingDiagnostics>
       {paletteOpen && <CommandPalette keyboard={settings.keyboard} onClose={() => setPaletteOpen(false)} onNewTerminal={() => startNewTerminal()} onNewShell={startExplicitShell} onNewWslTerminal={openWslTerminalPicker} onQuickConnect={() => { setQuickConnectOpen(true); setPaletteOpen(false); }} onOpenFiles={openSftpView} onOpenSettings={() => { openSettings(); setPaletteOpen(false); }} onOpenCredentials={() => { setCredentialsOpen(true); setPaletteOpen(false); }} onOpenSnippets={() => { setSnippetsOpen(true); setPaletteOpen(false); }} onOpenMacros={() => { setMacrosOpen(true); setPaletteOpen(false); }} onOpenNotes={() => { setNotesOpen(true); setPaletteOpen(false); }} onOpenAudit={() => { setActiveView("audit"); setPaletteOpen(false); }} onToggleSidebar={() => { setSidebarOpen((open) => !open); setPaletteOpen(false); }} onFocusPane={focusPane} />}
       {helpOpen && <HelpModal mode="help" onExportDiagnostics={exportDiagnostics} keyboard={settings.keyboard} onClose={() => setHelpOpen(false)} />}
@@ -4948,15 +4795,10 @@ function MonitorMetric({ label, value, detail }: { label: string; value: string;
   return <article className="remote-monitor-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
 }
 
-function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, onTcpPortChange, pingInterval, pingPacketSize, onPingIntervalChange, onPingPacketSizeChange, mtrResult, onMtr, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, diagnosticKind, diagnosticStatus, pingResult, traceMaxHops, onHostChange, onPortChange, onTimeoutChange, onTraceMaxHopsChange, onResolve, onCheckTcp, onInspectFingerprint, onPing, onCancelDiagnostic, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+function NetworkDiagnosticsView({ stopGeneration, pptpProfileId, onPptpProfileChange, tcpPort, onTcpPortChange, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, onHostChange, onPortChange, onTimeoutChange, onResolve, onCheckTcp, onInspectFingerprint, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
+  stopGeneration: number;
   pptpProfileId: string;
   onPptpProfileChange: (id: string) => void;
-  pingInterval: string;
-  pingPacketSize: string;
-  onPingIntervalChange: (value: string) => void;
-  onPingPacketSizeChange: (value: string) => void;
-  mtrResult: TracerouteResult | null;
-  onMtr: () => void;
   scanProtocol: "tcp" | "udp";
   onScanProtocolChange: (value: "tcp" | "udp") => void;
   host: string;
@@ -4981,19 +4823,12 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
   scanScanned: number;
   scanTotal: number;
   scanResults: TcpCheckResult[];
-  diagnosticKind: "ping" | "mtr" | null;
-  diagnosticStatus: "idle" | "running" | "completed" | "cancelled" | "failed";
-  pingResult: PingResult | null;
-  traceMaxHops: string;
   onHostChange: (value: string) => void;
   onPortChange: (value: string) => void;
   onTimeoutChange: (value: string) => void;
-  onTraceMaxHopsChange: (value: string) => void;
   onResolve: () => void;
   onCheckTcp: () => void;
   onInspectFingerprint: () => void;
-  onPing: () => void;
-  onCancelDiagnostic: () => void;
   onScanStartChange: (value: string) => void;
   onScanEndChange: (value: string) => void;
   onScanConcurrencyChange: (value: string) => void;
@@ -5001,7 +4836,10 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
   onCancelScan: () => void;
 }) {
   type Tool = "scan" | "ping" | "mtr" | "dns" | "tcp" | "ssh";
-  const [tool, setTool] = useState<Tool>("scan");
+  const [tool, setTool] = useState<Tool>("mtr");
+  const [historyRun, setHistoryRun] = useState<DiagnosticLogRun | null>(null);
+  const [viewedLog, setViewedLog] = useState<DiagnosticLog | null>(null);
+  const [logsOpen, setLogsOpen] = useState(false);
   const [follow, setFollow] = useState(true);
   const [copyNotice, setCopyNotice] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -5010,11 +4848,11 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
   const openPorts = openScanResults(scanResults);
   const outputRef = useRef<HTMLPreElement>(null);
   const scanActive = scanStatus === "running";
-  const diagnosticActive = diagnosticStatus === "running";
-  const busy = scanActive || diagnosticActive || status === "running";
-  const tools: { id: Tool; label: string }[] = [{ id: "scan", label: "Port scan" }, { id: "ping", label: "Ping" }, { id: "mtr", label: "MTR" }, { id: "dns", label: "DNS" }, { id: "tcp", label: "TCP check" }, { id: "ssh", label: "SSH key" }];
+  const busy = scanActive || status === "running";
+  const tools: { id: Tool; label: string }[] = [{ id: "mtr", label: "MTR" }, { id: "ping", label: "Ping" }, { id: "scan", label: "Port scan" }, { id: "dns", label: "DNS" }, { id: "tcp", label: "TCP check" }, { id: "ssh", label: "SSH key" }];
   const label = tools.find(item => item.id === tool)!.label;
-  const selectedStatus = tool === "scan" ? scanStatus : ["ping", "mtr"].includes(tool) ? diagnosticKind === tool ? diagnosticStatus : "idle" : status;
+  const selectedStatus = tool === "scan" ? scanStatus : status;
+  const liveTool = tool === "mtr" || tool === "ping";
   const lines: string[] = [];
   lines.push(pptpProfileId ? "Route: private PPTP tunnel" : "Route: direct network", "");
   if (tool === "scan") {
@@ -5027,20 +4865,6 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
       else lines.push("", `${openPorts.length} open ports · ${scanScanned} host/port checks completed`, `Scan ${scanStatus}.`);
     } else lines.push("Ready. Enter a target and port range, then press Run.");
     if (scanProtocol === "udp") lines.push("", "UDP: reply = open; silence = open or filtered.", "Only confirmed open ports are listed; services may ignore empty datagrams.");
-  } else if (tool === "mtr") {
-    const report = mtrResult;
-    lines.push("MTR  /  PACKET LOSS & LATENCY", "");
-    if (report) lines.push(`Target: ${report.host}    Elapsed: ${formatElapsedTime(report.elapsedMs)}`, "", ...report.hops);
-    else lines.push(diagnosticKind === tool && diagnosticActive ? "Collecting live probe cycles…" : diagnosticKind === tool && diagnosticStatus === "failed" ? "Diagnostic failed." : "Ready. Enter a target, then press Run.");
-    if (diagnosticKind === tool && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
-  } else if (tool === "ping") {
-    lines.push("PING", "");
-    if (pingResult) {
-      const loss = pingResult.sent ? ((pingResult.sent - pingResult.received) / pingResult.sent * 100).toFixed(1) : "0.0";
-      lines.push(`Target: ${pingResult.host}    Payload: ${pingResult.packetSize} bytes    Interval: ${pingResult.intervalMs} ms`, "", ...pingResult.lines, "", `Sent: ${pingResult.sent}    Successful probes: ${pingResult.received}    Loss: ${loss}%    Elapsed: ${formatElapsedTime(pingResult.elapsedMs)}`);
-    }
-    else lines.push(diagnosticKind === "ping" && diagnosticActive ? "Waiting for echo reply…" : "Ready. Enter a target, then press Run.");
-    if (diagnosticKind === "ping" && diagnosticStatus === "cancelled") lines.push("", "Cancelled.");
   } else if (tool === "dns") {
     if (dnsReport) lines.push(`;; ${dnsReport.tool} · ${dnsReport.elapsedMs} ms`, "", dnsReport.output);
     else lines.push("DNS LOOKUP", "", status === "running" ? "Querying DNS…" : "Ready. Enter a hostname or IP, choose a record type, then press Run.");
@@ -5052,22 +4876,27 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
   }
   if (error) lines.push("", `ERROR: ${error}`);
   const output = lines.join("\n");
+  const displayedOutput = logsOpen ? viewedLog?.content ?? "Select a saved log above to view its output." : output;
   useEffect(() => {
     if (follow && outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [follow, output]);
+  }, [follow, displayedOutput]);
   const run = () => {
+    if (tool === "mtr" || tool === "ping") return;
     setFollow(true); setCopyNotice(""); setExportNotice("");
-    ({ scan: onStartScan, ping: onPing, mtr: onMtr, dns: onResolve, tcp: onCheckTcp, ssh: onInspectFingerprint })[tool]();
+    setViewedLog(null);
+    setHistoryRun({ id: crypto.randomUUID(), tool, target: host.trim(), route: pptpProfileId ? `PPTP profile ${pptpProfileId}` : "Direct network" });
+    ({ scan: onStartScan, dns: onResolve, tcp: onCheckTcp, ssh: onInspectFingerprint })[tool]();
   };
   const exportOutput = async () => {
     if (exporting) return;
     setExporting(true); setExportNotice("");
     // Capture the displayed report now; a live test may keep producing output.
-    const snapshot = output;
-    const fileName = `conxol-${tool}-${new Date().toISOString().replaceAll(":", "-")}.txt`;
+    const snapshot = displayedOutput;
+    const exportTool = logsOpen ? viewedLog?.tool ?? tool : tool;
+    const fileName = `conxol-${exportTool}-${new Date().toISOString().replaceAll(":", "-")}.txt`;
     try {
       if (IS_TAURI) {
-        const saved = await invoke<boolean>("network_diagnostic_output_export", { tool, content: snapshot });
+        const saved = await invoke<boolean>("network_diagnostic_output_export", { tool: exportTool, content: snapshot });
         if (saved) setExportNotice("Text output saved.");
       } else {
         const url = URL.createObjectURL(new Blob([snapshot], { type: "text/plain;charset=utf-8" }));
@@ -5080,7 +4909,9 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
     finally { setExporting(false); }
   };
   return <section className="diagnostics-cli" aria-label="Network diagnostics">
-    <nav className="diagnostics-cli-tools" aria-label="Diagnostic tool">{tools.map(item => <button key={item.id} type="button" aria-pressed={tool === item.id} disabled={busy && item.id !== tool} onClick={() => { setTool(item.id); setCopyNotice(""); setExportNotice(""); setFollow(true); }}>{item.label}</button>)}</nav>
+    <nav className="diagnostics-cli-tools" aria-label="Diagnostic tool">{tools.map(item => <button key={item.id} type="button" aria-pressed={!logsOpen && tool === item.id} disabled={busy && item.id !== tool} onClick={() => { setTool(item.id); setLogsOpen(false); setCopyNotice(""); setExportNotice(""); setFollow(true); }}>{item.label}</button>)}<button type="button" aria-pressed={logsOpen} onClick={() => { setLogsOpen(true); setCopyNotice(""); setExportNotice(""); }}>Logs</button></nav>
+    <LiveDiagnosticTabs kind={tool === "ping" ? "ping" : "mtr"} visible={liveTool && !logsOpen} defaultTimeout={timeout} stopGeneration={stopGeneration} />
+    {!logsOpen && !liveTool && <>
     {!IS_ANDROID && <div className="diagnostics-cli-controls diagnostics-pptp-route"><PptpAttachment diagnostics value={pptpProfileId} onChange={onPptpProfileChange} disabled={busy} /></div>}
     <form className="diagnostics-cli-controls" onSubmit={event => { event.preventDefault(); if (!busy) run(); }}>
       <label className="diagnostics-cli-host">Target<input required value={host} disabled={busy} onChange={event => onHostChange(event.target.value)} placeholder={tool === "scan" ? "IP, CIDR (192.0.2.0/24), or hostname" : "Hostname or IP address"} /></label>
@@ -5095,24 +4926,22 @@ function NetworkDiagnosticsView({ pptpProfileId, onPptpProfileChange, tcpPort, o
         <label className="diagnostics-dns-server">DNS server<input value={dnsServer} disabled={busy} onChange={event => onDnsServerChange(event.target.value)} placeholder={pptpProfileId ? "Required IPv4 resolver" : "System default"} required={!!pptpProfileId} title="Explicit IPv4 resolver required when using PPTP" /></label>
       </>}
       {(tool === "tcp" || tool === "ssh") && <label>Port<input type="number" min="1" max="65535" required value={tool === "tcp" ? tcpPort : port} disabled={busy} onChange={event => (tool === "tcp" ? onTcpPortChange : onPortChange)(event.target.value)} /></label>}
-      {tool === "ping" && <>
-        <label>Interval (ms)<input type="number" min="200" max="60000" required value={pingInterval} disabled={busy} onChange={event => onPingIntervalChange(event.target.value)} /></label>
-        <label>Packet (bytes)<input type="number" min="0" max={pptpProfileId ? "1332" : "65500"} required value={pingPacketSize} disabled={busy} onChange={event => onPingPacketSizeChange(event.target.value)} title="ICMP payload size, excluding headers" /></label>
-      </>}
-      {(tool === "mtr") && <label>Max hops<input type="number" min="1" max="32" required value={traceMaxHops} disabled={busy} onChange={event => onTraceMaxHopsChange(event.target.value)} /></label>}
-      {tool !== "mtr" && <label>Timeout (ms)<input type="number" min="50" max="60000" required value={timeout} disabled={busy} onChange={event => onTimeoutChange(event.target.value)} /></label>}
-      {scanActive || diagnosticActive ? <button type="button" className="outline-button" onClick={scanActive ? onCancelScan : onCancelDiagnostic}><Square size={14} /> Stop</button> : <button type="submit" className="primary-button" disabled={busy}><Play size={14} /> Run</button>}
+      {<label>Timeout (ms)<input type="number" min="50" max="60000" required value={timeout} disabled={busy} onChange={event => onTimeoutChange(event.target.value)} /></label>}
+      {scanActive ? <button type="button" className="outline-button" onClick={onCancelScan}><Square size={14} /> Stop</button> : <button type="submit" className="primary-button" disabled={busy}><Play size={14} /> Run</button>}
     </form>
-    {tool === "scan" && scanStatus !== "idle" && <div className="diagnostics-scan-progress">
+    </>}
+    <DiagnosticHistory run={historyRun} output={output} state={selectedStatus} busy={busy} error={error} selected={viewedLog} onSelect={setViewedLog} visible={logsOpen} />
+    {!logsOpen && tool === "scan" && scanStatus !== "idle" && <div className="diagnostics-scan-progress">
       <div><span>{scanActive ? progress.total ? "Scanning" : "Preparing scan…" : `Scan ${scanStatus}`}</span><span>{progress.total ? `${progress.completed} / ${progress.total} checks · ${progress.percent}%` : scanActive ? "Waiting for scan total" : "0 checks"}</span></div>
       <progress aria-label="Port scan progress" max={progress.total || 1} value={progress.total ? progress.completed : scanActive ? undefined : 0} />
     </div>}
-    <div className="diagnostics-cli-console">
-      <div className="diagnostics-cli-console-bar"><span>{label} <span className="diagnostics-cli-state">/ {selectedStatus}</span></span><div><button type="button" aria-pressed={follow} onClick={() => setFollow(value => !value)}>Follow {follow ? "on" : "off"}</button><button type="button" onClick={() => { void writeClipboardText(output).then(() => setCopyNotice("Copied"), () => setCopyNotice("Copy failed")); }}>{copyNotice || "Copy output"}</button><button type="button" disabled={exporting} onClick={() => void exportOutput()}>{exporting ? "Saving…" : "Export text"}</button></div></div>
+    {(!liveTool || logsOpen) && <div className="diagnostics-cli-console">
+      <div className="diagnostics-cli-console-bar"><span>{logsOpen ? viewedLog ? `${viewedLog.tool.toUpperCase()} · Saved log` : "Logs" : label} <span className="diagnostics-cli-state">/ {logsOpen ? viewedLog?.state ?? "select a log" : selectedStatus}</span></span><div><button type="button" aria-pressed={follow} onClick={() => setFollow(value => !value)}>Follow {follow ? "on" : "off"}</button><button type="button" disabled={logsOpen && !viewedLog} onClick={() => { void writeClipboardText(displayedOutput).then(() => setCopyNotice("Copied"), () => setCopyNotice("Copy failed")); }}>{copyNotice || "Copy output"}</button><button type="button" disabled={exporting || (logsOpen && !viewedLog)} onClick={() => void exportOutput()}>{exporting ? "Saving…" : "Export text"}</button></div></div>
       {exportNotice && <p className="diagnostics-export-notice" role="status">{exportNotice}</p>}
-      <pre ref={outputRef} className="diagnostics-cli-output" tabIndex={0} aria-label={`${label} output`} onScroll={event => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) setFollow(false); }}>{output}</pre>
+      <pre ref={outputRef} className="diagnostics-cli-output" tabIndex={0} aria-label={logsOpen ? "Saved diagnostic log output" : `${label} output`} onScroll={event => { const element = event.currentTarget; if (element.scrollHeight - element.scrollTop - element.clientHeight > 40) setFollow(false); }}>{displayedOutput}</pre>
     </div>
-    <footer className="diagnostics-cli-footer"><span>{tool === "scan" ? "IP or CIDR · Up to 256 hosts, 4096 ports, 65536 checks" : tool === "ping" ? "Native IPv4 Ping · Interval between probe starts · Payload size excludes headers" : tool === "mtr" ? "Live until stopped · Cumulative hop statistics · Native IPv4 MTR" : "Run against the selected target"}</span><span>{busy ? "Working…" : "Select a tool · Enter a target · Run"}</span></footer>
+    }
+    <footer className="diagnostics-cli-footer"><span>{logsOpen ? "Select a saved run to view, copy or export its output" : tool === "scan" ? "IP or CIDR · Up to 256 hosts, 4096 ports, 65536 checks" : tool === "ping" ? "Native IPv4 Ping · Interval between probe starts · Payload size excludes headers" : tool === "mtr" ? "Live until stopped · Cumulative hop statistics · Native IPv4 MTR" : "Run against the selected target"}</span><span>{busy ? "Working…" : logsOpen ? "Logs are saved in this workspace" : "Select a tool · Enter a target · Run"}</span></footer>
   </section>;
 }
 
@@ -5161,19 +4990,6 @@ function formatTransferEta(seconds: number) {
   return `${minutes}m ${String(remainingSeconds).padStart(2, "0")}s`;
 }
 
-function formatElapsedTime(milliseconds: number) {
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) return "—";
-  const seconds = Math.floor(milliseconds / 1000);
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  return [
-    days > 0 ? `${days}d` : "",
-    hours > 0 || days > 0 ? `${hours}h` : "",
-    minutes > 0 || hours > 0 || days > 0 ? `${minutes}m` : "",
-    `${seconds % 60}s`,
-  ].filter(Boolean).join(" ");
-}
 
 function formatDuration(seconds?: number | null) {
   if (seconds == null || !Number.isFinite(seconds)) return "Unavailable";

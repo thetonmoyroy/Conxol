@@ -33,6 +33,8 @@ fn main() {
         "test-web-sessions" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "-p", "conxol-store", "web_sessions", "--", "--nocapture"], None),
         "test-retired-sessions" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "-p", "conxol-store", "--lib"], None),
         "test-pptp-diagnostics" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp_diagnostics::tests", "--", "--nocapture"], None),
+        "test-diagnostic-history" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "diagnostic_history::tests", "--", "--nocapture"], None),
+        "test-diagnostic-instances" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "network::tests", "--", "--nocapture"], None),
         "test-pptp" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "--", "--nocapture"], None)
             .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp::tests", "--", "--nocapture"], None)),
         "test-pptp-attachments" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "-p", "conxol-ssh", "-p", "conxol-telnet", "-p", "conxol-store", "pptp", "--", "--nocapture"], None),
@@ -91,6 +93,8 @@ fn main() {
             println!("cargo xtask test-mtr    Run isolated native MTR engine and loopback tests");
             println!("cargo xtask test-ping    Run isolated native Ping engine and loopback tests");
             println!("cargo xtask test-diagnostics    Run isolated diagnostic export regressions");
+            println!("cargo xtask test-diagnostic-history    Run isolated diagnostic log persistence regressions");
+            println!("cargo xtask test-diagnostic-instances    Run isolated diagnostic instance/cancellation regressions");
             println!(
                 "cargo xtask test-backup    Run isolated encrypted workspace backup regressions"
             );

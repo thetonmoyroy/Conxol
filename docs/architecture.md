@@ -348,3 +348,30 @@ services bounded async TCP streams and ICMP/UDP probes; `pptp_diagnostics.rs`
 adapts these to existing cancellable diagnostic events. Private DNS uses an
 explicit IPv4 resolver over TCP. Selected-route failures never fall back to host
 networking; the ordinary direct diagnostic implementations remain available.
+
+Network diagnostics automatically save results in the active workspace's
+`diagnostic-history.json`. The Logs tab lists the newest 50 runs for viewing,
+copying, text export or explicit clearing. Live runs checkpoint every five
+seconds; completed, stopped and failed runs save a final snapshot under the same
+run ID. Checkpoints still marked running after an app exit are shown as partial
+snapshots. Storage is atomically replaced, bounded to 8 MiB, with a 256 KiB
+per-report limit and an explicit truncation marker. `DiagnosticHistory.tsx` owns
+the Logs interface and `diagnostic-autosave.ts` owns the shared ordered save
+queue; `diagnostic_history.rs` validates and
+persists records natively. The separate sanitized support export is unchanged.
+`cargo xtask test-diagnostic-history` verifies persistence and retention using
+temporary fixtures without contacting a real endpoint.
+
+MTR and Ping support up to eight independent tabs in total through
+`LiveDiagnosticTabs.tsx`. Each mounted instance retains its target, route,
+settings, run status and output when hidden. The renderer supplies a fresh UUID
+before starting each native job, so progress received before the IPC response
+is still attributed to the right tab. Stop and tab close cancel only that UUID;
+an early cancellation is retried after worker registration, including when a
+tab closes while its selected tunnel is connecting. Minimize preserves jobs;
+closing the diagnostics window requests Stop for every instance. A closing tab
+saves its last snapshot, and completed/stopped runs retain independent logs.
+The native diagnostic registry allows eight jobs and rejects duplicate IDs;
+the separate scan registry retains its two-job bound. Frontend instance/routing
+tests and `cargo xtask test-diagnostic-instances` cover tab limits, event
+isolation, cancellation and bounded native admission using synthetic fixtures.

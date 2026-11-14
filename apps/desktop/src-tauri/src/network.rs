@@ -15,6 +15,7 @@ use uuid::Uuid;
 const MIN_TIMEOUT_MS: u64 = 50;
 const MAX_TIMEOUT_MS: u64 = 60_000;
 const MAX_CONCURRENT_OPERATIONS: usize = 2;
+const MAX_CONCURRENT_DIAGNOSTICS: usize = 8;
 const SCAN_BATCH_SIZE: usize = 64;
 const SCAN_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
@@ -97,6 +98,8 @@ pub enum NetworkManagerError {
     LockPoisoned,
     #[error("the concurrent network operation limit has been reached")]
     OperationLimit,
+    #[error("a network operation with this ID is already running")]
+    DuplicateOperation,
     #[error(
         "network scan timeout must be between {MIN_TIMEOUT_MS} and {MAX_TIMEOUT_MS} milliseconds"
     )]
@@ -133,7 +136,7 @@ impl NetworkManager {
         let total = options.total_checks()?;
         let scan_id = Uuid::new_v4().to_string();
         let (cancel_sender, mut cancellation) = watch::channel(false);
-        register_operation(&self.scans, scan_id.clone(), cancel_sender)?;
+        register_operation(&self.scans, scan_id.clone(), cancel_sender, MAX_CONCURRENT_OPERATIONS)?;
 
         emit_scan_event(
             &app,
@@ -246,6 +249,7 @@ impl NetworkManager {
     pub async fn start_ping(
         &self,
         app: AppHandle,
+        operation_id: Option<Uuid>,
         host: String,
         timeout_ms: u64,
         interval_ms: u64,
@@ -259,9 +263,9 @@ impl NetworkManager {
             timeout: validated_timeout(timeout_ms)?,
         };
         options.validate()?;
-        let operation_id = Uuid::new_v4().to_string();
+        let operation_id = operation_id.unwrap_or_else(Uuid::new_v4).to_string();
         let (cancel_sender, mut cancellation) = watch::channel(false);
-        register_operation(&self.diagnostics, operation_id.clone(), cancel_sender)?;
+        register_operation(&self.diagnostics, operation_id.clone(), cancel_sender, MAX_CONCURRENT_DIAGNOSTICS)?;
         emit_diagnostic_event(
             &app,
             NetworkDiagnosticEvent {
@@ -336,6 +340,7 @@ impl NetworkManager {
     pub async fn start_mtr(
         &self,
         app: AppHandle,
+        operation_id: Option<Uuid>,
         host: String,
         timeout_ms: u64,
         max_hops: u8,
@@ -348,9 +353,9 @@ impl NetworkManager {
             max_hops,
         };
         options.validate()?;
-        let operation_id = Uuid::new_v4().to_string();
+        let operation_id = operation_id.unwrap_or_else(Uuid::new_v4).to_string();
         let (cancel_sender, mut cancellation) = watch::channel(false);
-        register_operation(&self.diagnostics, operation_id.clone(), cancel_sender)?;
+        register_operation(&self.diagnostics, operation_id.clone(), cancel_sender, MAX_CONCURRENT_DIAGNOSTICS)?;
         emit_diagnostic_event(
             &app,
             NetworkDiagnosticEvent {
@@ -455,11 +460,15 @@ fn register_operation(
     operations: &Mutex<HashMap<String, watch::Sender<bool>>>,
     operation_id: String,
     cancel_sender: watch::Sender<bool>,
+    limit: usize,
 ) -> Result<(), NetworkManagerError> {
     let mut operations = operations
         .lock()
         .map_err(|_| NetworkManagerError::LockPoisoned)?;
-    if operations.len() >= MAX_CONCURRENT_OPERATIONS {
+    if operations.contains_key(&operation_id) {
+        return Err(NetworkManagerError::DuplicateOperation);
+    }
+    if operations.len() >= limit {
         return Err(NetworkManagerError::OperationLimit);
     }
     operations.insert(operation_id, cancel_sender);
@@ -496,13 +505,13 @@ mod tests {
         for index in 0..MAX_CONCURRENT_OPERATIONS {
             let (sender, receiver) = watch::channel(false);
             receivers.push(receiver);
-            register_operation(&operations, index.to_string(), sender).unwrap();
+            register_operation(&operations, index.to_string(), sender, MAX_CONCURRENT_OPERATIONS).unwrap();
         }
 
         let (sender, receiver) = watch::channel(false);
         receivers.push(receiver);
         assert!(matches!(
-            register_operation(&operations, "overflow".into(), sender),
+            register_operation(&operations, "overflow".into(), sender, MAX_CONCURRENT_OPERATIONS),
             Err(NetworkManagerError::OperationLimit)
         ));
         assert_eq!(operations.lock().unwrap().len(), MAX_CONCURRENT_OPERATIONS);
@@ -537,5 +546,23 @@ mod tests {
                 .unwrap()
                 .contains_key("finished-diagnostic")
         );
+    }
+
+    #[test]
+    fn diagnostic_instances_have_independent_cancellation_and_bounded_admission() {
+        let manager = super::NetworkManager::default();
+        let mut receivers = Vec::new();
+        for index in 0..super::MAX_CONCURRENT_DIAGNOSTICS {
+            let (sender, receiver) = watch::channel(false);
+            receivers.push(receiver);
+            register_operation(&manager.diagnostics, index.to_string(), sender, super::MAX_CONCURRENT_DIAGNOSTICS).unwrap();
+        }
+        assert!(manager.cancel_diagnostic("0").unwrap());
+        assert!(*receivers[0].borrow());
+        assert!(receivers.iter().skip(1).all(|receiver| !*receiver.borrow()));
+        let (duplicate, _receiver) = watch::channel(false);
+        assert!(matches!(register_operation(&manager.diagnostics, "1".into(), duplicate, super::MAX_CONCURRENT_DIAGNOSTICS), Err(NetworkManagerError::DuplicateOperation)));
+        let (overflow, _receiver) = watch::channel(false);
+        assert!(matches!(register_operation(&manager.diagnostics, "overflow".into(), overflow, super::MAX_CONCURRENT_DIAGNOSTICS), Err(NetworkManagerError::OperationLimit)));
     }
 }

@@ -651,6 +651,12 @@ button:not(:disabled) { cursor: pointer; }
 .quick-connect-simple .quick-connect-footer > span { font-family: inherit; font-size: 10px; }
 .connection-pending { color: var(--amber); }
 .terminal-login-container { position: relative; width: 100%; height: 100%; min-height: 0; }
+.terminal-disconnect-banner { position: absolute; z-index: 2; inset: auto 12px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--amber); border-radius: 6px; background: var(--panel); box-shadow: 0 4px 20px #0004; color: var(--text); font-size: 13px; }
+.terminal-disconnect-banner .primary-button { min-height: 38px; height: auto; padding: 8px 16px; font-size: 13px; cursor: pointer; }
+.terminal-disconnect-banner > div { display: grid; gap: 4px; }
+.terminal-disconnect-banner > div > span { color: var(--muted); font-size: 12px; }
+.terminal-disconnect-banner .primary-button:disabled { cursor: wait; opacity: .65; }
+.terminal-disconnect-banner .primary-button:focus-visible { outline: 2px solid var(--text); outline-offset: 3px; }
 .terminal-ssh-login { position: absolute; inset: 0; z-index: 3; padding: 12px; overflow: auto; font-family: "Conxol Terminal", Consolas, monospace; line-height: 1.2; }
 .terminal-ssh-login p { margin: 0 0 12px; }
 .terminal-ssh-login pre { margin: 0 0 12px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
@@ -1307,6 +1313,29 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 
 .diagnostics-cli-console-bar { flex-wrap: wrap; gap: 4px; padding-top: 3px; padding-bottom: 3px; }
 .diagnostics-cli-console-bar > div { flex-wrap: wrap; }
+.diagnostics-history { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; }
+.diagnostics-history[hidden] { display: none; }
+.diagnostics-history header { display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px; }
+.diagnostics-history-list { width: 100%; max-height: 140px; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+.diagnostics-history-list button { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; width: 100%; gap: 4px 12px; padding: 8px 10px; border: 0; border-bottom: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; text-align: left; overflow-wrap: anywhere; }
+.diagnostics-history-list button[aria-pressed="true"] { background: var(--mint-soft); color: var(--mint); }
+.diagnostics-history-list button:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
+.diagnostics-history-list button span:last-child { color: var(--muted); }
+.diagnostics-history-list p { margin: 10px; }
+.diagnostics-history > span, .diagnostics-history > p { flex-basis: 100%; margin: 0; overflow-wrap: anywhere; }
+.live-diagnostic-workspace, .diagnostics-instance-panel, .diagnostics-instance-content { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.live-diagnostic-workspace[hidden], .diagnostics-instance-panel[hidden] { display: none; }
+.diagnostics-instance-tabs { display: flex; flex-shrink: 0; align-items: stretch; gap: 4px; padding: 6px 10px; overflow-x: auto; border-bottom: 1px solid var(--line); background: var(--panel); }
+.diagnostics-instance-tab { display: flex; flex-shrink: 0; max-width: 280px; border: 1px solid var(--line); border-radius: 4px; }
+.diagnostics-instance-tab.selected { border-color: var(--amber); background: var(--amber-soft); }
+.diagnostics-instance-tab button, .diagnostics-add-instance { display: flex; align-items: center; gap: 6px; min-height: 32px; padding: 4px 8px; border: 0; background: transparent; color: var(--text); font: inherit; font-size: 11px; }
+.diagnostics-instance-tab button:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diagnostics-instance-tab small { color: var(--muted); font-size: 10px; }
+.diagnostics-instance-state { width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: var(--muted); }
+.diagnostics-instance-state.running { background: var(--mint); }
+.diagnostics-instance-state.failed { background: var(--coral); }
+.diagnostics-add-instance { flex-shrink: 0; border: 1px dashed var(--line-strong); border-radius: 4px; }
+.diagnostics-instance-empty { padding: 16px; color: var(--muted); }
 
 /* Reserve one action button so compact session rows have room for host names. */
 .app-shell .session-row .session-copy { flex: 1; }

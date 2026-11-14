@@ -8,6 +8,18 @@ function isRemoteProtocol(protocol: string | null): protocol is "ssh" | "telnet"
   return protocol === "ssh" || protocol === "telnet" || protocol === "serial";
 }
 
+// Telnet/serial report a lost connection as reconnecting with a reason, then
+// wait for a manual Reconnect command. A reason-free event starts the attempt.
+// SSH's automatic retries keep their reconnecting state, including errors.
+export function remoteSessionReconnectStatus(
+  protocol: string | null,
+  reason: string | null | undefined,
+): "reconnecting" | "error" {
+  return (protocol === "telnet" || protocol === "serial") && sanitizeTerminalErrorDetail(reason)
+    ? "error"
+    : "reconnecting";
+}
+
 export function remoteSessionStateError(
   protocol: string | null,
   state: "reconnecting" | "failed",

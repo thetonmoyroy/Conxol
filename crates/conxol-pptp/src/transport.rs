@@ -231,8 +231,8 @@ mod tests {
     async fn pptp_private_stream_encrypted_bidirectional_backpressure_and_disconnect() {
         let a = Ipv4Addr::new(192, 0, 2, 1);
         let b = Ipv4Addr::new(192, 0, 2, 2);
-        let mut client = Stack::new(a, b, 1360, 1);
-        let mut server = Stack::new(b, a, 1360, 2);
+        let mut client = Stack::new(a, b, crate::PPTP_MTU, 1);
+        let mut server = Stack::new(b, a, crate::PPTP_MTU, 2);
         let listener = server.tcp_socket();
         server
             .sockets

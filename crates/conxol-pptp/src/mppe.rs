@@ -77,7 +77,7 @@ impl Codec {
         }
     }
     pub fn encrypt_ipv4(&mut self, ip: &[u8]) -> Result<Vec<u8>, &'static str> {
-        if ip.len() < 20 || ip.len() > 1360 || ip[0] >> 4 != 4 {
+        if ip.len() < 20 || ip.len() > crate::PPTP_MTU || ip[0] >> 4 != 4 {
             return Err("invalid outbound IPv4 size/version");
         }
         self.send.advance();
@@ -90,7 +90,7 @@ impl Codec {
         Ok(p)
     }
     pub fn decrypt_ipv4(&mut self, packet: &[u8]) -> Result<Option<Vec<u8>>, &'static str> {
-        if packet.len() < 4 || packet.len() > 1364 || packet[0] & 0xf0 != 0x90 {
+        if packet.len() < 4 || packet.len() > crate::PPTP_MRU || packet[0] & 0xf0 != 0x90 {
             return Err("invalid stateless encrypted MPPE header");
         }
         let count = u16::from_be_bytes([packet[0] & 0xf, packet[1]]);
@@ -195,5 +195,26 @@ mod tests {
             assert!(codec.decrypt_ipv4(&[header, 0, 0, 0]).is_err());
         }
         assert!(codec.decrypt_ipv4(&[0x90]).is_err());
+    }
+
+    #[test]
+    fn full_mtu_packet_roundtrips_and_oversized_packets_are_rejected() {
+        let k = keys();
+        let mut receiver = Codec::new(Keys {
+            send: k.receive,
+            receive: k.send,
+        });
+        let mut sender = Codec::new(keys());
+        let mut ip = vec![0x5a; crate::PPTP_MTU];
+        ip[0] = 0x45;
+        ip[2..4].copy_from_slice(&(crate::PPTP_MTU as u16).to_be_bytes());
+        let encrypted = sender.encrypt_ipv4(&ip).unwrap();
+        assert_eq!(encrypted.len(), crate::PPTP_MRU);
+        assert_eq!(receiver.decrypt_ipv4(&encrypted).unwrap(), Some(ip.clone()));
+        ip.push(0);
+        assert!(sender.encrypt_ipv4(&ip).is_err());
+        let mut oversized = encrypted;
+        oversized.push(0);
+        assert!(receiver.decrypt_ipv4(&oversized).is_err());
     }
 }

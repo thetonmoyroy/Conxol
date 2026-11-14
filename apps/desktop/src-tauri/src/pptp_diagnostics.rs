@@ -109,9 +109,9 @@ pub async fn ping_live(
 ) -> Result<LivePingResult, Error> {
     options.validate()?;
     ipv4(&options.host).map_err(Error::PrivateTransport)?;
-    if options.packet_size > 1332 {
+    if usize::from(options.packet_size) > conxol_pptp::MAX_PING_PAYLOAD {
         return Err(Error::PrivateTransport(
-            "PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).".into(),
+            "PPTP Ping payload must fit the tunnel MTU (at most 1422 bytes).".into(),
         ));
     }
     let start = Instant::now();

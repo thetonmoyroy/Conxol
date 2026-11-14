@@ -22,6 +22,7 @@ use tftp_server::{TftpServerManager, tftp_server_start, tftp_server_status, tftp
 mod file_transfer;
 use file_transfer::{FileTransferManager, file_transfer_cancel, file_transfer_run};
 mod network;
+mod diagnostic_history;
 mod output_batch;
 mod serial;
 mod ssh;
@@ -199,6 +200,8 @@ struct NetworkTcpCheckRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkPingRequest {
     #[serde(default)]
+    operation_id: Option<uuid::Uuid>,
+    #[serde(default)]
     pptp_profile_id: Option<uuid::Uuid>,
     host: String,
     timeout_ms: u64,
@@ -209,6 +212,8 @@ struct NetworkPingRequest {
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NetworkMtrRequest {
+    #[serde(default)]
+    operation_id: Option<uuid::Uuid>,
     #[serde(default)]
     pptp_profile_id: Option<uuid::Uuid>,
     host: String,
@@ -1327,8 +1332,8 @@ async fn network_ping_start(
     }
     .validate()
     .map_err(|e| e.to_string())?;
-    if request.pptp_profile_id.is_some() && request.packet_size > 1332 {
-        return Err("PPTP Ping payload must fit the tunnel MTU (at most 1332 bytes).".into());
+    if request.pptp_profile_id.is_some() && usize::from(request.packet_size) > conxol_pptp::MAX_PING_PAYLOAD {
+        return Err("PPTP Ping payload must fit the tunnel MTU (at most 1422 bytes).".into());
     }
     let connector = if let Some(id) = request.pptp_profile_id {
         pptp_diagnostics::ipv4(&request.host)?;
@@ -1339,6 +1344,7 @@ async fn network_ping_start(
     manager
         .start_ping(
             app,
+            request.operation_id,
             request.host,
             request.timeout_ms,
             request.interval_ms,
@@ -1373,6 +1379,7 @@ async fn network_mtr_start(
     manager
         .start_mtr(
             app,
+            request.operation_id,
             request.host,
             request.timeout_ms,
             request.max_hops,
@@ -2192,6 +2199,9 @@ pub fn run() {
             app.manage(Mutex::new(notes::NoteStore::open(
                 data_dir.join("notes.json"),
             )?));
+            app.manage(Mutex::new(diagnostic_history::HistoryStore::new(
+                data_dir.join("diagnostic-history.json"),
+            )));
             app.manage(pptp::PptpManager::open(data_dir.join("pptp.json"))?);
             app.manage(pptp_browser::BrowserManager::default());
             let macros = MacroStore::open(data_dir.join("macros.json"))
@@ -2318,6 +2328,9 @@ pub fn run() {
                 network_resolve_host,
                 network_dns_lookup,
                 network_diagnostic_output_export,
+                diagnostic_history::network_diagnostic_history_list,
+                diagnostic_history::network_diagnostic_history_save,
+                diagnostic_history::network_diagnostic_history_clear,
                 terminal_output_export,
                 network_check_tcp,
                 ssh_inspect_host_key,

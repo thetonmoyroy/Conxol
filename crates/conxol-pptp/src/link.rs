@@ -256,7 +256,11 @@ impl<T: PppIo> Link<T> {
                     peer_ip,
                     sent: 0,
                     received: 0,
-                    mtu: 1360.min(auth.peer_mru.saturating_sub(4)),
+                    mtu: if mppe {
+                        crate::PPTP_MTU.min(auth.peer_mru.saturating_sub(crate::MPPE_OVERHEAD))
+                    } else {
+                        1360.min(auth.peer_mru.saturating_sub(4))
+                    },
                     encrypted_received: 0,
                     other_received: 0,
                 });

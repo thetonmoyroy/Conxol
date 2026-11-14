@@ -57,6 +57,11 @@ impl Control {
         if let Some(message) = extract(&mut self.buffered)? {
             return Ok(Some(message));
         }
+        // Control traffic is usually idle. Never spend its read timeout before
+        // receiving the next GRE packet. This socket has exactly one reader.
+        if !read_ready(&self.stream)? {
+            return Ok(None);
+        }
         let mut bytes = [0u8; 512];
         match self.stream.read(&mut bytes) {
             Ok(0) => return Err(io::Error::other("PPTP control connection closed")),
@@ -83,6 +88,9 @@ impl Control {
                     return Ok(body);
                 }
                 self.service(kind, &body)?;
+            } else {
+                // Setup waits have no GRE receive to pace an idle poll loop.
+                std::thread::sleep(Duration::from_millis(1));
             }
         }
         Err(io::Error::other("PPTP control reply deadline exceeded"))
@@ -142,6 +150,50 @@ impl Control {
         Ok(peer)
     }
 }
+
+#[cfg(windows)]
+fn read_ready(stream: &TcpStream) -> io::Result<bool> {
+    use std::os::windows::io::AsRawSocket;
+    use windows_sys::Win32::Networking::WinSock::{
+        POLLRDNORM, SOCKET_ERROR, WSAGetLastError, WSAPOLLFD, WSAPoll,
+    };
+    let mut fd = WSAPOLLFD {
+        fd: stream.as_raw_socket() as usize,
+        events: POLLRDNORM,
+        revents: 0,
+    };
+    // SAFETY: one initialized descriptor for a live, exclusively read socket.
+    // A zero timeout checks readiness without delaying GRE processing.
+    if unsafe { WSAPoll(&mut fd, 1, 0) } == SOCKET_ERROR {
+        return Err(io::Error::from_raw_os_error(unsafe { WSAGetLastError() }));
+    }
+    // Read on hangup/error too, so EOF and socket errors reach the caller.
+    Ok(fd.revents != 0)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn read_ready(stream: &TcpStream) -> io::Result<bool> {
+    use std::os::fd::AsRawFd;
+    let mut fd = libc::pollfd {
+        fd: stream.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: one initialized descriptor for a live, exclusively read socket.
+    if unsafe { libc::poll(&mut fd, 1, 0) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(fd.revents != 0)
+}
+
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+fn read_ready(_: &TcpStream) -> io::Result<bool> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "native PPTP control is unavailable on this platform",
+    ))
+}
+
 impl Drop for Control {
     fn drop(&mut self) {
         if let Some(call) = self.call {
@@ -175,6 +227,79 @@ fn extract(buffer: &mut Vec<u8>) -> io::Result<Option<(u16, Vec<u8>)>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pair() -> (Control, TcpStream) {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let stream = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(10)))
+            .unwrap();
+        stream
+            .set_write_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let (peer, _) = listener.accept().unwrap();
+        peer.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        (
+            Control {
+                stream,
+                buffered: Vec::new(),
+                call: None,
+                cancel: None,
+            },
+            peer,
+        )
+    }
+
+    #[test]
+    fn idle_control_polls_do_not_pay_the_read_timeout() {
+        let (mut control, _peer) = pair();
+        let start = Instant::now();
+        for _ in 0..100 {
+            assert!(control.poll().unwrap().is_none());
+        }
+        // The old path takes at least one second for these 100 idle polls.
+        assert!(start.elapsed() < Duration::from_millis(250));
+    }
+
+    #[test]
+    fn socket_control_frames_survive_fragmentation_and_service_echo() {
+        let (mut control, mut peer) = pair();
+        let echo = frame(5, &[1, 2, 3, 4]);
+        peer.write_all(&echo[..7]).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while control.buffered.is_empty() {
+            assert!(control.poll().unwrap().is_none());
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        assert!(control.poll().unwrap().is_none());
+        let mut tail = echo[7..].to_vec();
+        tail.extend_from_slice(&frame(12, &[0, 1, 0, 0]));
+        peer.write_all(&tail).unwrap();
+        let body = control.wait(5).unwrap();
+        control.service(5, &body).unwrap();
+        let expected = frame(6, &[1, 2, 3, 4, 1, 0, 0, 0]);
+        let mut reply = vec![0; expected.len()];
+        peer.read_exact(&mut reply).unwrap();
+        assert_eq!(reply, expected);
+        let body = control.wait(12).unwrap();
+        assert!(control.service(12, &body).is_err());
+    }
+
+    #[test]
+    fn control_peer_shutdown_is_not_treated_as_idle() {
+        let (mut control, peer) = pair();
+        peer.shutdown(std::net::Shutdown::Both).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match control.poll() {
+                Err(_) => break,
+                Ok(None) => assert!(Instant::now() < deadline),
+                Ok(Some(_)) => panic!("unexpected control message"),
+            }
+            std::thread::yield_now();
+        }
+    }
     #[test]
     fn cancellation_interrupts_control_before_socket_read() {
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
