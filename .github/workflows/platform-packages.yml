@@ -23,6 +23,7 @@ on:
         type: choice
         options:
           - all
+          - macos
           - macos-arm64
 
 permissions:
@@ -35,7 +36,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.platform == 'macos-arm64' && '[{"runner":"macos-15","platform":"macos-arm64","bundles":"dmg","arch":"arm64"}]' || '[{"runner":"ubuntu-22.04","platform":"linux-x64","bundles":"deb,appimage","arch":"x86_64"},{"runner":"macos-15","platform":"macos-arm64","bundles":"dmg","arch":"arm64"},{"runner":"macos-15-intel","platform":"macos-x64","bundles":"dmg","arch":"x86_64"}]') }}
+        include: ${{ fromJSON(inputs.platform == 'macos-arm64' && '[{"runner":"macos-15","platform":"macos-arm64","bundles":"dmg","arch":"arm64"}]' || inputs.platform == 'macos' && '[{"runner":"macos-15","platform":"macos-arm64","bundles":"dmg","arch":"arm64"},{"runner":"macos-15-intel","platform":"macos-x64","bundles":"dmg","arch":"x86_64"}]' || '[{"runner":"ubuntu-22.04","platform":"linux-x64","bundles":"deb,appimage","arch":"x86_64"},{"runner":"macos-15","platform":"macos-arm64","bundles":"dmg","arch":"arm64"},{"runner":"macos-15-intel","platform":"macos-x64","bundles":"dmg","arch":"x86_64"}]') }}
     runs-on: ${{ matrix.runner }}
     env:
       CI: 'true'
