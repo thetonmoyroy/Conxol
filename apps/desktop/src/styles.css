@@ -590,24 +590,37 @@ button:not(:disabled) { cursor: pointer; }
 .desktop-tool-tab { display: flex; align-items: center; gap: 9px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 6px 6px 0 0; color: var(--amber); background: var(--bg); font-size: 10px; white-space: nowrap; }
 .desktop-tool-tab button { display: grid; place-items: center; width: 16px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted); }
 .desktop-menu hr { width: 100%; margin: 4px 0; border: 0; border-top: 1px solid var(--line-strong); }
-.sidebar-file-browser { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.sidebar-file-browser { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; background: var(--panel); }
 .sidebar-path { display: flex; align-items: center; flex-shrink: 0; gap: 4px; min-height: 24px; padding: 0 3px; border-bottom: 1px solid var(--line); color: var(--muted); font-family: var(--mono); font-size: 10px; }
 .sidebar-path span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-path button { display: grid; place-items: center; padding: 0; width: 19px; height: 20px; border: 0; background: transparent; color: var(--mint); }
-.sidebar-file-browser .remote-files { display: flex; flex: 1; flex-direction: column; min-height: 0; border: 0; background: transparent; }
+.sidebar-path { min-height: 30px; gap: 3px; padding: 2px 4px; }
+.sidebar-path > svg, .sidebar-path > button { flex-shrink: 0; }
+.sidebar-path input { flex: 1; min-width: 0; width: 0; height: 25px; padding: 0 4px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: var(--text); font: inherit; font-size: 11px; }
+.sidebar-path input:hover { border-color: var(--line-strong); }
+.sidebar-path input:focus { outline: none; border-color: var(--amber); background: var(--bg); }
+.sidebar-path button:hover:not(:disabled) { background: var(--panel-soft); }
+.sidebar-path button:focus-visible { outline: 1px solid var(--amber); }
+.sidebar-path button:disabled { opacity: .4; }
+.sidebar-file-browser .remote-files { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; border: 0; background: var(--panel); }
 .sidebar-file-browser .remote-files-toolbar { flex-shrink: 0; min-height: 26px; padding: 2px; }
 .sidebar-file-browser .remote-files-toolbar > div:first-child, .sidebar-file-browser .transfer-protocol-select, .sidebar-file-browser .remote-files-hidden, .sidebar-file-browser .remote-files-meta, .sidebar-file-browser .remote-files-note { display: none; }
 .sidebar-file-browser .remote-files-toolbar-actions { flex: 1; flex-wrap: nowrap; justify-content: flex-start; gap: 2px; }
 .sidebar-file-browser .remote-files-toolbar-actions .outline-button { width: 23px; height: 22px; justify-content: center; padding: 0; border: 0; background: transparent; font-size: 0; }
 .sidebar-file-browser .remote-files-list { flex: 1; min-height: 0; overflow: auto; padding: 0; scrollbar-width: thin; }
-.sidebar-file-browser .remote-file-row { display: flex; min-height: 21px; padding: 0 2px; border: 0; gap: 2px; font-size: 10px; }
-.sidebar-file-browser .remote-file-main { flex: 1; min-width: 0; gap: 5px; padding: 2px; font-size: 10px; }
+.sidebar-file-browser .remote-file-row { display: flex; align-items: center; min-height: 24px; padding: 0 4px; border: 0; gap: 2px; font-size: 11px; }
+/* The full browser's hidden details column must not reserve sidebar width. */
+.sidebar-file-browser .remote-file-main { display: grid; grid-template-columns: 16px minmax(0, 1fr); flex: 1; min-width: 0; min-height: 24px; gap: 6px; padding: 2px 3px; font-size: 11px; }
 .sidebar-file-browser .remote-file-main > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-file-browser .remote-file-icon { flex: 0 0 14px; }
 .sidebar-file-browser .remote-file-main small { display: none; }
-.sidebar-file-browser .remote-file-action { display: none; width: 17px; flex: 0 0 17px; padding: 0; }
+.sidebar-file-browser .remote-file-action { display: none; width: 22px; height: 22px; min-height: 0; flex: 0 0 22px; padding: 0; }
 .sidebar-file-browser .remote-file-row:hover, .sidebar-file-browser .remote-file-row:focus-within { flex-wrap: wrap; }
+.sidebar-file-browser .remote-file-row:hover .remote-file-main, .sidebar-file-browser .remote-file-row:focus-within .remote-file-main { flex-basis: 100%; }
 .sidebar-file-browser .remote-file-row:hover .remote-file-action, .sidebar-file-browser .remote-file-row:focus-within .remote-file-action { display: grid; }
+.sidebar-file-browser .remote-file-row:focus-within { background: var(--panel-soft); }
+.sidebar-file-browser .remote-file-main:focus-visible { outline: 1px solid var(--amber); outline-offset: -1px; }
+.sidebar-file-browser .remote-files-toolbar-actions .outline-button:hover:not(:disabled) { background: var(--panel-soft); border-radius: 3px; }
 .sidebar-file-browser .remote-files-error { padding: 7px 3px; font-size: 9px; }
 .sidebar-monitor { display: flex; align-items: center; justify-content: center; flex-shrink: 0; gap: 5px; min-height: 28px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--mint); font-size: 10px; }
 .sidebar-file-empty { padding: 25px 8px; color: var(--muted); font-size: 11px; text-align: center; }
@@ -626,7 +639,8 @@ button:not(:disabled) { cursor: pointer; }
 .sidebar-divider:hover, .sidebar-divider:active, .sidebar-divider:focus-visible { background: var(--amber-soft); border-color: var(--amber); outline: 0; }
 .app-shell .sidebar { container-type: inline-size; }
 @container (min-width: 380px) {
-  .sidebar-file-browser .remote-file-main small { display: block; margin-left: auto; min-width: 130px; }
+  .sidebar-file-browser .remote-file-main { grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 110px); }
+  .sidebar-file-browser .remote-file-main small { display: block; min-width: 0; margin-left: auto; }
   .sidebar-file-browser .remote-files-toolbar-actions .outline-button { width: auto; gap: 4px; padding: 0 5px; font-size: 9px; }
   .sidebar-file-browser .remote-files-toolbar-actions { flex-wrap: wrap; }
 }

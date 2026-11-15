@@ -1,0 +1,47 @@
+.setup-surface { position: relative; isolation: isolate; min-height: 100dvh; height: 100%; overflow: auto; display: grid; place-items: center; padding: 32px 24px; box-sizing: border-box; background: var(--bg); color: var(--text); font-size: 13px; }
+.setup-card { position: relative; z-index: 1; width: min(440px, 100%); padding: 30px; box-sizing: border-box; border: 1px solid var(--line-strong); border-radius: 12px; background: color-mix(in srgb, var(--panel) 82%, transparent); backdrop-filter: blur(24px) saturate(125%); -webkit-backdrop-filter: blur(24px) saturate(125%); box-shadow: 0 16px 64px #0004, inset 0 1px 0 #ffffff0a; }
+.setup-workspace-preview { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; user-select: none; background: var(--bg); color: var(--muted); filter: blur(5px); opacity: .55; font-size: 12px; }
+.setup-preview-menu { height: 30px; padding: 7px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.setup-preview-body { display: flex; height: calc(100% - 30px); }
+.setup-preview-rail { width: 32px; padding-top: 18px; line-height: 40px; text-align: center; border-right: 1px solid var(--line); background: var(--panel); }
+.setup-preview-sidebar { width: 180px; padding: 18px 12px; border-right: 1px solid var(--line); background: var(--panel); }
+.setup-preview-sidebar strong { font-weight: 500; color: var(--text); }
+.setup-preview-search { padding: 9px; margin: 18px 0 24px; border: 1px solid var(--line); border-radius: 4px; }
+.setup-preview-sidebar p { margin: 22px 0 12px; }
+.setup-preview-main { flex: 1; min-width: 0; }
+.setup-preview-tabs { padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.setup-preview-home { display: flex; flex-direction: column; align-items: center; padding: 15vh 24px 0; }
+.setup-preview-logo { display: grid; place-items: center; width: 56px; height: 56px; margin-bottom: 18px; border: 1px solid var(--mint); border-radius: 12px; color: var(--mint); font-size: 32px; }
+.setup-preview-home > strong { color: var(--text); font-size: 32px; font-weight: 500; }
+.setup-preview-home > p { margin: 12px 0 40px; }
+.setup-preview-tiles { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; }
+.setup-preview-tiles span { padding: 22px; min-width: 150px; border: 1px solid var(--line-strong); border-radius: 6px; background: var(--panel-raised); }
+.setup-brand { display: block; color: var(--amber); font-size: 14px; font-weight: 600; }
+.setup-card h1 { margin: 0 0 8px; font-size: 24px; font-weight: 600; letter-spacing: -.03em; line-height: 1.25; }
+.setup-card p { margin: 0 0 28px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.setup-steps { display: flex; gap: 24px; padding: 0; margin: 14px 0 36px; list-style: none; font-size: 11px; }
+.setup-steps li { color: var(--muted); }
+.setup-steps li[aria-current] { color: var(--text); border-bottom: 2px solid var(--amber); padding-bottom: 7px; }
+.setup-card .settings-grid { grid-template-columns: 1fr; gap: 18px; margin: 0; }
+.setup-card label, .setup-card .settings-grid label { display: flex; flex-direction: column; gap: 8px; color: var(--text); font: inherit; font-size: 12px; letter-spacing: 0; text-transform: none; }
+.setup-pin-form { display: grid; gap: 8px; }
+.setup-pin-form label { flex-direction: row; justify-content: space-between; margin-top: 12px; }
+.setup-pin-form label:first-child { margin-top: 0; }
+.setup-pin-form label span { color: var(--muted); font-size: 11px; }
+.setup-card input, .setup-card select, .setup-card .settings-grid select { box-sizing: border-box; width: 100%; min-width: 0; height: 38px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--panel); color: var(--text); font: inherit; font-size: 13px; letter-spacing: 0; color-scheme: dark; }
+.setup-surface[data-theme="light"] select { color-scheme: light; }
+.setup-card input:focus-visible, .setup-card select:focus-visible, .setup-card button:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; }
+.setup-card input[type="password"] { letter-spacing: .18em; }
+.setup-terminal-preview { margin-top: 24px; padding: 18px; min-height: 82px; border: 1px solid var(--line); border-radius: 5px; font-family: monospace; line-height: 1.7; overflow-wrap: anywhere; }
+.setup-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 28px; }
+.setup-card .setup-actions button { min-height: 36px; min-width: 94px; padding: 0 16px; border-radius: 5px; font-size: 12px; font-weight: 500; }
+.setup-pin-form .setup-actions { margin-top: 20px; }
+.setup-card .primary-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--amber); background: var(--amber); color: var(--bg); }
+.setup-card .primary-button:hover:not(:disabled) { filter: brightness(1.08); }
+.setup-card button:disabled { opacity: .5; cursor: default; }
+.setup-card .outline-button { border: 1px solid var(--line-strong); background: transparent; color: var(--muted); }
+.setup-card .outline-button:hover:not(:disabled) { color: var(--text); background: var(--panel-soft); }
+.setup-card p[role="alert"] { margin: 8px 0 0; color: var(--coral); }
+.setup-card .workspace-pin-status { margin: 20px 0; font-size: 12px; }
+@media (max-height: 600px) { .setup-surface { place-items: start center; padding-block: 20px; } .setup-steps { margin-bottom: 24px; } }
+@media (max-width: 480px) { .setup-surface { padding: 16px; } .setup-card { padding: 22px; } }

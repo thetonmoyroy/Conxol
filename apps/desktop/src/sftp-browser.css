@@ -1,0 +1,34 @@
+/* Explorer geometry follows the reference while colors follow the app palette. */
+.sftp-browser { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; background: var(--panel); color: var(--text); font-family: "Segoe UI", sans-serif; }
+.sftp-toolbar { display: flex; flex-wrap: wrap; align-items: center; flex-shrink: 0; gap: 1px; padding: 3px; border-bottom: 1px solid var(--line); }
+.sftp-toolbar button { display: grid; place-items: center; width: 25px; height: 26px; padding: 3px; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--text); }
+.sftp-toolbar svg { width: 17px; height: 17px; stroke-width: 2; }
+.sftp-toolbar button:nth-child(1), .sftp-toolbar button:nth-child(5) { color: var(--amber); }
+.sftp-toolbar button:nth-child(2) { color: var(--icon-sessions, #4b93bd); }
+.sftp-toolbar button:nth-child(3) { color: var(--icon-files, #4f9fb1); }
+.sftp-toolbar button:nth-child(4) { color: var(--mint); }
+.sftp-toolbar button:nth-child(6) { color: var(--icon-settings, #b76578); }
+.sftp-toolbar button:nth-child(7) { color: var(--coral); }
+.sftp-toolbar button:hover:not(:disabled), .sftp-toolbar button[aria-pressed="true"] { border-color: var(--line-strong); background: var(--panel-soft); }
+.sftp-toolbar button:disabled { opacity: .35; cursor: default; }
+.sftp-browser .sidebar-path { margin: 0; padding: 1px 3px; min-height: 27px; background: var(--bg); border: 1px solid var(--line-strong); }
+.sftp-browser .sidebar-path input { height: 23px; padding-left: 2px; border-radius: 0; font: 12px "Segoe UI", sans-serif; }
+.sftp-column-heading { display: flex; align-items: center; flex-shrink: 0; gap: 7px; min-height: 24px; padding: 2px 6px; border: 0; border-bottom: 1px solid var(--line-strong); background: var(--panel-soft); color: var(--text); font: 11px "Segoe UI", sans-serif; text-align: left; }
+.sftp-column-heading svg { color: var(--icon-sessions, #4b93bd); }
+.sftp-list { flex: 1; min-height: 0; overflow: auto; padding: 2px 0; scrollbar-width: thin; }
+.sftp-row { display: flex; align-items: center; gap: 5px; width: 100%; height: 24px; min-height: 24px; padding: 1px 5px; border: 1px solid transparent; border-radius: 0; background: transparent; color: var(--text); font: 12px "Segoe UI", sans-serif; text-align: left; }
+.sftp-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sftp-row > svg { flex-shrink: 0; color: var(--muted); }
+.sftp-row.is-directory > svg { color: var(--amber); fill: var(--amber); fill-opacity: .55; }
+.sftp-row.sftp-parent > svg { color: var(--mint); fill: var(--mint-soft); }
+.sftp-row:hover { background: var(--panel-soft); }
+.sftp-row.is-selected { border-color: var(--icon-sessions, #4b93bd); background: color-mix(in srgb, var(--icon-sessions, #4b93bd) 24%, var(--panel)); }
+.sftp-row:disabled { opacity: .45; cursor: default; }
+.sftp-browser button:focus-visible { outline: 1px solid var(--amber); outline-offset: -2px; }
+.sftp-empty, .sftp-error { margin: 0; padding: 10px; font-size: 11px; color: var(--muted); }
+.sftp-error { flex-shrink: 0; color: var(--coral); overflow-wrap: anywhere; }
+.sftp-context-menu { position: fixed; z-index: 1500; width: 220px; max-height: calc(100dvh - 8px); overflow-y: auto; padding: 3px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--text); box-shadow: 0 4px 12px #0005; }
+.sftp-context-menu button { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 30px; padding: 4px 8px; border: 0; border-radius: 0; background: transparent; color: inherit; font: 12px "Segoe UI", sans-serif; text-align: left; }
+.sftp-context-menu button:hover, .sftp-context-menu button:focus-visible { background: var(--panel-soft); outline: none; }
+.sftp-context-menu button:disabled { opacity: .4; cursor: default; }
+.sftp-context-menu button:last-child { border-top: 1px solid var(--line); color: var(--coral); }

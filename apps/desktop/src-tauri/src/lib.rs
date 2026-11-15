@@ -1568,6 +1568,15 @@ async fn ssh_list_directory(
 }
 
 #[tauri::command]
+async fn ssh_browse_directory(
+    manager: State<'_, SshManager>,
+    terminal_id: String,
+    path: String,
+) -> Result<ssh::RemoteDirectoryListing, String> {
+    manager.browse_directory(&terminal_id, path).await.map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn ssh_open_remote_text_file(
     manager: State<'_, SshManager>,
     terminal_id: String,
@@ -2195,10 +2204,17 @@ pub fn run() {
                 path: data_dir.join("vault.bin"),
                 vault: portable_vault,
             });
+            let fresh_workspace = !["sessions.json", "settings.json", "workspace-lock.json"]
+                .iter().any(|name| data_dir.join(name).exists());
             let store = SessionStore::open(data_dir.join("sessions.json"))
                 .map_err(|error| error.to_string())?;
-            let settings = SettingsStore::open(data_dir.join("settings.json"))
+            let mut settings = SettingsStore::open(data_dir.join("settings.json"))
                 .map_err(|error| error.to_string())?;
+            if fresh_workspace {
+                let mut initial = settings.get().clone();
+                initial.general.setup_complete = false;
+                settings.save(initial).map_err(|error| error.to_string())?;
+            }
             let snippets = SnippetStore::open(data_dir.join("snippets.json"))
                 .map_err(|error| error.to_string())?;
             app.manage(Mutex::new(notes::NoteStore::open(
@@ -2355,6 +2371,7 @@ pub fn run() {
                 ssh_reconnect,
                 ssh_attach,
                 ssh_list_directory,
+                ssh_browse_directory,
                 ssh_open_remote_text_file,
                 ssh_collect_remote_monitor,
                 ssh_save_remote_text_file,

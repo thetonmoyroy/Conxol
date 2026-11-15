@@ -27,6 +27,9 @@ pub enum ThemePreference {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GeneralSettings {
+    // Existing workspaces predate onboarding and must not be prompted again.
+    #[serde(default = "default_true")]
+    pub setup_complete: bool,
     #[serde(default)]
     pub theme: ThemePreference,
     #[serde(default = "default_true")]
@@ -44,6 +47,7 @@ pub struct GeneralSettings {
 impl Default for GeneralSettings {
     fn default() -> Self {
         Self {
+            setup_complete: true,
             theme: ThemePreference::default(),
             confirm_multiline_paste: true,
             paste_preview: true,
@@ -428,6 +432,17 @@ fn default_shortcut_emergency_broadcast_disable() -> String {
 #[cfg(test)]
 mod tests {
     use super::{AppSettings, SettingsValidationError};
+
+    #[test]
+    fn setup_completion_preserves_existing_workspaces_and_pending_setup() {
+        let existing: super::GeneralSettings = serde_json::from_str("{}").unwrap();
+        assert!(existing.setup_complete);
+        let pending: super::GeneralSettings =
+            serde_json::from_str(r#"{"setupComplete":false}"#).unwrap();
+        assert!(!pending.setup_complete);
+        let json = serde_json::to_string(&pending).unwrap();
+        assert!(!serde_json::from_str::<super::GeneralSettings>(&json).unwrap().setup_complete);
+    }
 
     #[test]
     fn tab_plus_preference_migrates_and_round_trips() {

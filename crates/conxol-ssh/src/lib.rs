@@ -944,9 +944,36 @@ pub struct RemoteMonitorSnapshot {
     pub load_average: Option<[f64; 3]>,
     pub memory_total_bytes: Option<u64>,
     pub memory_available_bytes: Option<u64>,
+    pub memory_cached_bytes: Option<u64>,
+    pub memory_buffers_bytes: Option<u64>,
+    pub network_interfaces: Vec<RemoteNetworkInterface>,
+    pub disks: Vec<RemoteDiskUsage>,
     pub root_disk_used_percent: Option<u8>,
     pub process_count: Option<u64>,
     pub supported_metrics: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteNetworkInterface {
+    pub name: String,
+    pub received_bytes: u64,
+    pub transmitted_bytes: u64,
+    pub receive_errors: u64,
+    pub receive_dropped: u64,
+    pub transmit_errors: u64,
+    pub transmit_dropped: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteDiskUsage {
+    pub filesystem: String,
+    pub mount_point: String,
+    pub total_bytes: u64,
+    pub used_bytes: u64,
+    pub available_bytes: u64,
+    pub used_percent: u8,
 }
 
 struct RemoteCommandOutput {
@@ -959,7 +986,7 @@ struct RemoteCommandOutput {
 // This string is intentionally constant. User input never reaches a remote
 // shell through the monitoring API. Every individual metric is optional so a
 // BSD host, a minimal appliance, or a host without /proc can degrade cleanly.
-const REMOTE_MONITOR_COMMAND: &[u8] = br#"sh -c 'printf "__CONXOL__hostname=%s\n" "$(hostname 2>/dev/null || true)"; printf "__CONXOL__kernel=%s\n" "$(uname -sr 2>/dev/null || true)"; if [ -r /proc/uptime ]; then read uptime_seconds uptime_rest < /proc/uptime; printf "__CONXOL__uptime_seconds=%s\n" "$uptime_seconds"; fi; if [ -r /proc/loadavg ]; then read load_one load_two load_three load_rest < /proc/loadavg; printf "__CONXOL__load=%s,%s,%s\n" "$load_one" "$load_two" "$load_three"; elif command -v sysctl >/dev/null 2>&1; then load_line=$(sysctl -n vm.loadavg 2>/dev/null || true); set -- $load_line; printf "__CONXOL__load=%s,%s,%s\n" "$(printf %s "$1" | tr -d "{}")" "$2" "$3"; fi; if [ -r /proc/meminfo ]; then mem_total=$(grep ^MemTotal: /proc/meminfo 2>/dev/null || true); set -- $mem_total; printf "__CONXOL__mem_total_kib=%s\n" "$2"; mem_available=$(grep ^MemAvailable: /proc/meminfo 2>/dev/null || true); set -- $mem_available; printf "__CONXOL__mem_available_kib=%s\n" "$2"; elif command -v sysctl >/dev/null 2>&1; then printf "__CONXOL__mem_total_bytes=%s\n" "$(sysctl -n hw.memsize 2>/dev/null || true)"; fi; disk_line=$(df -P / 2>/dev/null | tail -n 1 || true); set -- $disk_line; printf "__CONXOL__disk_root_used_percent=%s\n" "$(printf %s "$5" | tr -d "%")"; if command -v ps >/dev/null 2>&1; then printf "__CONXOL__process_count=%s\n" "$(ps -e 2>/dev/null | tail -n +2 | wc -l | tr -d " ")"; fi'"#;
+const REMOTE_MONITOR_COMMAND: &[u8] = include_bytes!("remote-monitor.sh");
 
 /// A server-initiated channel created by an SSH remote `-R` forward.
 ///
@@ -4090,6 +4117,10 @@ fn parse_remote_monitor_snapshot(stdout: &[u8]) -> Result<RemoteMonitorSnapshot,
     let mut load_average = None;
     let mut memory_total_bytes = None;
     let mut memory_available_bytes = None;
+    let mut memory_cached_bytes = None;
+    let mut memory_buffers_bytes = None;
+    let mut network_interfaces = Vec::new();
+    let mut disks = Vec::new();
     let mut root_disk_used_percent = None;
     let mut process_count = None;
 
@@ -4133,6 +4164,30 @@ fn parse_remote_monitor_snapshot(stdout: &[u8]) -> Result<RemoteMonitorSnapshot,
                     .ok()
                     .and_then(|kib| kib.checked_mul(1024));
             }
+            "mem_cached_kib" => memory_cached_bytes = value.parse::<u64>().ok().and_then(|v| v.checked_mul(1024)),
+            "mem_buffers_kib" => memory_buffers_bytes = value.parse::<u64>().ok().and_then(|v| v.checked_mul(1024)),
+            "network" if network_interfaces.len() < 32 => {
+                let fields: Vec<_> = value.split(',').take(8).collect();
+                if fields.len() == 7 && !fields[0].is_empty() && fields[0].len() <= 64
+                    && fields[0].chars().all(|c| c.is_ascii_alphanumeric() || "_-.:".contains(c)) {
+                    let counters: Option<Vec<u64>> = fields[1..].iter().map(|v| v.parse().ok()).collect();
+                    if let Some(c) = counters {
+                        network_interfaces.push(RemoteNetworkInterface {
+                            name: fields[0].to_owned(), received_bytes: c[0], transmitted_bytes: c[1],
+                            receive_errors: c[2], receive_dropped: c[3], transmit_errors: c[4], transmit_dropped: c[5],
+                        });
+                    }
+                }
+            }
+            "disk" if disks.len() < 64 => {
+                let f: Vec<_> = value.split('\t').take(7).collect();
+                if f.len() == 6 && f[0].len() <= 256 && f[1].len() <= 1024 && f[1].starts_with('/') {
+                    let counts: Option<Vec<u64>> = f[2..5].iter().map(|v| v.parse::<u64>().ok().and_then(|v| v.checked_mul(1024))).collect();
+                    if let (Some(c), Some(percent)) = (counts, f[5].parse::<u8>().ok().filter(|v| *v <= 100)) {
+                        disks.push(RemoteDiskUsage { filesystem: f[0].into(), mount_point: f[1].into(), total_bytes: c[0], used_bytes: c[1], available_bytes: c[2], used_percent: percent });
+                    }
+                }
+            }
             "mem_total_bytes" => memory_total_bytes = value.parse().ok(),
             "disk_root_used_percent" => {
                 root_disk_used_percent = value.parse::<u8>().ok().filter(|percent| *percent <= 100);
@@ -4143,6 +4198,8 @@ fn parse_remote_monitor_snapshot(stdout: &[u8]) -> Result<RemoteMonitorSnapshot,
     }
 
     let mut supported_metrics = Vec::new();
+    if !disks.is_empty() { supported_metrics.push("filesystems".to_owned()); }
+    if !network_interfaces.is_empty() { supported_metrics.push("network".to_owned()); }
     if hostname.is_some() {
         supported_metrics.push("hostname".to_owned());
     }
@@ -4178,6 +4235,10 @@ fn parse_remote_monitor_snapshot(stdout: &[u8]) -> Result<RemoteMonitorSnapshot,
         load_average,
         memory_total_bytes,
         memory_available_bytes,
+        memory_cached_bytes,
+        memory_buffers_bytes,
+        network_interfaces,
+        disks,
         root_disk_used_percent,
         process_count,
         supported_metrics,
@@ -5125,6 +5186,31 @@ mod tests {
             encode_remote_text("emoji 😀", RemoteTextEncoding::Windows1252),
             Err(SshError::RemoteTextEncodingUnsupported)
         ));
+    }
+
+    #[test]
+    fn remote_monitor_hover_details_are_bounded_and_validate_counters() {
+        let snapshot = parse_remote_monitor_snapshot(b"__CONXOL__mem_cached_kib=2048\n__CONXOL__mem_buffers_kib=16\n__CONXOL__network=eth0,1000,2000,3,4,5,6\n__CONXOL__network=bad,negative,0,0,0,0,0\n").unwrap();
+        assert_eq!(snapshot.memory_cached_bytes, Some(2048 * 1024));
+        assert_eq!(snapshot.memory_buffers_bytes, Some(16 * 1024));
+        assert_eq!(snapshot.network_interfaces.len(), 1);
+        assert_eq!(snapshot.network_interfaces[0].transmitted_bytes, 2000);
+        assert_eq!(snapshot.network_interfaces[0].receive_errors, 3);
+        assert_eq!(snapshot.network_interfaces[0].transmit_dropped, 6);
+        let many = "__CONXOL__network=eth0,1,2,0,0,0,0\n".repeat(64);
+        assert_eq!(parse_remote_monitor_snapshot(many.as_bytes()).unwrap().network_interfaces.len(), 32);
+    }
+
+    #[test]
+    fn remote_monitor_mount_details_validate_units_and_bounds() {
+        let snapshot = parse_remote_monitor_snapshot(b"__CONXOL__disk=/dev/sda1\t/\t4096\t1024\t3072\t25\n__CONXOL__disk=tmpfs\t/run\t100\t1\t99\t1\n__CONXOL__disk=bad\t/invalid\t1\t1\t0\t101\n").unwrap();
+        assert_eq!(snapshot.disks.len(), 2);
+        assert_eq!(snapshot.disks[0].total_bytes, 4096 * 1024);
+        assert_eq!(snapshot.disks[0].available_bytes, 3072 * 1024);
+        assert_eq!(snapshot.disks[0].mount_point, "/");
+        assert_eq!(snapshot.disks[1].used_percent, 1);
+        let many = "__CONXOL__disk=tmpfs\t/run\t100\t1\t99\t1\n".repeat(80);
+        assert_eq!(parse_remote_monitor_snapshot(many.as_bytes()).unwrap().disks.len(), 64);
     }
 
     #[test]

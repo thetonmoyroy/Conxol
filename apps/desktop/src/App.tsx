@@ -9,6 +9,8 @@ import { attachTerminalGpuRenderer } from "./terminal-gpu-renderer";
 import { ANDROID_TERMINAL_COLUMNS, fitAndroidTerminal, attachTerminalTouchPan } from "./terminal-mobile-layout";
 import { useStoreUpdates } from "./StoreUpdates";
 import { literalInputProps } from "./literal-input";
+import { SftpBrowser } from "./SftpBrowser";
+import { networkMbps, type NetworkSample } from "./remote-network-rate";
 import { ApplicationMenuBar } from "./ApplicationMenuBar";
 import { canReconnectTerminal, isReconnectKey } from "./terminal-reconnect";
 import { SessionRowActions } from "./SessionRowActions";
@@ -68,7 +70,8 @@ import { retainOperationHistory } from "./operation-history";
 import { chooseOverwrite, confirmAction, confirmSessionStartup, promptText } from "./text-prompt";
 import { remoteSessionCloseError, remoteSessionCloseStatus, remoteSessionReconnectStatus, remoteSessionStateError, sanitizeTerminalErrorDetail } from "./terminal-session-close";
 import { cachedTheme, terminalThemes, themeMode, workspaceTheme, appThemeVariables, type ThemePreference, type ColorTheme } from "./theme";
-import { isRemoteMonitorRefreshInterval, REMOTE_MONITOR_REFRESH_INTERVALS } from "./remote-monitor";
+import { RemoteMonitorStrip } from "./RemoteMonitorStrip";
+import { isRemoteMonitorRefreshInterval, readRemoteMonitorInterval, saveRemoteMonitorInterval } from "./remote-monitor";
 import { remoteChildPath, remoteParentPath } from "./remote-path";
 import { quoteRemotePromptPath } from "./remote-prompt";
 import { normalizeDroppedUploadPaths } from "./transfer-input";
@@ -141,10 +144,11 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-type View = "generator" | "home" | "terminal" | "files" | "tunnels" | "monitor" | "transfers" | "audit";
+type View = "generator" | "home" | "terminal" | "files" | "tunnels" | "transfers" | "audit";
 
-type AppSettings = {
+export type AppSettings = {
   general: {
+    setupComplete: boolean;
     theme: ThemePreference;
     confirmMultilinePaste: boolean;
     pastePreview: boolean;
@@ -190,7 +194,7 @@ type AppSettings = {
 
 
 const defaultSettings: AppSettings = {
-  general: { theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false, tabPlusSavedSessions: false },
+  general: { setupComplete: true, theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false, tabPlusSavedSessions: false },
   appearance: { fontSize: 14 },
   terminal: { ...defaultTerminalAppearance, scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
   keyboard: {
@@ -542,7 +546,7 @@ type SerialConnectResponse = {
   device: string;
 };
 
-type RemoteEntry = {
+export type RemoteEntry = {
   name: string;
   path: string;
   size: number | null;
@@ -568,13 +572,19 @@ type RemoteTextDocument = {
   backupCleanupFailed?: boolean;
 };
 
-type RemoteMonitorSnapshot = {
+export type RemoteMonitorSnapshot = {
+  networkReceivedMbps?: number | null;
+  networkSentMbps?: number | null;
+  disks?: { filesystem: string; mountPoint: string; totalBytes: number; usedBytes: number; availableBytes: number; usedPercent: number }[];
   hostname?: string | null;
   kernel?: string | null;
   uptimeSeconds?: number | null;
   loadAverage?: [number, number, number] | null;
   memoryTotalBytes?: number | null;
   memoryAvailableBytes?: number | null;
+  memoryCachedBytes?: number | null;
+  memoryBuffersBytes?: number | null;
+  networkInterfaces?: { name: string; receivedBytes: number; transmittedBytes: number; receiveErrors: number; receiveDropped: number; transmitErrors: number; transmitDropped: number }[];
   rootDiskUsedPercent?: number | null;
   processCount?: number | null;
   supportedMetrics: string[];
@@ -1346,10 +1356,16 @@ function App() {
   const [tunnels, setTunnels] = useState<SshTunnelEvent[]>([]);
   const [tunnelDraft, setTunnelDraft] = useState<{ kind: "local" | "remote" | "dynamic"; terminalId: string } | null>(null);
   const [remoteMonitor, setRemoteMonitor] = useState<RemoteMonitorSnapshot | null>(null);
+  const remoteNetworkSample = useRef<{ sessionId: string; sample: NetworkSample } | null>(null);
   const [remoteMonitorStatus, setRemoteMonitorStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [remoteMonitorError, setRemoteMonitorError] = useState<string | null>(null);
   const [remoteMonitorLive, setRemoteMonitorLive] = useState(false);
-  const [remoteMonitorIntervalSeconds, setRemoteMonitorIntervalSeconds] = useState<number>(30);
+  const [remoteMonitorIntervalSeconds, setRemoteMonitorIntervalSeconds] = useState<number>(readRemoteMonitorInterval);
+  const changeRemoteMonitorInterval = (seconds: number) => {
+    if (!isRemoteMonitorRefreshInterval(seconds)) return;
+    setRemoteMonitorIntervalSeconds(seconds);
+    saveRemoteMonitorInterval(seconds);
+  };
   const remoteMonitorRequestRef = useRef<{ requestId: number; sessionId: string } | null>(null);
   const remoteMonitorRequestSequenceRef = useRef(0);
   const remoteMonitorGenerationRef = useRef(0);
@@ -1456,7 +1472,7 @@ function App() {
     ? "Conxol - Your network, in command"
     : activeView === "terminal"
       ? `${sanitizeTerminalTitle(activeTerminal?.label ?? "") || sanitizeTerminalTitle(remoteHost ?? "") || "Terminal"} - Conxol`
-      : `${activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)} - Conxol`;
+      : `${activeView === "files" ? "Remote files" : activeView[0].toUpperCase() + activeView.slice(1)} - Conxol`;
   const windowTitleUpdate = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
     document.title = selectedWindowTitle;
@@ -2997,14 +3013,14 @@ function App() {
     setSftpStatus("loading");
     setRemoteDirectoryError(null);
     try {
-      const entries = await invoke<RemoteEntry[]>("ssh_list_directory", {
+      const listing = await invoke<{ path: string; entries: RemoteEntry[] }>("ssh_browse_directory", {
         terminalId: sessionId,
         path,
       });
       if (!isCurrentRequest()) return;
       sftpAvailabilityRef.current.set(sessionId, true);
-      setRemoteEntries(entries);
-      setRemotePath(path);
+      setRemoteEntries(listing.entries);
+      setRemotePath(listing.path);
       setSftpStatus("ready");
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -3049,7 +3065,10 @@ function App() {
     try {
       const snapshot = await invoke<RemoteMonitorSnapshot>("ssh_collect_remote_monitor", { terminalId: sessionId });
       if (!isCurrentRequest()) return;
-      setRemoteMonitor(snapshot);
+      const sample = { time: performance.now(), interfaces: snapshot.networkInterfaces ?? [] };
+      const rates = networkMbps(remoteNetworkSample.current?.sessionId === sessionId ? remoteNetworkSample.current.sample : null, sample);
+      remoteNetworkSample.current = { sessionId, sample };
+      setRemoteMonitor({ ...snapshot, networkReceivedMbps: rates.received, networkSentMbps: rates.sent });
       setRemoteMonitorStatus("ready");
     } catch (error) {
       if (!isCurrentRequest()) return;
@@ -3699,19 +3718,14 @@ function App() {
 
   useEffect(() => {
     setRemoteMonitor(null);
+    remoteNetworkSample.current = null;
     setRemoteMonitorStatus("idle");
     setRemoteMonitorError(null);
     setRemoteMonitorLive(false);
   }, [remoteSessionId]);
 
   useEffect(() => {
-    if (activeView === "monitor" && remoteSessionId && remoteProtocol === "ssh" && remoteMonitorStatus === "idle") {
-      void collectRemoteMonitor();
-    }
-  }, [activeView, collectRemoteMonitor, remoteMonitorStatus, remoteProtocol, remoteSessionId]);
-
-  useEffect(() => {
-    if (!remoteMonitorLive || activeView !== "monitor" || !remoteSessionId || remoteProtocol !== "ssh") return;
+    if (!remoteMonitorLive || activeView !== "terminal" || !remoteSessionId || remoteProtocol !== "ssh" || terminalStatus !== "connected" || workspaceSecurity.status?.locked !== false) return;
     let disposed = false;
     let timer: number | undefined;
     const generation = ++remoteMonitorGenerationRef.current;
@@ -3730,7 +3744,7 @@ function App() {
       remoteMonitorGenerationRef.current += 1;
       if (timer !== undefined) window.clearTimeout(timer);
     };
-  }, [activeView, collectRemoteMonitor, remoteMonitorIntervalSeconds, remoteMonitorLive, remoteProtocol, remoteSessionId]);
+  }, [activeView, collectRemoteMonitor, remoteMonitorIntervalSeconds, remoteMonitorLive, remoteProtocol, remoteSessionId, terminalStatus, workspaceSecurity.status?.locked]);
 
   useEffect(() => {
     if (!IS_TAURI) return;
@@ -4018,7 +4032,7 @@ function App() {
             </button>
           </div>
 
-          {sidebarMode !== "shortcuts" && sidebarMode !== "notes" && <label className="search-box">
+          {sidebarMode !== "shortcuts" && sidebarMode !== "notes" && sidebarMode !== "files" && <label className="search-box">
             <Search size={15} />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Quick connect / find session…" aria-label="Find session" onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing) { event.preventDefault(); if (event.repeat) return; const saved = savedSessions.find((item) => item.id === firstMatchingSession?.id); if (saved) { if (saved.protocol === "LOCAL") openSavedLocalSession(saved); else void connectSavedSession(saved); } else if (!search.trim()) setQuickConnectOpen(true); } }} />
             <span className="search-key">{formatShortcut(settings.keyboard.quickConnect)}</span>
@@ -4041,9 +4055,8 @@ function App() {
         disabledReason={!activeTerminal || activeTerminal.status !== "connected" ? "Select a connected text terminal to paste a shortcut." : broadcastEnabled || macroRun || macroRecording ? "Stop broadcast, recording, or the running macro to paste." : ""}
         onSave={saveCommandShortcut} onDelete={deleteCommandShortcut} onPaste={pasteShortcut} /> : sidebarMode === "files" ? <div className="sidebar-file-browser">
             {remoteSessionId && remoteProtocol === "ssh" ? <>
-              <div className="sidebar-path"><Folder size={12} /><span title={remotePath}>{remotePath}</span><button aria-label="Refresh remote files" title="Refresh" disabled={sftpStatus === "loading"} onClick={() => navigateRemote(remotePath)}><RefreshCw size={12} /></button></div>
-<RemoteFilesView entries={remoteListingSessionId === remoteSessionId && sftpStatus === "ready" ? remoteEntries : []} path={remoteListingSessionId === remoteSessionId ? remotePath : "."} status={remoteListingSessionId === remoteSessionId ? sftpStatus : "loading"} error={connectionError ?? (remoteListingSessionId === remoteSessionId ? remoteDirectoryError : null)} localDropActive={localDropActive} transfers={transfers.filter((transfer) => transfer.terminalId === remoteSessionId)} onOpenTerminal={() => setActiveView("terminal")} onNavigate={navigateRemote} onDownload={startDownload} onUpload={startUpload} onCreateDirectory={createRemoteDirectory} onRename={renameRemote} onDelete={deleteRemote} onSetPermissions={setRemotePermissions} onCopyPath={copyRemotePath} onEdit={openRemoteTextFile} onCancelTransfer={cancelTransfer} onRetryTransfer={retryTransfer} />
-              <button className="sidebar-monitor" disabled={terminalStatus !== "connected"} onClick={() => setActiveView("monitor")}><Gauge size={13} /> Remote monitoring</button>
+<RemoteFilesView compact key={remoteSessionId} entries={remoteListingSessionId === remoteSessionId && sftpStatus === "ready" ? remoteEntries : []} path={remoteListingSessionId === remoteSessionId ? remotePath : "."} status={remoteListingSessionId === remoteSessionId ? sftpStatus : "loading"} error={connectionError ?? (remoteListingSessionId === remoteSessionId ? remoteDirectoryError : null)} localDropActive={localDropActive} transfers={transfers.filter((transfer) => transfer.terminalId === remoteSessionId)} onOpenTerminal={() => setActiveView("terminal")} onNavigate={navigateRemote} onDownload={startDownload} onUpload={startUpload} onCreateDirectory={createRemoteDirectory} onRename={renameRemote} onDelete={deleteRemote} onSetPermissions={setRemotePermissions} onCopyPath={copyRemotePath} onEdit={openRemoteTextFile} onCancelTransfer={cancelTransfer} onRetryTransfer={retryTransfer} />
+              <button className="sidebar-monitor" aria-pressed={remoteMonitorLive} disabled={terminalStatus !== "connected"} onClick={() => { setActiveView("terminal"); setRemoteMonitorLive(value => !value); }}><Gauge size={13} /> Remote monitoring</button>
             </> : <div className="sidebar-file-empty"><Folder size={22} /><p>Open an SSH session to browse remote files.</p><button className="outline-button" onClick={() => setQuickConnectOpen(true)}>New session</button></div>}
           </div> : <>
           <div className={`session-list ${sessionDropTarget === "" ? "session-drop-target" : ""}`} data-session-folder="">
@@ -4111,7 +4124,6 @@ function App() {
             <div className="security-note"><ShieldCheck size={15} /><span><strong>Saved secrets stay native</strong><small>Vault boundary is Rust-owned</small></span></div>
             <button className={`nav-item ${diagnosticsOpen ? "active" : ""}`} onClick={() => setDiagnosticsOpen(true)}><Activity size={15} /> Network diagnostics</button>
             <button className="nav-item" onClick={() => setActiveView("tunnels")}><Network size={15} /> Tunnel manager <span className="nav-count">{activeTunnelCount}</span></button>
-            <button className={`nav-item ${activeView === "monitor" ? "active" : ""}`} onClick={() => setActiveView("monitor")} disabled={!remoteSessionId || remoteProtocol !== "ssh"} title={remoteSessionId && remoteProtocol === "ssh" ? "Collect a one-shot SSH system snapshot" : "Open an SSH session first"}><Gauge size={15} /> Remote monitor</button>
             <button className={`nav-item ${activeView === "transfers" ? "active" : ""}`} onClick={() => setActiveView("transfers")}><ArrowDownToLine size={15} /> Transfers <span className="nav-count">{activeTransferCount}</span></button>
             <button className={`nav-item ${activeView === "audit" ? "active" : ""}`} onClick={() => setActiveView("audit")}><History size={15} /> Audit history <span className="nav-count">{auditEvents.length}</span></button>
           </div>
@@ -4162,7 +4174,7 @@ function App() {
                         </div>
                       );
                     })}</div>
-            {activeView !== "home" && activeView !== "terminal" && <div className="desktop-tool-tab"><span>{activeView === "files" ? "Remote files" : activeView === "monitor" ? "Remote monitoring" : activeView[0].toUpperCase() + activeView.slice(1)}</span><button aria-label="Close tool" onClick={() => setActiveView(selectedTerminalId ? "terminal" : "home")}><X size={12} /></button></div>}
+            {activeView !== "home" && activeView !== "terminal" && <div className="desktop-tool-tab"><span>{activeView === "files" ? "Remote files" : activeView[0].toUpperCase() + activeView.slice(1)}</span><button aria-label="Close tool" onClick={() => setActiveView(selectedTerminalId ? "terminal" : "home")}><X size={12} /></button></div>}
             <button className="desktop-add-tab" aria-label={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} title={settings.general.tabPlusSavedSessions ? "Open saved session" : "New session"} onClick={() => settings.general.tabPlusSavedSessions ? setSavedSessionPickerOpen(true) : setQuickConnectOpen(true)}><Plus size={14} /></button>
             {activeView === "terminal" && (<div className="terminal-toolbar">
                   <div className="terminal-toolbar-actions">
@@ -4194,7 +4206,6 @@ function App() {
                 <button type="button" id="workspace-tab-terminal" aria-controls="workspace-view-panel" tabIndex={activeView === "terminal" ? 0 : -1} className={activeView === "terminal" ? "selected" : ""} onClick={() => setActiveView("terminal")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "terminal"}><TerminalIcon size={15} /> Terminal</button>
                 <button type="button" id="workspace-tab-files" aria-controls="workspace-view-panel" tabIndex={activeView === "files" ? 0 : -1} className={activeView === "files" ? "selected" : ""} onClick={() => setActiveView("files")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "files"}><Folder size={15} /> Files <span className="tab-badge">SSH</span></button>
                 <button type="button" id="workspace-tab-tunnels" aria-controls="workspace-view-panel" tabIndex={activeView === "tunnels" ? 0 : -1} className={activeView === "tunnels" ? "selected" : ""} onClick={() => setActiveView("tunnels")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "tunnels"}><Network size={15} /> Tunnels <span className="tab-badge">{activeTunnelCount}</span></button>
-                {remoteSessionId && remoteProtocol === "ssh" && <button type="button" id="workspace-tab-monitor" aria-controls="workspace-view-panel" tabIndex={activeView === "monitor" ? 0 : -1} className={activeView === "monitor" ? "selected" : ""} onClick={() => setActiveView("monitor")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "monitor"}><Gauge size={15} /> Monitor</button>}
                 <button type="button" id="workspace-tab-transfers" aria-controls="workspace-view-panel" tabIndex={activeView === "transfers" ? 0 : -1} className={activeView === "transfers" ? "selected" : ""} onClick={() => setActiveView("transfers")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "transfers"}><ArrowDownToLine size={15} /> Transfers <span className="tab-badge">{activeTransferCount}</span></button>
                 <button type="button" id="workspace-tab-audit" aria-controls="workspace-view-panel" tabIndex={activeView === "audit" ? 0 : -1} className={activeView === "audit" ? "selected" : ""} onClick={() => setActiveView("audit")} onKeyDown={handleWorkspaceTabKeyDown} role="tab" aria-selected={activeView === "audit"}><History size={15} /> Audit</button>
               </div>
@@ -4219,7 +4230,7 @@ function App() {
                       }}
                     >{label}</button>)}
                   </div>}
-                  <div className="terminal-statusbar"><span><span className="status-square" /> {terminalStatus === "connected" ? "connected" : terminalStatus}</span><span>{remoteProtocol ? `${remoteProtocol} transport` : "local process"}</span><span>scrollback {settings.terminal.scrollbackLines.toLocaleString()}</span><span>{settings.appearance.fontSize}px · Mod +/- zoom</span><span className="terminal-status-spacer" />{canReconnectTerminal(remoteProtocol, terminalStatus, activeTerminal?.connecting) && <button type="button" className="terminal-status-action" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal()}><RefreshCw size={12} /> {reconnectBusy ? "Reconnecting…" : "Disconnected · Reconnect (Enter / Space / R)"}</button>}<span>{formatShortcut(settings.keyboard.quickConnect)} for quick connect</span></div>
+                  {remoteMonitorLive && remoteProtocol === "ssh" && <RemoteMonitorStrip snapshot={remoteMonitor} loading={remoteMonitorStatus === "loading"} error={remoteMonitorError} interval={remoteMonitorIntervalSeconds} onInterval={changeRemoteMonitorInterval} onRefresh={() => void collectRemoteMonitor()} onClose={() => setRemoteMonitorLive(false)} />}
               </section>
               <div hidden={activeView !== "generator"}><ConfigGenerator /></div>
               {activeView === "generator" ? null : activeView === "home" ? (
@@ -4233,14 +4244,12 @@ function App() {
                 <RemoteFilesView entries={remoteListingSessionId === remoteSessionId && sftpStatus === "ready" ? remoteEntries : []} path={remoteListingSessionId === remoteSessionId ? remotePath : "."} status={remoteListingSessionId === remoteSessionId ? sftpStatus : "loading"} error={connectionError ?? (remoteListingSessionId === remoteSessionId ? remoteDirectoryError : null)} localDropActive={localDropActive} transfers={transfers.filter((transfer) => transfer.terminalId === remoteSessionId)} onOpenTerminal={() => setActiveView("terminal")} onNavigate={navigateRemote} onDownload={startDownload} onUpload={startUpload} onCreateDirectory={createRemoteDirectory} onRename={renameRemote} onDelete={deleteRemote} onSetPermissions={setRemotePermissions} onCopyPath={copyRemotePath} onEdit={openRemoteTextFile} onCancelTransfer={cancelTransfer} onRetryTransfer={retryTransfer} />
               ) : activeView === "tunnels" && remoteSessionId && remoteProtocol === "ssh" ? (
                 <TunnelView tunnels={tunnels} onNewTunnel={() => setTunnelDraft({ kind: "local", terminalId: remoteSessionId })} onNewDynamicForward={() => setTunnelDraft({ kind: "dynamic", terminalId: remoteSessionId })} onNewRemoteForward={() => setTunnelDraft({ kind: "remote", terminalId: remoteSessionId })} onCancelTunnel={cancelTunnel} />
-              ) : activeView === "monitor" && remoteSessionId && remoteProtocol === "ssh" ? (
-                <RemoteMonitorView snapshot={remoteMonitor} status={remoteMonitorStatus} error={remoteMonitorError} live={remoteMonitorLive} intervalSeconds={remoteMonitorIntervalSeconds} onLiveChange={setRemoteMonitorLive} onIntervalChange={setRemoteMonitorIntervalSeconds} onRefresh={() => void collectRemoteMonitor()} />
               ) : activeView === "transfers" ? (
                 <TransferManagerView transfers={transfers} onCancelTransfer={cancelTransfer} onRetryTransfer={retryTransfer} />
               ) : activeView === "audit" ? (
                 <AuditHistoryView events={auditEvents} onClear={() => void clearAudit()} />
               ) : activeView === "terminal" ? null : (
-                <EmptyProtocolView view={activeView} onAction={activeView === "tunnels" || activeView === "monitor" ? () => setQuickConnectOpen(true) : undefined} />
+                <EmptyProtocolView view={activeView} onAction={activeView === "tunnels" ? () => setQuickConnectOpen(true) : undefined} />
               )}
 
               <div className="lower-grid">
@@ -4505,7 +4514,8 @@ function SessionRow({ appearance, onCustomize, name, detail, type, active, favor
     onClickCapture={event => { if (suppressClick.current) { event.preventDefault(); event.stopPropagation(); suppressClick.current = false; } }}><button className="session-row-main" title={`${name} · ${detail}${onEdit ? " · Right-click or F2 to rename and organize" : ""}`} onContextMenu={onEdit ? event => { event.preventDefault(); onEdit(); } : undefined} onKeyDown={event => { if (event.key === "F2" && onEdit) { event.preventDefault(); onEdit(); } }} disabled={disabled} aria-busy={connecting} onClick={onSelect}><span className={`session-icon ${type === "LOCAL" ? "local" : "remote"}`}>{appearance ? <SessionFolderIcon appearance={appearance} /> : type === "LOCAL" ? <TerminalIcon size={14} /> : type === "WEB" ? <Globe size={14} /> : <Server size={14} />}</span><span className="session-copy"><strong>{name}</strong><small>{detail}</small></span><span className={`session-type ${type === "LOCAL" ? "local-type" : ""}`}>{type}</span></button><SessionRowActions name={name} favorite={favorite} onCustomize={onCustomize} onEdit={onEdit} onDelete={onDelete} onToggleFavorite={onToggleFavorite} /></div>;
 }
 
-function RemoteFilesView({ entries, path, status, error, localDropActive, transfers, onOpenTerminal, onNavigate, onDownload, onUpload, onCreateDirectory, onRename, onDelete, onSetPermissions, onCopyPath, onEdit, onCancelTransfer, onRetryTransfer }: {
+function RemoteFilesView({ compact = false, entries, path, status, error, localDropActive, transfers, onOpenTerminal, onNavigate, onDownload, onUpload, onCreateDirectory, onRename, onDelete, onSetPermissions, onCopyPath, onEdit, onCancelTransfer, onRetryTransfer }: {
+  compact?: boolean;
   entries: RemoteEntry[];
   path: string;
   status: "idle" | "loading" | "ready" | "error";
@@ -4543,6 +4553,12 @@ function RemoteFilesView({ entries, path, status, error, localDropActive, transf
       if (sort === "modified" && first.modifiedUnixSeconds !== second.modifiedUnixSeconds) return (second.modifiedUnixSeconds ?? 0) > (first.modifiedUnixSeconds ?? 0) ? 1 : -1;
       return first.name.localeCompare(second.name, undefined, { sensitivity: "base", numeric: true });
     });
+  if (compact) return <SftpBrowser entries={entries} path={path} loading={status === "loading"} ready={status === "ready"} error={error}
+    onNavigate={onNavigate} onDownload={entry => onDownload(entry, "sftp")} onUpload={() => onUpload("sftp", "files")}
+    onCreateDirectory={onCreateDirectory} onRename={onRename} onDelete={onDelete}
+    onSetPermissions={onSetPermissions} onCopyPath={onCopyPath} onEdit={entry => onEdit(entry, "utf-8")}>
+    {transfers.length > 0 && <TransferPanel transfers={transfers} onCancelTransfer={onCancelTransfer} onRetryTransfer={onRetryTransfer} />}
+  </SftpBrowser>;
   return <section className="remote-files" aria-label="Remote files">
       <div className="remote-files-toolbar">
       <div><span className="eyebrow">SFTP / BROWSER</span><strong>{path}</strong></div>
@@ -4564,7 +4580,7 @@ function RemoteFilesView({ entries, path, status, error, localDropActive, transf
     <div className="remote-files-list">
       <div className="remote-file-row parent"><button className="remote-file-main" onClick={() => onNavigate(parentPath)} disabled={status !== "ready"}><span className="remote-file-icon"><Folder size={15} /></span><span>..</span><small>parent directory</small></button></div>
       {visibleEntries.map((entry) => <div className={`remote-file-row ${entry.isDirectory ? "directory" : ""}`} key={entry.path}>
-        <button className="remote-file-main" onClick={() => entry.isDirectory ? onNavigate(entry.path) : undefined} aria-label={entry.isDirectory ? `Open ${entry.name}` : entry.name}>
+        <button className="remote-file-main" title={entry.name} onClick={() => entry.isDirectory ? onNavigate(entry.path) : undefined} aria-label={entry.isDirectory ? `Open ${entry.name}` : entry.name}>
           <span className="remote-file-icon">{entry.isDirectory ? <Folder size={15} /> : <ArrowDownToLine size={15} />}</span><span>{entry.name}</span><small>{remoteEntryDetails(entry)}</small>
         </button>
         <button className="remote-file-action" onClick={() => onDownload(entry, entry.isDirectory ? "sftp" : transferProtocol)} title={`${entry.isDirectory ? "Download directory" : "Download"} ${entry.name}`} aria-label={`${entry.isDirectory ? "Download directory" : "Download"} ${entry.name}`}><Download size={14} /></button>
@@ -4767,36 +4783,6 @@ function TunnelView({ tunnels, onNewTunnel, onNewDynamicForward, onNewRemoteForw
   </section>;
 }
 
-function RemoteMonitorView({ snapshot, status, error, live, intervalSeconds, onLiveChange, onIntervalChange, onRefresh }: { snapshot: RemoteMonitorSnapshot | null; status: "idle" | "loading" | "ready" | "error"; error: string | null; live: boolean; intervalSeconds: number; onLiveChange: (enabled: boolean) => void; onIntervalChange: (seconds: number) => void; onRefresh: () => void }) {
-  const memoryUsed = snapshot?.memoryTotalBytes != null && snapshot.memoryAvailableBytes != null
-    ? Math.max(0, snapshot.memoryTotalBytes - snapshot.memoryAvailableBytes)
-    : null;
-  const statusLabel = status === "loading" ? "Collecting" : status === "ready" ? "Snapshot ready" : status === "error" ? "Unavailable" : "Ready";
-  return <section className="remote-monitor" aria-label="Remote system monitor">
-    <div className="remote-monitor-toolbar">
-      <div><span className="eyebrow">SSH / SYSTEM SNAPSHOT</span><strong>Remote system monitor</strong><p>Collect a bounded read-only snapshot through the active SSH connection. Live refresh is opt-in and stops when this view closes.</p></div>
-      <div className="remote-monitor-actions"><span className={`remote-monitor-status monitor-${status}`}><span /> {statusLabel}</span><label className="remote-monitor-live"><input type="checkbox" checked={live} onChange={(event) => onLiveChange(event.target.checked)} /> Live <select value={intervalSeconds} onChange={(event) => { const next = Number(event.target.value); if (isRemoteMonitorRefreshInterval(next)) onIntervalChange(next); }} disabled={!live} aria-label="Live monitor interval">{REMOTE_MONITOR_REFRESH_INTERVALS.map((seconds) => <option key={seconds} value={seconds}>{seconds}s</option>)}</select></label><button className="primary-button" onClick={onRefresh} disabled={status === "loading"}><RefreshCw className={status === "loading" ? "spin" : ""} size={14} /> {status === "loading" ? "Collecting…" : "Refresh snapshot"}</button></div>
-    </div>
-    {error && <div className="connect-error remote-monitor-error" role="alert"><CircleX size={14} /><span>{error}</span></div>}
-    {snapshot ? <>
-      <div className="remote-monitor-identity"><div><span>Host</span><strong>{snapshot.hostname ?? "Unknown host"}</strong></div><div><span>Kernel</span><strong>{snapshot.kernel ?? "Unavailable"}</strong></div><div><span>Metrics</span><strong>{snapshot.supportedMetrics.length} available</strong></div></div>
-      <div className="remote-monitor-grid">
-        <MonitorMetric label="Uptime" value={formatDuration(snapshot.uptimeSeconds)} detail="remote clock" />
-        <MonitorMetric label="Load average" value={snapshot.loadAverage ? snapshot.loadAverage.map((value) => value.toFixed(2)).join(" · ") : "Unavailable"} detail="1 / 5 / 15 min where supported" />
-        <MonitorMetric label="Memory" value={memoryUsed != null && snapshot.memoryTotalBytes != null ? `${formatBytes(memoryUsed)} / ${formatBytes(snapshot.memoryTotalBytes)}` : "Unavailable"} detail="used / total" />
-        <MonitorMetric label="Available memory" value={snapshot.memoryAvailableBytes != null ? formatBytes(snapshot.memoryAvailableBytes) : "Unavailable"} detail="best-effort capability" />
-        <MonitorMetric label="Root disk" value={snapshot.rootDiskUsedPercent != null ? `${snapshot.rootDiskUsedPercent}% used` : "Unavailable"} detail="/ filesystem" />
-        <MonitorMetric label="Processes" value={snapshot.processCount != null ? snapshot.processCount.toLocaleString() : "Unavailable"} detail="visible process count" />
-      </div>
-      <div className="remote-monitor-note"><ShieldCheck size={14} /><span>Only a fixed, read-only metrics query is sent. Missing commands or platform-specific files produce unavailable fields instead of an assumed Linux result.</span></div>
-    </> : <div className="remote-monitor-empty"><Gauge size={21} /><strong>{status === "error" ? "No compatible metrics returned" : "No snapshot yet"}</strong><span>{status === "error" ? "The host may not expose the standard read-only capabilities." : "Refresh to request a one-shot snapshot from this SSH session."}</span></div>}
-  </section>;
-}
-
-function MonitorMetric({ label, value, detail }: { label: string; value: string; detail: string }) {
-  return <article className="remote-monitor-card"><span>{label}</span><strong>{value}</strong><small>{detail}</small></article>;
-}
-
 function NetworkDiagnosticsView({ stopGeneration, pptpProfileId, onPptpProfileChange, tcpPort, onTcpPortChange, scanProtocol, onScanProtocolChange, host, port, timeout, status, dnsReport, dnsRecordType, onDnsRecordTypeChange, dnsServer, onDnsServerChange, result, fingerprint, error, scanId, scanStatus, scanStart, scanEnd, scanConcurrency, scanScanned, scanTotal, scanResults, onHostChange, onPortChange, onTimeoutChange, onResolve, onCheckTcp, onInspectFingerprint, onScanStartChange, onScanEndChange, onScanConcurrencyChange, onStartScan, onCancelScan }: {
   stopGeneration: number;
   pptpProfileId: string;
@@ -4993,20 +4979,9 @@ function formatTransferEta(seconds: number) {
 }
 
 
-function formatDuration(seconds?: number | null) {
-  if (seconds == null || !Number.isFinite(seconds)) return "Unavailable";
-  const days = Math.floor(seconds / 86400);
-  const hours = Math.floor((seconds % 86400) / 3600);
-  const minutes = Math.floor((seconds % 3600) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  return `${minutes}m`;
-}
-
-function EmptyProtocolView({ view, onAction }: { view: "files" | "tunnels" | "monitor"; onAction?: () => void }) {
+function EmptyProtocolView({ view, onAction }: { view: "files" | "tunnels"; onAction?: () => void }) {
   const isFiles = view === "files";
-  const isMonitor = view === "monitor";
-  return <section className="empty-protocol"><div className="empty-protocol-art"><div className="empty-ring ring-one" /><div className="empty-ring ring-two" />{isFiles ? <Folder size={24} /> : isMonitor ? <Gauge size={24} /> : <Network size={24} />}</div><span className="eyebrow">{isFiles ? "REMOTE FILES" : isMonitor ? "REMOTE MONITOR" : "NETWORK FABRIC"}</span><h2>{isFiles ? "Open an SSH session to browse files" : isMonitor ? "Connect an SSH session to inspect it" : "No tunnels are active"}</h2><p>{isFiles ? "SFTP listing, streaming transfers, cancellation, and path safety are ready for a connected SSH session." : isMonitor ? "The monitor sends a single bounded read-only query and leaves unsupported platform metrics blank." : "Create a tunnel from a connected SSH session. The manager will expose endpoints, ownership, state, and byte counts."}</p>{onAction ? <button className="outline-button" onClick={onAction}><Network size={14} /> Quick connect</button> : <button className="outline-button" disabled><Settings2 size={14} /> Delivery map</button>}</section>;
+  return <section className="empty-protocol"><div className="empty-protocol-art"><div className="empty-ring ring-one" /><div className="empty-ring ring-two" />{isFiles ? <Folder size={24} /> : <Network size={24} />}</div><span className="eyebrow">{isFiles ? "REMOTE FILES" : "NETWORK FABRIC"}</span><h2>{isFiles ? "Open an SSH session to browse files" : "No tunnels are active"}</h2><p>{isFiles ? "SFTP listing, streaming transfers, cancellation, and path safety are ready for a connected SSH session." : "Create a tunnel from a connected SSH session. The manager will expose endpoints, ownership, state, and byte counts."}</p>{onAction ? <button className="outline-button" onClick={onAction}><Network size={14} /> Quick connect</button> : <button className="outline-button" disabled><Settings2 size={14} /> Delivery map</button>}</section>;
 }
 
 function InfoCard({ icon: Icon, label, title, detail, action, onAction }: { icon: LucideIcon; label: string; title: string; detail: string; action: string; onAction: () => void }) {

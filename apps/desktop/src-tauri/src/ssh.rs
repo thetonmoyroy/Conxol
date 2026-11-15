@@ -354,6 +354,10 @@ enum SshCommand {
         reply: oneshot::Sender<Result<(Arc<SshConnection>, conxol_ssh::SshShell), String>>,
     },
     Write(Vec<u8>),
+    BrowseDirectory {
+        path: String,
+        reply: oneshot::Sender<Result<RemoteDirectoryListing, String>>,
+    },
     ListDirectory {
         path: String,
         reply: oneshot::Sender<Result<Vec<conxol_ssh::RemoteEntry>, String>>,
@@ -1179,6 +1183,19 @@ impl SshManager {
             .map_err(SshManagerError::InvalidRequest)
     }
 
+    pub async fn browse_directory(
+        &self,
+        terminal_id: &str,
+        path: String,
+    ) -> Result<RemoteDirectoryListing, SshManagerError> {
+        let path = validate_remote_directory_path(&path)?;
+        let (reply, response) = oneshot::channel();
+        let sender = self.sender(terminal_id)?;
+        Self::reserve_command(&sender)?.send(SshCommand::BrowseDirectory { path, reply });
+        response.await.map_err(|_| SshManagerError::Closed)?
+            .map_err(SshManagerError::InvalidRequest)
+    }
+
     pub async fn open_remote_text_file(
         &self,
         terminal_id: &str,
@@ -1759,6 +1776,7 @@ impl SshManager {
                 command,
                 SshCommand::BranchShell { .. }
                     | SshCommand::ListDirectory { .. }
+                    | SshCommand::BrowseDirectory { .. }
                     | SshCommand::OpenTextFile { .. }
                     | SshCommand::CollectMonitor { .. }
                     | SshCommand::SaveTextFile { .. }
@@ -1797,6 +1815,9 @@ impl SshManager {
             SshCommand::BranchShell { reply, .. } => { let _ = reply.send(Err(reason.into())); }
             SshCommand::Write(_) => {}
             SshCommand::ListDirectory { reply, .. } => {
+                let _ = reply.send(Err(reason.into()));
+            }
+            SshCommand::BrowseDirectory { reply, .. } => {
                 let _ = reply.send(Err(reason.into()));
             }
             SshCommand::OpenTextFile { reply, .. }
@@ -2816,6 +2837,12 @@ fn spawn_session_operation(
                 let _ = reply.send(result);
             });
         }
+        SshCommand::BrowseDirectory { path, reply } => {
+            workers.spawn(async move {
+                let result = browse_remote_directory(&connection, path).await;
+                let _ = reply.send(result);
+            });
+        }
         SshCommand::OpenTextFile {
             path,
             encoding,
@@ -3004,6 +3031,26 @@ async fn run_shell_once(
             }
         }
     }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RemoteDirectoryListing {
+    pub path: String,
+    pub entries: Vec<conxol_ssh::RemoteEntry>,
+}
+
+async fn browse_remote_directory(
+    connection: &SshConnection,
+    path: String,
+) -> Result<RemoteDirectoryListing, String> {
+    let sftp = connection.open_sftp().await.map_err(|error| error.to_string())?;
+    let result = async {
+        let path = sftp.canonicalize(path).await.map_err(|error| error.to_string())?;
+        let entries = sftp.read_dir(path.clone()).await.map_err(|error| error.to_string())?;
+        Ok(RemoteDirectoryListing { path, entries })
+    }.await;
+    let _ = sftp.close().await;
+    result
 }
 
 async fn list_remote_directory(
