@@ -9,5 +9,8 @@ for (const protocol of [null, "rdp", "vnc"]) assert.equal(canReconnectTerminal(p
 const key = { key: "r", ctrlKey: false, metaKey: false, altKey: false, repeat: false, isComposing: false };
 assert.equal(isReconnectKey(key), true);
 assert.equal(isReconnectKey({ ...key, key: "R" }), true);
-for (const flag of ["ctrlKey", "metaKey", "altKey", "repeat", "isComposing"]) assert.equal(isReconnectKey({ ...key, [flag]: true }), false);
+for (const value of ["r", "R", "Enter", " "]) {
+  assert.equal(isReconnectKey({ ...key, key: value }), true);
+  for (const flag of ["ctrlKey", "metaKey", "altKey", "repeat", "isComposing"]) assert.equal(isReconnectKey({ ...key, key: value, [flag]: true }), false);
+}
 assert.equal(isReconnectKey({ ...key, key: "x" }), false);

@@ -1524,6 +1524,11 @@ async fn ssh_resize(
 }
 
 #[tauri::command]
+fn ssh_reconnect(manager: State<'_, SshManager>, terminal_id: String) -> Result<(), String> {
+    manager.reconnect(&terminal_id).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn ssh_close(manager: State<'_, SshManager>, terminal_id: String) -> Result<(), String> {
     manager
         .close(&terminal_id)
@@ -2347,6 +2352,7 @@ pub fn run() {
                 ssh_write,
                 ssh_resize,
                 ssh_close,
+                ssh_reconnect,
                 ssh_attach,
                 ssh_list_directory,
                 ssh_open_remote_text_file,

@@ -456,6 +456,9 @@ pub struct SshBranchResponse {
 
 struct SessionState {
     sender: mpsc::Sender<SshCommand>,
+    reconnect: Option<mpsc::Sender<()>>,
+    reconnect_available: bool,
+    authentication_cancelled: bool,
     size: watch::Sender<(u32, u32)>,
     close: watch::Sender<bool>,
     finished: watch::Receiver<bool>,
@@ -833,6 +836,7 @@ impl SshManager {
         let (sender, receiver) = mpsc::channel(COMMAND_CAPACITY);
         let (close, close_receiver) = watch::channel(false);
         let (finished, finished_receiver) = watch::channel(false);
+        let (reconnect, reconnect_receiver) = mpsc::channel(1);
         {
             let mut sessions = self.sessions.lock().map_err(|_| SshManagerError::Closed)?;
             // Serialize registration with shutdown's snapshot: a connection
@@ -844,6 +848,9 @@ impl SshManager {
                 terminal_id.clone(),
                 SessionState {
                     sender,
+                    reconnect: Some(reconnect),
+                    reconnect_available: false,
+                    authentication_cancelled: false,
                     size,
                     close,
                     finished: finished_receiver,
@@ -875,7 +882,7 @@ impl SshManager {
             auth_events,
         };
         tauri::async_runtime::spawn(async move {
-            run_remote_session(context, connection, reader, writer, receiver).await;
+            run_remote_session(context, connection, reader, writer, receiver, reconnect_receiver).await;
             finished.send_replace(true);
         });
 
@@ -924,9 +931,12 @@ impl SshManager {
                 .sessions
                 .lock()
                 .map_err(|_| SshManagerError::Closed)?
-                .get(id)
+                .get_mut(id)
             {
-                let _ = state.close.send(true);
+                if !*state.close.borrow() {
+                    state.authentication_cancelled = true;
+                    let _ = state.close.send(true);
+                }
             }
             self.cancel_for_terminal(id);
         }
@@ -997,15 +1007,32 @@ impl SshManager {
         }
     }
 
+    pub fn reconnect(&self, terminal_id: &str) -> Result<(), SshManagerError> {
+        let mut sessions = self.sessions.lock().map_err(|_| SshManagerError::Closed)?;
+        let state = sessions
+            .get_mut(terminal_id)
+            .ok_or(SshManagerError::Closed)?;
+        if *self.shutdown.borrow() || *state.close.borrow() || !state.reconnect_available {
+            return Err(SshManagerError::Closed);
+        }
+        state
+            .reconnect
+            .as_ref()
+            .ok_or(SshManagerError::Closed)?
+            .try_send(())
+            .map_err(|_| SshManagerError::Closed)?;
+        state.reconnect_available = false;
+        Ok(())
+    }
+
     pub async fn close(&self, terminal_id: &str) -> Result<(), SshManagerError> {
-        let close = self
-            .sessions
-            .lock()
-            .map_err(|_| SshManagerError::Closed)?
-            .get(terminal_id)
-            .map(|state| state.close.clone())
-            .ok_or_else(|| SshManagerError::MissingSession(terminal_id.to_owned()))?;
-        let signalled = close.send(true);
+        let signalled = {
+            let mut sessions = self.sessions.lock().map_err(|_| SshManagerError::Closed)?;
+            let state = sessions.get_mut(terminal_id)
+                .ok_or_else(|| SshManagerError::MissingSession(terminal_id.to_owned()))?;
+            state.authentication_cancelled = false;
+            state.close.send(true)
+        };
         self.cancel_for_terminal(terminal_id);
         signalled.map_err(|_| SshManagerError::Closed)
     }
@@ -1067,6 +1094,9 @@ impl SshManager {
                 terminal_id.clone(),
                 SessionState {
                     sender: branch_sender,
+                    reconnect: None,
+                    reconnect_available: false,
+                    authentication_cancelled: false,
                     size,
                     close,
                     finished: finished_receiver,
@@ -2290,6 +2320,146 @@ async fn run_remote_session(
     mut reader: conxol_ssh::SshShellReader,
     mut writer: conxol_ssh::SshShellWriter,
     mut commands: mpsc::Receiver<SshCommand>,
+    mut reconnect: mpsc::Receiver<()>,
+) {
+    let mut close = context.close.clone();
+    'session: loop {
+        run_remote_session_once(&context, connection, reader, writer, commands).await;
+        // Retain the native ID, authentication owner, output and geometry until
+        // the tab closes. Only an explicit reconnect may start another login.
+        loop {
+            if *close.borrow() {
+                break;
+            }
+            tokio::select! {
+                biased;
+                _ = close.changed() => break,
+                request = reconnect.recv() => if request.is_none() { break; },
+            }
+            context.manager.emit_session_state(
+                &context.app,
+                &context.terminal_id,
+                SshSessionState::Reconnecting,
+                1,
+                None,
+            );
+            let outcome = reconnect_with_backoff(
+                &mut close,
+                "manual reconnect".into(),
+                1,
+                |_, _| {},
+                |_| {
+                    ssh_diagnostics::scope(
+                        DiagnosticOperation::Reconnect,
+                        context.request.connect_timeout_ms,
+                        context.request.jump_hosts.len(),
+                        async {
+                            let connection = connect_transport(
+                                &context.app,
+                                context.vault.as_ref(),
+                                context.app.state::<NativeVault>().inner().clone(),
+                                &context.request,
+                                &context.manager,
+                                &context.auth_events,
+                                Some(&context.terminal_id),
+                            )
+                            .await
+                            .inspect_err(record_connection_diagnostic)?;
+                            let shell = open_shell_at_current_size(&connection, &context.size)
+                                .await
+                                .inspect_err(|error| {
+                                    ssh_diagnostics::record_error(DiagnosticStage::Shell, error)
+                                })?;
+                            Ok((connection, shell.split()))
+                        },
+                    )
+                },
+                |_| Duration::ZERO,
+            )
+            .await;
+            match outcome {
+                ReconnectOutcome::Connected {
+                    value: (new_connection, (new_reader, new_writer)),
+                    ..
+                } => {
+                    let Ok(new_commands) =
+                        context.manager.reopen_command_queue(&context.terminal_id)
+                    else {
+                        let _ = new_connection.disconnect().await;
+                        break;
+                    };
+                    connection = Arc::new(new_connection);
+                    reader = new_reader;
+                    writer = new_writer;
+                    commands = new_commands;
+                    context.manager.start_x11_bridge(
+                        Arc::clone(&connection),
+                        close.clone(),
+                        context.app.clone(),
+                        context.terminal_id.clone(),
+                    );
+                    context.manager.emit_session_state(
+                        &context.app,
+                        &context.terminal_id,
+                        SshSessionState::Connected,
+                        1,
+                        None,
+                    );
+                    continue 'session;
+                }
+                ReconnectOutcome::Failed { last_error, .. } => {
+                    context.manager.allow_manual_reconnect(&context.terminal_id);
+                    context.manager.emit_session_state(
+                        &context.app,
+                        &context.terminal_id,
+                        SshSessionState::Failed,
+                        1,
+                        Some(last_error),
+                    );
+                    continue;
+                }
+                ReconnectOutcome::Cancelled => {
+                    context.manager.allow_manual_reconnect(&context.terminal_id);
+                    if *close.borrow() {
+                        break;
+                    }
+                    context.manager.emit_session_state(
+                        &context.app,
+                        &context.terminal_id,
+                        SshSessionState::Disconnected,
+                        0,
+                        None,
+                    );
+                }
+            }
+        }
+        break;
+    }
+    context.manager.remove(&context.terminal_id);
+}
+
+impl SshManager {
+    fn allow_manual_reconnect(&self, terminal_id: &str) {
+        if let Ok(mut sessions) = self.sessions.lock()
+            && let Some(state) = sessions.get_mut(terminal_id)
+        {
+            // Cancel stops this authentication attempt. Closing the tab or
+            // quitting remains permanent and must win over a cancelled prompt.
+            if state.authentication_cancelled && !*self.shutdown.borrow() {
+                state.authentication_cancelled = false;
+                state.close.send_replace(false);
+            }
+            state.reconnect_available = state.reconnect.is_some() && !*state.close.borrow();
+        }
+    }
+}
+
+async fn run_remote_session_once(
+    context: &RemoteSessionContext,
+    mut connection: Arc<SshConnection>,
+    mut reader: conxol_ssh::SshShellReader,
+    mut writer: conxol_ssh::SshShellWriter,
+    mut commands: mpsc::Receiver<SshCommand>,
 ) {
     let RemoteSessionContext {
         app,
@@ -2297,10 +2467,12 @@ async fn run_remote_session(
         terminal_id,
         request,
         vault,
-        mut close,
-        mut size,
+        close,
+        size,
         auth_events,
     } = context;
+    let mut close = close.clone();
+    let mut size = size.clone();
     let mut should_report_error = None;
     let mut connection_is_live = true;
     let mut shell_started_at = Instant::now();
@@ -2309,9 +2481,9 @@ async fn run_remote_session(
 
     'session: loop {
         let shell_result = run_shell_once(
-            &app,
-            &manager,
-            &terminal_id,
+            app,
+            manager,
+            terminal_id,
             &connection,
             &mut reader,
             &writer,
@@ -2323,19 +2495,19 @@ async fn run_remote_session(
         .await;
         let discarded = manager
             .retire_command_queue(
-                &terminal_id,
+                terminal_id,
                 &mut commands,
-                |event| manager.emit_transfer(&app, event),
-                |event| manager.emit_tunnel(&app, event),
+                |event| manager.emit_transfer(app, event),
+                |event| manager.emit_tunnel(app, event),
             )
             .await;
         retire_shell_output(reader, &writer).await;
         manager
-            .finish_session_operations(&terminal_id, &mut workers)
+            .finish_session_operations(terminal_id, &mut workers)
             .await;
-        manager.finish_output(&app, &terminal_id);
+        manager.finish_output(app, terminal_id);
         if discarded > 0 {
-            manager.emit_output(&app, &terminal_id, b"\r\nConxol: queued SSH actions were cancelled because the session changed or closed. Retry explicitly.\r\n");
+            manager.emit_output(app, terminal_id, b"\r\nConxol: queued SSH actions were cancelled because the session changed or closed. Retry explicitly.\r\n");
         }
         match shell_result {
             ShellRunResult::Closed => break 'session,
@@ -2354,8 +2526,8 @@ async fn run_remote_session(
                         "SSH shell closed repeatedly shortly after reconnecting"
                     };
                     manager.emit_session_state(
-                        &app,
-                        &terminal_id,
+                        app,
+                        terminal_id,
                         SshSessionState::Failed,
                         request.reconnect_attempts,
                         Some(reason.into()),
@@ -2372,8 +2544,8 @@ async fn run_remote_session(
                     request.reconnect_attempts,
                     |attempt, last_error| {
                         manager.emit_session_state(
-                            &app,
-                            &terminal_id,
+                            app,
+                            terminal_id,
                             SshSessionState::Reconnecting,
                             attempt,
                             Some(last_error.to_owned()),
@@ -2381,13 +2553,13 @@ async fn run_remote_session(
                     },
                     |_attempt| ssh_diagnostics::scope(DiagnosticOperation::Reconnect, request.connect_timeout_ms, request.jump_hosts.len(), async {
                         let new_connection = connect_transport(
-                            &app,
+                            app,
                             vault.as_ref(),
                             app.state::<NativeVault>().inner().clone(),
-                            &request,
-                            &manager,
-                            &auth_events,
-                            Some(&terminal_id),
+                            request,
+                            manager,
+                            auth_events,
+                            Some(terminal_id),
                         )
                         .await.inspect_err(record_connection_diagnostic)?;
                         let shell = open_shell_at_current_size(&new_connection, &size).await.inspect_err(|error| ssh_diagnostics::record_error(DiagnosticStage::Shell, error))?;
@@ -2401,7 +2573,7 @@ async fn run_remote_session(
                         value: (new_connection, (new_reader, new_writer)),
                         attempt,
                     } => {
-                        commands = match manager.reopen_command_queue(&terminal_id) {
+                        commands = match manager.reopen_command_queue(terminal_id) {
                             Ok(commands) => commands,
                             Err(_) => {
                                 let _ = new_connection.disconnect().await;
@@ -2420,8 +2592,8 @@ async fn run_remote_session(
                         connection_is_live = true;
                         shell_started_at = Instant::now();
                         manager.emit_session_state(
-                            &app,
-                            &terminal_id,
+                            app,
+                            terminal_id,
                             SshSessionState::Connected,
                             attempt,
                             None,
@@ -2437,8 +2609,8 @@ async fn run_remote_session(
                         last_error,
                     } => {
                         manager.emit_session_state(
-                            &app,
-                            &terminal_id,
+                            app,
+                            terminal_id,
                             SshSessionState::Failed,
                             attempts,
                             Some(last_error.clone()),
@@ -2455,10 +2627,10 @@ async fn run_remote_session(
     if connection_is_live {
         let _ = connection.disconnect().await;
     }
-    manager.remove(&terminal_id);
+    manager.allow_manual_reconnect(terminal_id);
     manager.emit_session_state(
-        &app,
-        &terminal_id,
+        app,
+        terminal_id,
         SshSessionState::Disconnected,
         0,
         should_report_error.clone(),
@@ -2466,7 +2638,7 @@ async fn run_remote_session(
     let _ = app.emit(
         "ssh://closed",
         SshClosedEvent {
-            terminal_id,
+            terminal_id: terminal_id.clone(),
             reason: should_report_error.unwrap_or_else(|| "closed".into()),
         },
     );
@@ -2961,7 +3133,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for TunnelStream<S> {
             Poll::Ready(Ok(written)) => {
                 let _ = this
                     .bytes
-                    .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |bytes| {
+                    .try_update(Ordering::Relaxed, Ordering::Relaxed, |bytes| {
                         Some(bytes.saturating_add(written as u64))
                     });
                 Poll::Ready(Ok(written))
@@ -5091,6 +5263,9 @@ mod tests {
             id.into(),
             super::SessionState {
                 sender,
+                reconnect: None,
+                reconnect_available: false,
+                authentication_cancelled: false,
                 size: watch::channel((80, 24)).0,
                 close: watch::channel(false).0,
                 finished: watch::channel(false).1,
@@ -5100,6 +5275,105 @@ mod tests {
             },
         );
         commands
+    }
+
+    #[tokio::test]
+    async fn manual_reconnect_retains_identity_and_rejects_duplicate_requests() {
+        let manager = SshManager::default();
+        let mut commands = queue_test_session(&manager, "retained");
+        let (signal, mut requests) = tokio::sync::mpsc::channel(1);
+        let (close, _closing) = watch::channel(false);
+        {
+            let mut sessions = manager.sessions.lock().unwrap();
+            let state = sessions.get_mut("retained").unwrap();
+            state.reconnect = Some(signal);
+            state.close = close;
+            state.attached = true;
+            state.pending_output.push("retained output".into());
+        }
+        assert!(
+            manager.reconnect("retained").is_err(),
+            "connected shell cannot reconnect"
+        );
+        manager
+            .retire_command_queue("retained", &mut commands, |_| {}, |_| {})
+            .await;
+        manager.allow_manual_reconnect("retained");
+        manager.reconnect("retained").unwrap();
+        assert!(
+            manager.reconnect("retained").is_err(),
+            "one request per attempt"
+        );
+        assert_eq!(requests.recv().await, Some(()));
+        assert!(requests.try_recv().is_err());
+        // A failed manual attempt leaves the same session available for retry.
+        manager.allow_manual_reconnect("retained");
+        manager.reconnect("retained").unwrap();
+        assert_eq!(requests.recv().await, Some(()));
+        let _new_commands = manager.reopen_command_queue("retained").unwrap();
+        let sessions = manager.sessions.lock().unwrap();
+        assert_eq!(sessions.len(), 1);
+        let state = sessions.get("retained").unwrap();
+        assert!(state.attached);
+        assert_eq!(state.pending_output, ["retained output"]);
+        assert!(!state.reconnect_available);
+    }
+
+    #[tokio::test]
+    async fn manual_reconnect_rejects_branch_closed_and_shutdown_sessions() {
+        let manager = SshManager::default();
+        let mut commands = queue_test_session(&manager, "retained");
+        manager
+            .retire_command_queue("retained", &mut commands, |_| {}, |_| {})
+            .await;
+        manager.allow_manual_reconnect("retained");
+        assert!(
+            manager.reconnect("retained").is_err(),
+            "shared branches have no login context"
+        );
+        let (signal, _requests) = tokio::sync::mpsc::channel(1);
+        let (close, _closing) = watch::channel(false);
+        {
+            let mut sessions = manager.sessions.lock().unwrap();
+            let state = sessions.get_mut("retained").unwrap();
+            state.reconnect = Some(signal);
+            state.close = close;
+        }
+        manager.allow_manual_reconnect("retained");
+        manager.shutdown.send_replace(true);
+        assert!(manager.reconnect("retained").is_err());
+        manager.shutdown.send_replace(false);
+        manager.close("retained").await.unwrap();
+        manager.allow_manual_reconnect("retained");
+        assert!(manager.reconnect("retained").is_err());
+        assert!(!manager.sessions.lock().unwrap()["retained"].reconnect_available);
+        assert!(manager.reconnect("missing").is_err());
+    }
+
+    #[tokio::test]
+    async fn manual_reconnect_can_retry_cancelled_authentication_but_not_a_closed_tab() {
+        let manager = SshManager::default();
+        let _commands = queue_test_session(&manager, "retained");
+        let (signal, mut requests) = tokio::sync::mpsc::channel(1);
+        let (close, closing) = watch::channel(true);
+        {
+            let mut sessions = manager.sessions.lock().unwrap();
+            let state = sessions.get_mut("retained").unwrap();
+            state.reconnect = Some(signal);
+            state.close = close;
+            state.authentication_cancelled = true;
+        }
+        manager.allow_manual_reconnect("retained");
+        assert!(!*closing.borrow());
+        manager.reconnect("retained").unwrap();
+        assert_eq!(requests.recv().await, Some(()));
+        // A tab close after cancelling a prompt must not resurrect the worker.
+        manager.sessions.lock().unwrap().get_mut("retained").unwrap()
+            .authentication_cancelled = true;
+        manager.close("retained").await.unwrap();
+        manager.allow_manual_reconnect("retained");
+        assert!(*closing.borrow());
+        assert!(manager.reconnect("retained").is_err());
     }
 
     #[tokio::test]
@@ -6083,6 +6357,9 @@ mod tests {
                 id.into(),
                 SessionState {
                     sender,
+                    reconnect: None,
+                    reconnect_available: false,
+                    authentication_cancelled: false,
                     size: watch::channel((80, 24)).0,
                     close,
                     finished: finished_receiver,

@@ -3,5 +3,5 @@ export function canReconnectTerminal(protocol: string | null | undefined, status
 }
 
 export function isReconnectKey(event: { key: string; ctrlKey: boolean; metaKey: boolean; altKey: boolean; repeat: boolean; isComposing: boolean }): boolean {
-  return event.key.toLowerCase() === "r" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat && !event.isComposing;
+  return ["r", "enter", " "].includes(event.key.toLowerCase()) && !event.ctrlKey && !event.metaKey && !event.altKey && !event.repeat && !event.isComposing;
 }

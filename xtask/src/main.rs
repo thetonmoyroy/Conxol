@@ -18,6 +18,7 @@ fn main() {
         "check" => check(),
         "check-rust" => check_rust(),
         "test-ssh" => test_ssh(),
+        "test-ssh-reconnect" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "ssh::tests::", "--", "--nocapture"], None),
         "test-serial" => {
             run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-serial", "--", "--nocapture"], None)
                 .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "serial::tests", "--", "--nocapture"], None))
@@ -89,6 +90,7 @@ fn main() {
             );
             println!("cargo xtask test-file-transfers    Run isolated FTP/TFTP client fixtures");
             println!("cargo xtask test-ssh    Run isolated SSH tests and Unix OpenSSH fixtures");
+            println!("cargo xtask test-ssh-reconnect    Run isolated desktop SSH lifecycle and reconnect tests");
             println!("cargo xtask test-ssh-branch    Run isolated SSH branch lifecycle regressions");
             println!("cargo xtask test-mtr    Run isolated native MTR engine and loopback tests");
             println!("cargo xtask test-ping    Run isolated native Ping engine and loopback tests");

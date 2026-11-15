@@ -279,6 +279,7 @@ type TerminalViewportProps = {
 };
 
 type WorkspaceTerminal = {
+  sharedSshBranch?: boolean;
   shortcutDeviceId?: string;
   customName?: string;
   authentication?: TerminalAuthentication;
@@ -2755,7 +2756,7 @@ function App() {
     if (isWorkspaceLocked() || !source || source.remoteProtocol !== "ssh" || !source.remoteSessionId || source.status !== "connected" || branchingSessions.current.has(workspaceId)) return;
     branchingSessions.current.add(workspaceId);
     const authentication = new TerminalAuthentication();
-    const pending = createWorkspaceTerminal({ label: `${source.customName ?? source.label} · branch`, customName: `${source.customName ?? source.label} · branch`, remoteProtocol: "ssh", remoteHost: source.remoteHost, shortcutDeviceId: source.shortcutDeviceId, authentication, connecting: true });
+    const pending = createWorkspaceTerminal({ label: `${source.customName ?? source.label} · branch`, customName: `${source.customName ?? source.label} · branch`, remoteProtocol: "ssh", remoteHost: source.remoteHost, shortcutDeviceId: source.shortcutDeviceId, authentication, connecting: true, sharedSshBranch: true });
     const removePending = () => {
       authentication.cancel();
       setTerminalTabs(current => current.filter(item => item.id !== pending.id));
@@ -2815,7 +2816,7 @@ function App() {
     setReconnectBusy(true);
     setConnectionError(null);
     try {
-      if ((terminal.remoteProtocol === "telnet" || terminal.remoteProtocol === "serial") && terminal.remoteSessionId) {
+      if (terminal.remoteProtocol && terminal.remoteSessionId && !terminal.sharedSshBranch) {
         await invoke(`${terminal.remoteProtocol}_reconnect`, { terminalId: terminal.remoteSessionId });
       } else {
         const saved = savedSessions.find(item => item.id === terminal.shortcutDeviceId);
@@ -2840,6 +2841,7 @@ function App() {
       if (!isReconnectKey(event) || activeView !== "terminal" || closing || isWorkspaceLocked() || editingRemoteFile
         || !terminal || !canReconnectTerminal(terminal.remoteProtocol, terminal.status, terminal.connecting)
         || document.querySelector('dialog[open], [aria-modal="true"]')
+        || ((event.key === "Enter" || event.key === " ") && target?.closest('button, a, [role="button"]'))
         || (isEditableKeyboardTarget(event.target) && !target?.closest(".xterm"))) return;
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -3934,7 +3936,7 @@ function App() {
       {viewport}
       {terminal.authentication && <TerminalSshLogin authentication={terminal.authentication} connecting={terminal.connecting ?? false} label={terminal.label} colorTheme={colorTheme} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} />}
       {canReconnectTerminal(terminal.remoteProtocol, terminal.status, terminal.connecting) && <div className="terminal-disconnect-banner" aria-label={`${terminal.label} disconnected`}>
-        <div><strong role="status">Session disconnected</strong><span>Click Reconnect or press R to reconnect.</span></div>
+        <div><strong role="status">Session disconnected</strong><span>Click Reconnect or press Enter, Space, or R to reconnect.</span></div>
         <button type="button" className="primary-button" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal(terminal.id)}>
           <RefreshCw size={16} aria-hidden="true" />{reconnectBusy ? "Reconnecting…" : "Reconnect"}
         </button>
@@ -4217,7 +4219,7 @@ function App() {
                       }}
                     >{label}</button>)}
                   </div>}
-                  <div className="terminal-statusbar"><span><span className="status-square" /> {terminalStatus === "connected" ? "connected" : terminalStatus}</span><span>{remoteProtocol ? `${remoteProtocol} transport` : "local process"}</span><span>scrollback {settings.terminal.scrollbackLines.toLocaleString()}</span><span>{settings.appearance.fontSize}px · Mod +/- zoom</span><span className="terminal-status-spacer" />{canReconnectTerminal(remoteProtocol, terminalStatus, activeTerminal?.connecting) && <button type="button" className="terminal-status-action" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal()}><RefreshCw size={12} /> {reconnectBusy ? "Reconnecting…" : "Disconnected · Reconnect (R)"}</button>}<span>{formatShortcut(settings.keyboard.quickConnect)} for quick connect</span></div>
+                  <div className="terminal-statusbar"><span><span className="status-square" /> {terminalStatus === "connected" ? "connected" : terminalStatus}</span><span>{remoteProtocol ? `${remoteProtocol} transport` : "local process"}</span><span>scrollback {settings.terminal.scrollbackLines.toLocaleString()}</span><span>{settings.appearance.fontSize}px · Mod +/- zoom</span><span className="terminal-status-spacer" />{canReconnectTerminal(remoteProtocol, terminalStatus, activeTerminal?.connecting) && <button type="button" className="terminal-status-action" disabled={reconnectBusy} onClick={() => void reconnectSelectedTerminal()}><RefreshCw size={12} /> {reconnectBusy ? "Reconnecting…" : "Disconnected · Reconnect (Enter / Space / R)"}</button>}<span>{formatShortcut(settings.keyboard.quickConnect)} for quick connect</span></div>
               </section>
               <div hidden={activeView !== "generator"}><ConfigGenerator /></div>
               {activeView === "generator" ? null : activeView === "home" ? (
