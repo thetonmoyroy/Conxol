@@ -12,7 +12,7 @@ import { TerminalInputQueue } from "./terminal-input";
 import { TerminalWindowReplay } from "./terminal-window-replay";
 import { attachNetworkHighlighting } from "./network-highlighting";
 import { suppressMirroredTerminalReports } from "./terminal-window-reports";
-import { attachTerminalUnicodeJoining, loadTerminalFont, terminalBoldWeight, terminalFontFamily } from "./terminal-unicode-joining";
+import { attachTerminalBengaliLayout, attachTerminalUnicodeJoining, configureTerminalUnicodeWidths, loadTerminalFont, terminalBoldWeight, terminalFontFamily } from "./terminal-unicode-joining";
 import { IS_WINDOWS_TERMINAL, WINDOWS_TERMINAL_LINE_HEIGHT } from "./terminal-zoom";
 import "./terminal-tabs.css";
 
@@ -46,6 +46,7 @@ export function DetachedTerminal() {
       lineHeight: IS_WINDOWS_TERMINAL ? WINDOWS_TERMINAL_LINE_HEIGHT : 1,
       scrollback: 10000,
     });
+    configureTerminalUnicodeWidths(terminal);
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current);
     const refreshFont = () => {
       const family = terminal.options.fontFamily;
@@ -58,6 +59,7 @@ export function DetachedTerminal() {
       }).catch(() => { /* Keep the platform font fallback. */ });
     };
     const disposeUnicodeJoining = attachTerminalUnicodeJoining(terminal);
+    const disposeBengaliLayout = attachTerminalBengaliLayout(terminal);
     const highlighting = attachNetworkHighlighting(terminal, false);
     const disposeReports = suppressMirroredTerminalReports(terminal);
     terminal.textarea?.setAttribute("aria-label", "Detached terminal input");
@@ -146,7 +148,7 @@ export function DetachedTerminal() {
     return () => {
       disposed = true; ready.current = false; requestSnapshot.current = () => {};
       clearInterval(retry); unlisten?.(); observer.disconnect(); input.dispose();
-      element.removeEventListener("paste", onPaste, true); disposeReports(); disposeUnicodeJoining(); highlighting.dispose(); terminal.dispose();
+      element.removeEventListener("paste", onPaste, true); disposeReports(); disposeUnicodeJoining(); disposeBengaliLayout(); highlighting.dispose(); terminal.dispose();
     };
   }, []);
 

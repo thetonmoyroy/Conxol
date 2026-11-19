@@ -9,7 +9,7 @@ import { isMultilineTerminalPaste, shouldConfirmTerminalPaste } from "../src/ter
 import { prepareTerminalPaste, settleTerminalWrites } from "../src/terminal-input.ts";
 import { MAX_TERMINAL_TITLE_LENGTH, sanitizeTerminalTitle } from "../src/terminal-title.ts";
 import { isCurrentSessionRequest } from "../src/session-request.ts";
-import { terminalFontSizeAfterZoom } from "../src/terminal-zoom.ts";
+import { TERMINAL_DEFAULT_FONT_SIZE, terminalFontSizeAfterZoom } from "../src/terminal-zoom.ts";
 import { countTextMatches, highlightRemoteCode, remoteEditorLanguage, remoteEditorSaveNotice, reloadRemoteEditorDocument, replaceTextMatches } from "../src/remote-editor.ts";
 import { isRemoteMonitorRefreshInterval, REMOTE_MONITOR_REFRESH_INTERVALS } from "../src/remote-monitor.ts";
 import { remoteChildPath, remoteParentPath } from "../src/remote-path.ts";
@@ -155,8 +155,8 @@ for (const prefix of [["界", 2], ["e\u0301", 1]]) {
 assert.equal(terminalFontSizeAfterZoom(13, "increase"), 14);
 assert.equal(terminalFontSizeAfterZoom(8, "decrease"), 8);
 assert.equal(terminalFontSizeAfterZoom(32, "increase"), 32);
-assert.equal(terminalFontSizeAfterZoom(24, "reset"), 13);
-assert.equal(terminalFontSizeAfterZoom(Number.NaN, "increase"), 14);
+assert.equal(terminalFontSizeAfterZoom(24, "reset"), TERMINAL_DEFAULT_FONT_SIZE);
+assert.equal(terminalFontSizeAfterZoom(Number.NaN, "increase"), TERMINAL_DEFAULT_FONT_SIZE + 1);
 assert.equal(sanitizeTerminalTitle("  app\u0007 · ready  "), "app · ready");
 assert.equal(sanitizeTerminalTitle("\u0000\u001b[31mremote\u001b[0m"), "[31mremote[0m");
 assert.equal(sanitizeTerminalTitle("build\u202eexe.txt\u2069\u0085"), "buildexe.txt");

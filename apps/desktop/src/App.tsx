@@ -1,5 +1,5 @@
 import { terminalOutputText, terminalOutputFilename } from "./terminal-output-export";
-import { attachTerminalUnicodeJoining, loadTerminalFont, terminalBoldWeight, terminalFontFamily, type TerminalFont } from "./terminal-unicode-joining";
+import { attachTerminalBengaliLayout, attachTerminalUnicodeJoining, configureTerminalUnicodeWidths, loadTerminalFont, terminalBoldWeight, terminalFontFamily, type TerminalFont } from "./terminal-unicode-joining";
 import { ReorderableTerminalTabs } from "./ReorderableTerminalTabs";
 import { moveTerminalTab } from "./terminal-tab-order";
 import { detachTerminal, detachedTerminalIds, isTerminalDetached, registerTerminalWindowSource, returnTerminal, startTerminalWindows, updateDetachedTerminalFont } from "./terminal-window-owner";
@@ -828,6 +828,7 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
       scrollback: terminalOptionsRef.current.scrollbackLines,
       theme: resolveTerminalTheme(terminalOptionsRef.current.colorTheme, terminalOptionsRef.current.terminalAppearance),
     });
+    configureTerminalUnicodeWidths(terminal);
     terminalRef.current = terminal;
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
@@ -836,6 +837,7 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
     terminal.open(host);
     const disposeUnicodeJoining = attachTerminalUnicodeJoining(terminal);
     const gpuRenderer = IS_ANDROID ? attachTerminalGpuRenderer(terminal, () => new WebglAddon()) : null;
+    const disposeBengaliLayout = attachTerminalBengaliLayout(terminal);
     // Terminal commands and credentials must not use browser writing assistance.
     const terminalInput = terminal.textarea;
     if (terminalInput) {
@@ -1101,6 +1103,7 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
       terminalRef.current = null;
       onTerminalDisposed(workspaceId);
       disposeUnicodeJoining();
+      disposeBengaliLayout();
       gpuRenderer?.dispose();
       terminal.dispose();
     };
