@@ -5,7 +5,7 @@ permissions:
   contents: read
 jobs:
   android:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
@@ -25,9 +25,12 @@ jobs:
         with:
           targets: aarch64-linux-android
       - uses: Swatinem/rust-cache@v2
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: ''
       - name: Install Android API and NDK
         run: |
-          sdkmanager "platforms;android-37" "build-tools;37.0.0" "ndk;28.2.13676358"
+          sdkmanager "platforms;android-37.0" "build-tools;37.0.0" "ndk;28.2.13676358"
           echo "NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
       - name: Build ARM64 release APK
         run: |
@@ -36,6 +39,7 @@ jobs:
           android=apps/desktop/src-tauri/gen/android/app
           cp tools/android/MainActivity.kt "$android/src/main/java/com/othmane/conxol/MainActivity.kt"
           cp -a apps/desktop/src-tauri/icons/android/. "$android/src/main/res/"
+          sed -i '/^[[:space:]]*ndkVersion =/d; /^[[:space:]]*ndkPath =/d' "$android/build.gradle.kts"
           sed -i '/android {/a\    ndkVersion = "28.2.13676358"\n    ndkPath = System.getenv("NDK_HOME")' "$android/build.gradle.kts"
           sed -i '/jniLibs\.keepDebugSymbols\.add(/d;s/isJniDebuggable = true/isJniDebuggable = false/' "$android/build.gradle.kts"
           pnpm --dir apps/desktop tauri android build --apk --target aarch64 --ci --config '{"bundle":{"android":{"versionCode":1069}}}'
