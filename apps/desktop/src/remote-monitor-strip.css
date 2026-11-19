@@ -20,20 +20,22 @@
 .remote-metric-tooltip dl > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 20px; }
 .remote-metric-tooltip dt { font-weight: 600; overflow-wrap: anywhere; }
 .remote-metric-tooltip dd { margin: 0; text-align: right; font-variant-numeric: tabular-nums; }
-.remote-disk-tooltip { width: 560px; max-width: calc(100vw - 16px); padding: 0; border-radius: 8px; font: 12px "Segoe UI", sans-serif; }
-.remote-disk-heading { display: flex; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.remote-disk-tooltip { width: 520px; max-width: calc(100vw - 16px); padding: 0; border-radius: 6px; font: 11px "Segoe UI", sans-serif; }
+.remote-disk-heading { display: flex; align-items: center; gap: 7px; padding: 9px 10px; border-bottom: 1px solid var(--line); }
 .remote-disk-heading > span { margin-left: auto; color: var(--muted); font-size: 11px; }
 .remote-disk-heading svg { color: var(--mint); }
-.remote-disk-mount { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.remote-disk-columns, .remote-disk-mount { display: grid; grid-template-columns: minmax(80px, 1fr) repeat(3, 68px) 84px; align-items: center; gap: 8px; padding: 6px 10px; font-variant-numeric: tabular-nums; }
+.remote-disk-columns { color: var(--muted); font-size: 10px; background: var(--panel-soft); }
+.remote-disk-columns > span:not(:first-child), .remote-disk-mount > span { text-align: right; }
+.remote-disk-mount { min-height: 29px; border-bottom: 1px solid var(--line); }
 .remote-disk-mount:last-child { border-bottom: 0; }
-.remote-disk-name, .remote-disk-capacity { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-.remote-disk-name strong { overflow-wrap: anywhere; font-weight: 600; }
-.remote-disk-name > span { flex-shrink: 0; color: var(--mint); font-size: 11px; }
-.remote-disk-device { margin: 2px 0 9px; color: var(--muted); overflow-wrap: anywhere; font-size: 11px; }
-.remote-disk-bar { height: 5px; overflow: hidden; border-radius: 4px; background: var(--panel-soft); }
+.remote-disk-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.remote-disk-usage { display: flex; align-items: center; gap: 6px; }
+.remote-disk-usage > span { width: 29px; flex-shrink: 0; color: var(--mint); text-align: right; font-size: 10px; }
+.remote-disk-bar { flex: 1; height: 4px; overflow: hidden; border-radius: 4px; background: var(--panel-soft); }
 .remote-disk-bar i { display: block; height: 100%; border-radius: inherit; background: var(--mint); }
-.remote-disk-capacity { margin-top: 7px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; flex-wrap: wrap; gap: 4px 12px; }
-.remote-disk-capacity b { font-weight: 500; color: var(--text); }
 .remote-disk-mount.is-full .remote-disk-bar i { background: var(--coral); }
-.remote-disk-mount.is-full .remote-disk-name > span { color: var(--coral); }
+.remote-disk-mount.is-full .remote-disk-usage > span { color: var(--coral); }
+.remote-disk-mounts { overflow-x: auto; }
+@media (max-width: 520px) { .remote-disk-columns, .remote-disk-mount { grid-template-columns: minmax(60px, 1fr) repeat(3, 54px) 55px; gap: 5px; padding-inline: 7px; font-size: 10px; } }
 .remote-disk-unavailable { margin: 0; padding: 16px; color: var(--muted); }

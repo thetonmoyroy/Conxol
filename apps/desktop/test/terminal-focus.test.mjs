@@ -35,3 +35,13 @@ ownInput = true;
 attempt();
 frames.shift()();
 assert.equal(focused, 2, "an already focused terminal input may stay focused");
+
+ownInput = false;
+globalThis.document.activeElement.closest = selector => selector === ".terminal-host" ? {} : null;
+attempt();
+frames.shift()();
+assert.equal(focused, 3, "tab cycling hands focus from the previous terminal to the selected pane");
+globalThis.document.activeElement.closest = () => null;
+attempt();
+frames.shift()();
+assert.equal(focused, 3, "other editable controls retain focus");

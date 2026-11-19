@@ -7,6 +7,7 @@ import "./setup-wizard.css";
 import "./sftp-browser.css";
 import "./remote-monitor-strip.css";
 import App from "./App";
+import { DetachedTerminal } from "./DetachedTerminal";
 import { WorkspaceSecurity } from "./WorkspaceSecurity";
 import { PptpBrowser } from "./PptpBrowser";
 import { FirstRunSetup } from "./SetupWizard";
@@ -15,6 +16,6 @@ if (/Android/i.test(navigator.userAgent)) document.documentElement.classList.add
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {location.search === "?pptp-browser" ? <PptpBrowser /> : <WorkspaceSecurity><FirstRunSetup><App /></FirstRunSetup></WorkspaceSecurity>}
+    {location.search === "?pptp-browser" ? <PptpBrowser /> : location.search === "?terminal-view" ? <WorkspaceSecurity><DetachedTerminal /></WorkspaceSecurity> : <WorkspaceSecurity><FirstRunSetup><App /></FirstRunSetup></WorkspaceSecurity>}
   </StrictMode>,
 );

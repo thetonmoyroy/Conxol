@@ -47,7 +47,7 @@ function LiveDiagnosticInstance({ id, kind, defaultTimeout, stopGeneration, onUp
   const [timeout, setTimeoutValue] = useState(defaultTimeout);
   const [interval, setIntervalValue] = useState("1000");
   const [packetSize, setPacketSize] = useState("32");
-  const [maxHops, setMaxHops] = useState("8");
+  const [maxHops, setMaxHops] = useState("30");
   const [state, setState] = useState("idle");
   const [error, setError] = useState<string | null>(null);
   const [ping, setPing] = useState<PingResult | null>(null);

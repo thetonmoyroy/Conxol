@@ -1,0 +1,33 @@
+.external-editor-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #0009;
+}
+.external-editor-modal {
+  width: min(580px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 24px;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel, #20252b);
+  color: var(--text, #eee);
+  overflow-wrap: anywhere;
+}
+.external-editor-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px; }
+.external-editor-status {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 8;
+  width: min(360px, calc(100vw - 32px));
+}
+.external-editor-status .external-editor-modal { width: 100%; box-sizing: border-box; padding: 12px; box-shadow: 0 6px 24px #0006; }
+.external-editor-status h2 { margin: 0; font-size: 13px; }
+.external-editor-status p { margin: 6px 0; font-size: 12px; }
+.external-editor-status .external-editor-actions { margin-top: 10px; }
+.external-editor-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

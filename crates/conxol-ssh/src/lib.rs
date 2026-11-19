@@ -650,6 +650,7 @@ pub struct SshConnectOptions {
     /// included in Debug output or logs.
     pub startup_directory: Option<String>,
     pub startup_command: Option<String>,
+    pub startup_command_delay_ms: Option<u64>,
 }
 
 /// A complete SSH connection description for one hop in a jump chain. The
@@ -831,6 +832,7 @@ pub struct SshConnection {
     environment: Vec<(String, String)>,
     startup_directory: Option<String>,
     startup_command: Option<String>,
+    startup_command_delay_ms: Option<u64>,
 }
 
 // A global forward request can take effect even if its reply future is dropped.
@@ -1342,6 +1344,7 @@ impl SshConnection {
             environment,
             startup_directory,
             startup_command,
+            startup_command_delay_ms: options.startup_command_delay_ms,
         })
     }
 
@@ -1433,9 +1436,13 @@ impl SshConnection {
             self.startup_directory.as_deref(),
             self.startup_command.as_deref(),
         ) {
+            let delay = Duration::from_millis(self.startup_command_delay_ms.unwrap_or(
+                conxol_core::session::DEFAULT_SESSION_STARTUP_DELAY_MS,
+            ));
+            let gaps = startup.iter().filter(|&&byte| byte == b'\n').count().saturating_sub(1);
             let write = tokio::time::timeout_at(
-                deadline,
-                write_shell_startup(&mut reader, &writer, startup, &mut buffered_bytes),
+                deadline + delay * gaps as u32,
+                write_shell_startup(&mut reader, &writer, startup, delay, &mut buffered_bytes),
             )
             .await
             .map_err(|_| SshError::StartupInputTimeout)
@@ -2055,9 +2062,10 @@ fn validate_options(options: &SshConnectOptions) -> Result<(), SshError> {
             .keepalive_interval
             .is_some_and(|interval| interval.is_zero() || interval > Duration::from_secs(86_400))
         || conxol_core::validate_session_environment(&options.environment).is_err()
-        || conxol_core::validate_session_startup(
+        || conxol_core::session::validate_remote_session_startup(
             options.startup_directory.as_deref(),
             options.startup_command.as_deref(),
+            options.startup_command_delay_ms,
         )
         .is_err()
     {
@@ -2092,11 +2100,9 @@ fn build_startup_input(
             input.push(b'\n');
         }
     }
-    if let Some(command) = startup_command {
-        input.extend_from_slice(command.as_bytes());
-        if !command.ends_with('\n') && !command.ends_with('\r') {
-            input.push(b'\n');
-        }
+    for line in startup_command.into_iter().flat_map(conxol_core::session::startup_command_lines) {
+        input.extend_from_slice(line.as_bytes());
+        input.push(b'\n');
     }
     Some(input)
 }
@@ -4014,14 +4020,23 @@ async fn write_shell_startup(
     reader: &mut SshShellReader,
     writer: &SshShellWriter,
     startup: Vec<u8>,
+    delay: Duration,
     buffered_bytes: &mut usize,
 ) -> Result<(), SshError> {
-    let write = writer.channel.data_bytes(startup);
+    let write = async {
+        for (index, line) in startup.split_inclusive(|&byte| byte == b'\n').enumerate() {
+            if index != 0 && !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            writer.channel.data_bytes(line.to_vec()).await.map_err(SshError::Channel)?;
+        }
+        Ok(())
+    };
     tokio::pin!(write);
     loop {
         tokio::select! {
             biased;
-            result = &mut write => return result.map_err(SshError::Channel),
+            result = &mut write => return result,
             message = reader.channel.wait() => {
                 buffer_shell_setup_output(message, "startup input",
                     &mut reader.pending_output, buffered_bytes)?;
@@ -4450,6 +4465,7 @@ mod tests {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         };
 
         let parts = connection_parts(&options);
@@ -4475,6 +4491,7 @@ mod tests {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         };
         let jumps = (0..=MAX_SSH_JUMP_HOSTS).map(|_| options()).collect();
         assert!(matches!(
@@ -4532,6 +4549,7 @@ mod tests {
             environment: vec![("CONXOL_FIXTURE".into(), "do-not-print-me".into())],
             startup_directory: Some("/srv/fixture-secret".into()),
             startup_command: Some("printf startup-secret".into()),
+            startup_command_delay_ms: None,
         };
         let debug = format!("{options:?}");
         assert!(debug.contains("environment_count: 1"));
@@ -4544,6 +4562,10 @@ mod tests {
     fn startup_input_quotes_directory_and_requires_no_shell_discovery() {
         let input = build_startup_input(Some("/srv/O'Reilly"), Some("printf ready")).unwrap();
         assert_eq!(input, b"cd -- '/srv/O'\"'\"'Reilly' && printf ready\n");
+        assert_eq!(
+            build_startup_input(None, Some("configure terminal\r\n\r\n end")).unwrap(),
+            b"configure terminal\n end\n",
+        );
         assert_eq!(build_startup_input(None, None), None);
     }
 

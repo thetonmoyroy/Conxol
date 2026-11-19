@@ -5,7 +5,10 @@ export function focusConnectedTerminal(terminal: { element?: HTMLElement; focus(
     const active = document.activeElement;
     if (!stillSelected() || !host?.isConnected || host.closest('[hidden], [aria-hidden="true"]')) return;
     if (document.querySelector('dialog[open], [aria-modal="true"]')) return;
-    if (active?.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])') && !host.contains(active)) return;
+    // Tab cycling may leave focus in the previous pane's xterm textarea.
+    // Allow that handoff while preserving search, login and other form inputs.
+    if (active?.matches('input, textarea, select, [contenteditable]:not([contenteditable="false"])')
+      && !host.contains(active) && !active.closest?.(".terminal-host")) return;
     terminal.focus();
   });
 }

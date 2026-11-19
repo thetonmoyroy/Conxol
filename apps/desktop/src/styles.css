@@ -586,6 +586,11 @@ button:not(:disabled) { cursor: pointer; }
 .desktop-home-empty { color: var(--faint); font-size: 14px; }
 
 /* Compact SSH browser shares the existing transfer and file-operation handlers. */
+.session-row .session-copy strong { display: flex; align-items: center; gap: 6px; }
+.session-row .session-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-open-indicator { display: inline-block; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: var(--mint); }
+.session-open-indicator.is-connecting { background: var(--amber); }
+.session-open-indicator.is-disconnected { background: transparent; border: 1px solid var(--muted); }
 .app-shell .sidebar { flex-basis: 164px; }
 .desktop-tool-tab { display: flex; align-items: center; gap: 9px; margin-top: 3px; padding: 0 6px; border: 1px solid var(--line-strong); border-bottom: 0; border-radius: 6px 6px 0 0; color: var(--amber); background: var(--bg); font-size: 10px; white-space: nowrap; }
 .desktop-tool-tab button { display: grid; place-items: center; width: 16px; height: 18px; padding: 0; border: 0; background: transparent; color: var(--muted); }

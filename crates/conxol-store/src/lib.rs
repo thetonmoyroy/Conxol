@@ -989,6 +989,7 @@ impl SessionStore {
                 favorite: false,
                 startup_directory: None,
                 startup_command: None,
+                startup_command_delay_ms: None,
                 environment: Vec::new(),
                 pptp_profile_id: None,
                 jump_hosts,
@@ -1537,6 +1538,7 @@ mod tests {
             favorite: true,
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
             environment: Vec::new(),
             pptp_profile_id: None,
             jump_hosts: Vec::new(),
@@ -1592,11 +1594,14 @@ mod tests {
         session.username = None;
         session.auth = AuthMethod::None;
         session.folder = Some("Telnet sessions".into());
+        session.startup_command = Some("configure terminal\nend".into());
+        session.startup_command_delay_ms = Some(450);
         session.telnet_profile = Some(TelnetProfile {
             terminal: "xterm-256color".into(),
             encoding: "utf-8".into(),
             columns: 120,
             rows: 32,
+            login_success_prompt: Some("router#".into()),
         });
         store.save(session.clone()).unwrap();
 

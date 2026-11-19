@@ -35,6 +35,7 @@ fn main() {
         "test-retired-sessions" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-core", "-p", "conxol-store", "--lib"], None),
         "test-pptp-diagnostics" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp_diagnostics::tests", "--", "--nocapture"], None),
         "test-diagnostic-history" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "diagnostic_history::tests", "--", "--nocapture"], None),
+        "test-external-editor" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "external_editor::tests", "--", "--nocapture"], None),
         "test-diagnostic-instances" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "--lib", "network::tests", "--", "--nocapture"], None),
         "test-pptp" => run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol-pptp", "--", "--nocapture"], None)
             .and_then(|()| run_sanitized_test("cargo", ["test", "--locked", "-p", "conxol", "pptp::tests", "--", "--nocapture"], None)),
@@ -96,6 +97,7 @@ fn main() {
             println!("cargo xtask test-ping    Run isolated native Ping engine and loopback tests");
             println!("cargo xtask test-diagnostics    Run isolated diagnostic export regressions");
             println!("cargo xtask test-diagnostic-history    Run isolated diagnostic log persistence regressions");
+            println!("cargo xtask test-external-editor    Run isolated external editor file regressions");
             println!("cargo xtask test-diagnostic-instances    Run isolated diagnostic instance/cancellation regressions");
             println!(
                 "cargo xtask test-backup    Run isolated encrypted workspace backup regressions"

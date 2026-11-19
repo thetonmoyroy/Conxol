@@ -10,6 +10,9 @@ pub const MAX_SESSION_ENVIRONMENT_VALUE_BYTES: usize = 4096;
 pub const MAX_SESSION_ENVIRONMENT_TOTAL_BYTES: usize = 64 * 1024;
 pub const MAX_SESSION_STARTUP_DIRECTORY_BYTES: usize = 4096;
 pub const MAX_SESSION_STARTUP_COMMAND_BYTES: usize = 16 * 1024;
+pub const MAX_SESSION_STARTUP_LINES: usize = 64;
+pub const DEFAULT_SESSION_STARTUP_DELAY_MS: u64 = 300;
+pub const MAX_SESSION_STARTUP_DELAY_MS: u64 = 5000;
 pub const MAX_CREDENTIAL_REFERENCE_BYTES: usize = 128;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,6 +110,8 @@ pub struct TelnetProfile {
     pub encoding: String,
     pub columns: u16,
     pub rows: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub login_success_prompt: Option<String>,
 }
 
 impl TelnetProfile {
@@ -118,6 +123,18 @@ impl TelnetProfile {
             || self.columns == 0
             || self.rows == 0
         {
+            return Err(SessionValidationError::InvalidTelnetProfile);
+        }
+        Self::validate_login_success_prompt(self.login_success_prompt.as_deref())
+    }
+
+    pub fn validate_login_success_prompt(prompt: Option<&str>) -> Result<(), SessionValidationError> {
+        if prompt.is_some_and(|prompt| {
+            prompt.trim().is_empty()
+                || prompt.len() > 256
+                || prompt.trim_end().ends_with(':')
+                || prompt.chars().any(char::is_control)
+        }) {
             return Err(SessionValidationError::InvalidTelnetProfile);
         }
         Ok(())
@@ -177,6 +194,8 @@ pub struct SessionRecord {
     pub startup_directory: Option<String>,
     #[serde(default)]
     pub startup_command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_command_delay_ms: Option<u64>,
     #[serde(default)]
     pub environment: Vec<(String, String)>,
     #[serde(default)]
@@ -234,6 +253,8 @@ pub enum SessionValidationError {
     InvalidStartupDirectory,
     #[error("session startup command is invalid")]
     InvalidStartupCommand,
+    #[error("session startup delay must be between 0 and 5000 ms")]
+    InvalidStartupDelay,
 }
 
 impl std::fmt::Debug for SessionRecord {
@@ -300,6 +321,7 @@ impl SessionRecord {
             favorite: true,
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
             environment: Vec::new(),
             pptp_profile_id: None,
             jump_hosts: Vec::new(),
@@ -353,10 +375,18 @@ impl SessionRecord {
         if self.tags.iter().any(|tag| tag.trim().is_empty()) {
             return Err(SessionValidationError::EmptyTag);
         }
-        validate_session_startup(
-            self.startup_directory.as_deref(),
-            self.startup_command.as_deref(),
-        )?;
+        if matches!(self.protocol, Protocol::Ssh | Protocol::Telnet) {
+            validate_remote_session_startup(
+                self.startup_directory.as_deref(),
+                self.startup_command.as_deref(),
+                self.startup_command_delay_ms,
+            )?;
+        } else {
+            validate_session_startup(
+                self.startup_directory.as_deref(),
+                self.startup_command.as_deref(),
+            )?;
+        }
         validate_session_environment(&self.environment)?;
         validate_auth_method(&self.auth)?;
         for jump_host in &self.jump_host_profiles {
@@ -414,6 +444,32 @@ pub fn validate_session_startup(
             || value.chars().any(char::is_control)
     }) {
         return Err(SessionValidationError::InvalidStartupCommand);
+    }
+    Ok(())
+}
+
+/// Nonblank terminal input lines, preserving their contents and accepting LF or CRLF.
+pub fn startup_command_lines(command: &str) -> impl Iterator<Item = &str> {
+    command.lines().filter(|line| !line.trim().is_empty())
+}
+
+pub fn validate_remote_session_startup(
+    directory: Option<&str>,
+    command: Option<&str>,
+    delay_ms: Option<u64>,
+) -> Result<(), SessionValidationError> {
+    validate_session_startup(directory, None)?;
+    if let Some(command) = command {
+        let lines = startup_command_lines(command).count();
+        if command.len() > MAX_SESSION_STARTUP_COMMAND_BYTES
+            || !(1..=MAX_SESSION_STARTUP_LINES).contains(&lines)
+            || command.lines().any(|line| line.chars().any(char::is_control))
+        {
+            return Err(SessionValidationError::InvalidStartupCommand);
+        }
+    }
+    if delay_ms.is_some_and(|delay| delay > MAX_SESSION_STARTUP_DELAY_MS) {
+        return Err(SessionValidationError::InvalidStartupDelay);
     }
     Ok(())
 }
@@ -591,6 +647,7 @@ mod tests {
             favorite: false,
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
             environment: Vec::new(),
             pptp_profile_id: None,
             jump_hosts: Vec::new(),
@@ -658,6 +715,7 @@ mod tests {
             encoding: "utf-8".into(),
             columns: 120,
             rows: 32,
+            login_success_prompt: None,
         };
         profile.validate().unwrap();
         let mut invalid = profile;

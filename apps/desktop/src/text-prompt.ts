@@ -10,10 +10,16 @@ export async function confirmAction(message: string, options: { title?: string; 
   return await openDialogue(message, undefined, options) !== null;
 }
 
-/** Review configured shell input before opening a local or SSH session. */
-export async function confirmSessionStartup(command: string | undefined, destination: string, reconnect = false, stillAllowed: () => boolean = () => true): Promise<boolean> {
+/** Review configured shell input before opening a session. */
+export async function confirmSessionStartup(command: string | undefined, destination: string, reconnect: boolean | "telnet" = false, stillAllowed: () => boolean = () => true): Promise<boolean> {
   if (!stillAllowed()) return false;
-  if (command?.trim() && await openDialogue(`Send this profile's startup command to ${destination}?${reconnect ? " It will also run again after automatic SSH reconnects." : ""}`, undefined, { reviewText: command }) === null) return false;
+  const reconnectNotice = reconnect === "telnet"
+    ? " It will also run again when the configured prompt appears after a reconnect."
+    : reconnect ? " It will also run again after automatic SSH reconnects." : "";
+  if (command?.trim()) {
+    const subject = command.trim().includes("\n") ? "startup commands" : "startup command";
+    if (await openDialogue(`Send this profile's ${subject} to ${destination}?${reconnectNotice}`, undefined, { reviewText: command, title: `Review ${subject}` }) === null) return false;
+  }
   return stillAllowed();
 }
 

@@ -14,6 +14,8 @@ $sdk = Get-ChildItem -LiteralPath $sdkRoot -Directory |
     Sort-Object { [version]$_.Name } -Descending | Select-Object -First 1
 if (-not $sdk) { throw 'Install Windows SDK with x64 MakeAppx.exe first.' }
 $makeAppx = Join-Path $sdk.FullName 'x64/makeappx.exe'
+$makePri = Join-Path $sdk.FullName 'x64/makepri.exe'
+if (-not (Test-Path -LiteralPath $makePri -PathType Leaf)) { throw 'Install Windows SDK with x64 MakePri.exe first.' }
 
 Push-Location $repoRoot
 try {
@@ -42,6 +44,27 @@ try {
         if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) { throw "Missing package input: $source" }
         Copy-Item -LiteralPath $sourcePath -Destination (Join-Path $stage $payload[$source])
     }
+    # Windows otherwise shrinks the Store logo onto an accent-color taskbar plate.
+    # Target-size assets and a PRI select the transparent variants in both themes.
+    Add-Type -AssemblyName System.Drawing
+    $iconSource = [Drawing.Image]::FromFile((Join-Path $repoRoot 'apps/desktop/src-tauri/icons/icon.png'))
+    try {
+        foreach ($size in @(16, 24, 32, 44, 48, 256)) {
+            $bitmap = [Drawing.Bitmap]::new($size, $size, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+            try {
+                $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                try {
+                    $graphics.Clear([Drawing.Color]::Transparent)
+                    $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                    $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+                    $graphics.DrawImage($iconSource, 0, 0, $size, $size)
+                } finally { $graphics.Dispose() }
+                foreach ($form in @('unplated', 'lightunplated')) {
+                    $bitmap.Save("$stage/Assets/Square44x44Logo.targetsize-${size}_altform-${form}.png", [Drawing.Imaging.ImageFormat]::Png)
+                }
+            } finally { $bitmap.Dispose() }
+        }
+    } finally { $iconSource.Dispose() }
     # Check PE machine type for every included executable, not just its filename.
     foreach ($file in Get-ChildItem -LiteralPath $stage -Recurse -Filter '*.exe') {
         $bytes = [IO.File]::ReadAllBytes($file.FullName)
@@ -80,6 +103,16 @@ try {
 </Package>
 "@
     [IO.File]::WriteAllText("$stage/AppxManifest.xml", $manifest, [Text.UTF8Encoding]::new($false))
+    $priConfig = "$stage-priconfig.xml"
+    & $makePri createconfig /cf $priConfig /dq en-US /o
+    if ($LASTEXITCODE -ne 0) { throw 'MakePri configuration failed.' }
+    & $makePri new /pr $stage /cf $priConfig /of "$stage/resources.pri" /o
+    if ($LASTEXITCODE -ne 0) { throw 'MakePri resource indexing failed.' }
+    $priDump = "$stage-pri.xml"
+    & $makePri dump /if "$stage/resources.pri" /of $priDump /o
+    if ($LASTEXITCODE -ne 0 -or (Get-Content -LiteralPath $priDump -Raw) -notmatch 'unplated') {
+        throw 'Taskbar unplated assets are missing from the resource index.'
+    }
     $package = Join-Path $output "Conxol_${packageVersion}_x64.msix"
     & $makeAppx pack /d $stage /p $package /h SHA256 /o
     if ($LASTEXITCODE -ne 0) { throw 'MakeAppx packaging/manifest validation failed.' }

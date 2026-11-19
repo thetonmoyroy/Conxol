@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Folder, FolderUp, FolderPlus, File, FileCode, Download, Upload, RefreshCw, Trash2, Pencil, Copy, Settings2, Eye, ArrowDown, ArrowUp } from "lucide-react";
+import { Folder, FolderUp, FolderPlus, FilePlus, File, FileCode, Download, Upload, RefreshCw, Trash2, Pencil, Copy, Settings2, Eye, ArrowDown, ArrowUp, ExternalLink } from "lucide-react";
 import type { RemoteEntry } from "./App";
 import { RemotePathBar } from "./RemotePathBar";
 import { remoteParentPath } from "./remote-path";
@@ -8,10 +8,11 @@ import { remoteParentPath } from "./remote-path";
 type Props = {
   entries: RemoteEntry[]; path: string; loading: boolean; ready: boolean; error: string | null;
   onNavigate: (path: string) => void; onDownload: (entry: RemoteEntry) => void;
-  onUpload: () => void; onCreateDirectory: () => void;
+  onUpload: () => void; onCreateDirectory: () => void; onCreateFile: () => void;
   onRename: (entry: RemoteEntry) => void; onDelete: (entry: RemoteEntry) => void;
   onSetPermissions: (entry: RemoteEntry) => void; onCopyPath: (entry: RemoteEntry) => void;
   onEdit: (entry: RemoteEntry) => void; children?: ReactNode;
+  onExternalEdit?: (entry: RemoteEntry) => void;
 };
 export function SftpBrowser(props: Props) {
   const { entries, path, loading, ready, error, onNavigate } = props;
@@ -39,6 +40,7 @@ export function SftpBrowser(props: Props) {
   const actions = (entry: RemoteEntry) => [
     { label: entry.isDirectory ? "Open directory" : "Open in text editor", icon: Folder, run: () => open(entry), disabled: !entry.isDirectory && !entry.isRegular },
     { label: "Download", icon: Download, run: () => props.onDownload(entry) },
+    ...(props.onExternalEdit ? [{ label: "Edit in external editor", icon: ExternalLink, run: () => props.onExternalEdit?.(entry), disabled: !entry.isRegular }] : []),
     { label: "Rename", icon: Pencil, run: () => props.onRename(entry) },
     { label: "Copy file path", icon: Copy, run: () => props.onCopyPath(entry) },
     { label: "Permissions", icon: Settings2, run: () => props.onSetPermissions(entry) },
@@ -46,20 +48,20 @@ export function SftpBrowser(props: Props) {
   ];
   return <section className="sftp-browser" aria-label="SSH browser (SFTP)">
     <div className="sftp-toolbar" role="toolbar" aria-label="SFTP actions">
-      <button title="Parent directory" aria-label="Parent directory" disabled={!ready || path === "/"} onClick={() => onNavigate(remoteParentPath(path))}><FolderUp /></button>
       <button title="Download selected item" aria-label="Download selected item" disabled={!ready || !selected} onClick={() => selected && props.onDownload(selected)}><Download /></button>
       <button title="Upload files" aria-label="Upload files" disabled={!ready} onClick={props.onUpload}><Upload /></button>
       <button title="Refresh" aria-label="Refresh" disabled={loading} onClick={() => onNavigate(path)}><RefreshCw className={loading ? "spin" : undefined} /></button>
       <button title="New folder" aria-label="New folder" disabled={!ready} onClick={props.onCreateDirectory}><FolderPlus /></button>
-      <button title="Edit selected file" aria-label="Edit selected file" disabled={!ready || !selected?.isRegular} onClick={() => selected && props.onEdit(selected)}><Pencil /></button>
-      <button title="Delete selected item" aria-label="Delete selected item" disabled={!ready || !selected} onClick={() => selected && props.onDelete(selected)}><Trash2 /></button>
+      <button title="Create new file" aria-label="Create new file" disabled={!ready} onClick={props.onCreateFile}><FilePlus /></button>
       <button title="Show hidden files" aria-label="Show hidden files" aria-pressed={hidden} onClick={() => setHidden(value => !value)}><Eye /></button>
     </div>
     <RemotePathBar path={path} loading={loading} onNavigate={onNavigate} compact />
     <button className="sftp-column-heading" onClick={() => setDescending(value => !value)} title="Reverse name sort">{descending ? <ArrowUp size={11} /> : <ArrowDown size={11} />} Name</button>
     {error && <p className="sftp-error" role="alert">{error}</p>}
     <div className="sftp-list" aria-label="Remote directory contents" aria-busy={loading} onScroll={() => setMenu(null)}>
-      <button className="sftp-row sftp-parent" title="Parent directory" disabled={!ready || path === "/"} onClick={() => onNavigate(remoteParentPath(path))}><FolderUp size={18} /><span>..</span></button>
+      <button className="sftp-row sftp-parent" title="Double-click to open parent directory" aria-label="Parent directory" disabled={!ready || path === "/"}
+        onClick={event => { if (event.detail === 0) onNavigate(remoteParentPath(path)); }}
+        onDoubleClick={() => onNavigate(remoteParentPath(path))}><FolderUp size={18} /><span>..</span></button>
       {visible.map(entry => <button key={entry.path} className={`sftp-row${selectedPath === entry.path ? " is-selected" : ""}${entry.isDirectory ? " is-directory" : ""}`} title={entry.name} aria-pressed={selectedPath === entry.path}
         onClick={() => select(entry.path)} onDoubleClick={() => open(entry)}
         onKeyDown={event => {

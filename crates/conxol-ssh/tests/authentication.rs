@@ -631,6 +631,7 @@ impl Fixture {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         }
     }
 
@@ -1026,6 +1027,7 @@ fn native_fixture_options(metadata: &serde_json::Value) -> SshConnectOptions {
         environment: Vec::new(),
         startup_directory: None,
         startup_command: Some("fixture-startup-".repeat(512)),
+        startup_command_delay_ms: None,
     }
 }
 
@@ -1273,15 +1275,19 @@ async fn startup_input_keeps_shell_output_draining() {
         let mut options = fixture.options(Method::Password, true);
         options.timeout = Duration::from_secs(1);
         let command = "fixture-startup-".repeat(512);
-        let expected_input = format!("{command}\n").into_bytes();
-        options.startup_command = Some(command);
+        let expected_input = format!("{command}\nsecond\n").into_bytes();
+        options.startup_command = Some(format!("{command}\r\n\r\nsecond"));
+        options.startup_command_delay_ms = split.then_some(125);
+        let expected_delay = options.startup_command_delay_ms.unwrap_or(300);
         let connection = SshConnection::connect(options).await.unwrap();
+        let startup_started = tokio::time::Instant::now();
         let mut shell = Some(
             connection
                 .open_shell(80, 24)
                 .await
                 .expect("startup input must not deadlock the SSH actor behind unread output"),
         );
+        assert!(startup_started.elapsed() >= Duration::from_millis(expected_delay));
         let expected = [
             vec![b'x'; 256 * 1024],
             SHELL_BANNER.to_vec(),

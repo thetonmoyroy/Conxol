@@ -1992,6 +1992,7 @@ fn connects_to_a_reproducible_local_sshd_fixture_with_a_real_pty_shell() {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         })
         .await;
         let rejected_fingerprint = match rejection {
@@ -2031,6 +2032,7 @@ fn connects_to_a_reproducible_local_sshd_fixture_with_a_real_pty_shell() {
             environment: vec![("CONXOL_FIXTURE".into(), "loopback-only".into())],
             startup_directory: Some("/tmp".into()),
             startup_command: Some("printf 'CONXOL_%s\\n' 'STARTUP_OK'".into()),
+            startup_command_delay_ms: None,
         })
         .await
         .expect("connect to local sshd");
@@ -2677,6 +2679,7 @@ fn forwards_an_explicit_x11_channel_to_a_loopback_display_fixture() {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         })
         .await
         .expect("connect local SSH X11 fixture");
@@ -2755,6 +2758,7 @@ fn forwards_x11_setup_to_a_disposable_xvfb_server_when_available() {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         })
         .await
         .expect("connect local SSH X11 fixture");
@@ -3009,6 +3013,7 @@ impl LocalSshd {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         }
     }
 

@@ -82,6 +82,8 @@ pub struct SshConnectRequest {
     pub startup_directory: Option<String>,
     #[serde(default)]
     pub startup_command: Option<String>,
+    #[serde(default)]
+    pub startup_command_delay_ms: Option<u64>,
     #[serde(default = "default_ssh_reconnect_attempts")]
     pub reconnect_attempts: u8,
     #[serde(default = "default_ssh_connect_timeout_ms")]
@@ -2009,9 +2011,10 @@ async fn connect_transport(
 ) -> Result<SshConnection, SshManagerError> {
     conxol_core::validate_session_environment(&request.environment)
         .map_err(|error| SshManagerError::InvalidRequest(error.to_string()))?;
-    conxol_core::validate_session_startup(
+    conxol_core::session::validate_remote_session_startup(
         request.startup_directory.as_deref(),
         request.startup_command.as_deref(),
+        request.startup_command_delay_ms,
     )
     .map_err(|error| SshManagerError::InvalidRequest(error.to_string()))?;
     let keepalive_interval = server_alive_interval_duration(request.server_alive_interval)?;
@@ -2062,6 +2065,7 @@ async fn connect_transport(
         environment: request.environment.clone(),
         startup_directory: request.startup_directory.clone(),
         startup_command: request.startup_command.clone(),
+        startup_command_delay_ms: request.startup_command_delay_ms,
     };
     let mut jump_options = Vec::with_capacity(request.jump_hosts.len());
     for jump in &request.jump_hosts {
@@ -2086,6 +2090,7 @@ async fn connect_transport(
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         });
     }
     let connection = if let Some(id) = request.pptp_profile_id {

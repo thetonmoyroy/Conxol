@@ -42,6 +42,8 @@ pub struct GeneralSettings {
     pub right_click_to_paste: bool,
     #[serde(default)]
     pub tab_plus_saved_sessions: bool,
+    #[serde(default)]
+    pub single_click_to_open_sessions: bool,
 }
 
 impl Default for GeneralSettings {
@@ -54,6 +56,7 @@ impl Default for GeneralSettings {
             always_show_terminal_search: false,
             right_click_to_paste: false,
             tab_plus_saved_sessions: false,
+            single_click_to_open_sessions: false,
         }
     }
 }
@@ -442,6 +445,20 @@ mod tests {
         assert!(!pending.setup_complete);
         let json = serde_json::to_string(&pending).unwrap();
         assert!(!serde_json::from_str::<super::GeneralSettings>(&json).unwrap().setup_complete);
+    }
+
+    #[test]
+    fn session_click_preference_defaults_to_double_click_and_round_trips() {
+        let existing: super::GeneralSettings = serde_json::from_str("{}").unwrap();
+        assert!(!existing.single_click_to_open_sessions);
+        let single_click: super::GeneralSettings =
+            serde_json::from_str(r#"{"singleClickToOpenSessions":true}"#).unwrap();
+        assert!(single_click.single_click_to_open_sessions);
+        let json = serde_json::to_string(&single_click).unwrap();
+        assert_eq!(
+            serde_json::from_str::<super::GeneralSettings>(&json).unwrap(),
+            single_click
+        );
     }
 
     #[test]

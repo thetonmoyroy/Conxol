@@ -34,6 +34,7 @@ fn ssh_session(
         favorite,
         startup_directory: None,
         startup_command: None,
+        startup_command_delay_ms: None,
         environment: Vec::new(),
         pptp_profile_id: None,
         jump_hosts: Vec::new(),

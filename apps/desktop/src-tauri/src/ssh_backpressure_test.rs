@@ -325,6 +325,7 @@ async fn blocked_shell_input_keeps_output_and_cancellation_live() {
                 host_key_policy: HostKeyPolicy::PinnedFingerprint(fingerprint), timeout: Duration::from_secs(5),
                 credentials: SshCredentials::password_secret("fixture", conxol_ssh::Secret::from_zeroizing(password)),
                 keepalive_interval: None, x11: None, environment: Vec::new(), startup_directory: None, startup_command: None,
+                startup_command_delay_ms: None,
             }).await.unwrap();
             let (size, mut viewport) = watch::channel((80, 24));
             let (mut reader, writer) = open_shell_at_current_size(&connection, &viewport).await.unwrap().split();
@@ -587,6 +588,7 @@ async fn tunnel_workers_are_owned_and_joined_before_transport_cleanup() {
                     environment: Vec::new(),
                     startup_directory: None,
                     startup_command: None,
+                    startup_command_delay_ms: None,
                 })
                 .await
                 .unwrap(),
@@ -905,6 +907,7 @@ async fn finite_session_operations_settle_before_transport_cleanup() {
                     environment: Vec::new(),
                     startup_directory: None,
                     startup_command: None,
+                    startup_command_delay_ms: None,
                 })
                 .await
                 .unwrap(),

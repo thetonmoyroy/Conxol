@@ -18,7 +18,7 @@ function MetricDetails({ label, rows = [], details, children }: { label: string;
   const show = () => {
     cancel();
     const rect = anchor.current?.getBoundingClientRect();
-    if (rect) setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - (details ? 568 : 348))), bottom: window.innerHeight - rect.top + 6, maxHeight: Math.max(40, rect.top - 14) });
+    if (rect) setPosition({ left: Math.max(8, Math.min(rect.left, window.innerWidth - (details ? 528 : 348))), bottom: window.innerHeight - rect.top + 6, maxHeight: Math.max(40, rect.top - 14) });
   };
   useEffect(() => {
     const close = (event: Event) => { if (event.type === "scroll" && event.target instanceof Element && event.target.closest(".remote-metric-tooltip")) return; setPosition(null); };
@@ -62,11 +62,13 @@ export function RemoteMonitorStrip({ snapshot, loading, error, interval, onInter
       <MetricDetails label="Uptime details" rows={[["Uptime", snapshot?.uptimeSeconds != null ? `${Math.floor(snapshot.uptimeSeconds / 86400)}d ${Math.floor(snapshot.uptimeSeconds % 86400 / 3600)}h ${Math.floor(snapshot.uptimeSeconds % 3600 / 60)}m` : "Unavailable"]]}><Clock size={12} />{snapshot?.uptimeSeconds != null ? `${Math.floor(snapshot.uptimeSeconds / 60)} min` : "—"}</MetricDetails>
       <MetricDetails label="Disk usage details" details={<>
         <header className="remote-disk-heading"><HardDrive size={16} /><strong>Storage</strong><span>{disks.length} mounts</span></header>
+        {disks.length > 0 && <div className="remote-disk-columns" aria-hidden="true"><span>Mount</span><span>Used</span><span>Free</span><span>Total</span><span>Usage</span></div>}
         {disks.length ? <div className="remote-disk-mounts">{disks.map((disk, index) => <article className={`remote-disk-mount${disk.usedPercent >= 90 ? " is-full" : ""}`} key={`${disk.filesystem}:${disk.mountPoint}:${index}`}>
-          <div className="remote-disk-name"><strong>{disk.mountPoint}</strong><span>{disk.usedPercent}% used</span></div>
-          <div className="remote-disk-device">{disk.filesystem}</div>
-          <div className="remote-disk-bar" role="meter" aria-label={`${disk.mountPoint} space used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={disk.usedPercent}><i style={{ width: `${disk.usedPercent}%` }} /></div>
-          <div className="remote-disk-capacity"><span><b>{bytes(disk.usedBytes)}</b> used</span><span><b>{bytes(disk.availableBytes)}</b> free</span><span>{bytes(disk.totalBytes)} total</span></div>
+          <strong className="remote-disk-name" title={`${disk.mountPoint} · ${disk.filesystem}`}>{disk.mountPoint}</strong>
+          <span aria-label={`Used ${bytes(disk.usedBytes)}`}>{bytes(disk.usedBytes)}</span>
+          <span aria-label={`Free ${bytes(disk.availableBytes)}`}>{bytes(disk.availableBytes)}</span>
+          <span aria-label={`Total ${bytes(disk.totalBytes)}`}>{bytes(disk.totalBytes)}</span>
+          <div className="remote-disk-usage"><div className="remote-disk-bar" role="meter" aria-label={`${disk.mountPoint} space used`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={disk.usedPercent}><i style={{ width: `${disk.usedPercent}%` }} /></div><span>{disk.usedPercent}%</span></div>
         </article>)}</div> : <p className="remote-disk-unavailable">{snapshot?.rootDiskUsedPercent != null ? `/ filesystem: ${snapshot.rootDiskUsedPercent}% used. Mount details require an updated desktop build.` : "Mount details unavailable on this host."}</p>}
       </>}><HardDrive size={12} />{diskSummary || `/ ${snapshot?.rootDiskUsedPercent != null ? `${snapshot.rootDiskUsedPercent}%` : "—"}`}</MetricDetails>
       <MetricDetails label="Process details" rows={[["Visible processes", snapshot?.processCount?.toLocaleString() ?? "Unavailable"]]}><Activity size={12} />{snapshot?.processCount ?? "—"} processes</MetricDetails>

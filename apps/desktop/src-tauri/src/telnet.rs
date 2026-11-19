@@ -1,5 +1,8 @@
 use conxol_core::{
-    ConnectionState, TerminalInputError, Utf8OutputDecoder, validate_terminal_input,
+    ConnectionState, TelnetProfile, TerminalInputError, Utf8OutputDecoder, validate_terminal_input,
+};
+use conxol_core::session::{
+    DEFAULT_SESSION_STARTUP_DELAY_MS, startup_command_lines, validate_remote_session_startup,
 };
 use conxol_telnet::{TelnetConnection, TelnetEncoding, TelnetError, TelnetOptions};
 use conxol_vault::{CredentialId, SecretMaterial};
@@ -31,6 +34,12 @@ pub struct TelnetConnectRequest {
     pub credential_id: Option<String>,
     #[serde(default)]
     pub save_password: bool,
+    #[serde(default)]
+    pub startup_command: Option<String>,
+    #[serde(default)]
+    pub startup_command_delay_ms: Option<u64>,
+    #[serde(default)]
+    pub login_success_prompt: Option<String>,
     #[serde(default = "default_terminal")]
     pub terminal: String,
     #[serde(default)]
@@ -119,6 +128,25 @@ impl TelnetManager {
         request: TelnetConnectRequest,
     ) -> Result<TelnetConnectResponse, TelnetManagerError> {
         let host = request.host.clone();
+        validate_remote_session_startup(
+            None, request.startup_command.as_deref(), request.startup_command_delay_ms,
+        )
+            .and_then(|()| {
+                TelnetProfile::validate_login_success_prompt(request.login_success_prompt.as_deref())
+            })
+            .map_err(|error| TelnetManagerError::InvalidRequest(error.to_string()))?;
+        let startup = match (request.login_success_prompt, request.startup_command) {
+            (Some(prompt), Some(command)) => {
+                Some((prompt.trim().to_owned(), startup_command_lines(&command)
+                    .map(|line| format!("{line}\r\n")).collect()))
+            }
+            (None, None) => None,
+            _ => {
+                return Err(TelnetManagerError::InvalidRequest(
+                    "Set both the startup command and the post-login prompt".into(),
+                ));
+            }
+        };
         if request.pptp_profile_id.is_some() && request.host.parse::<std::net::Ipv4Addr>().is_err() {
             return Err(TelnetManagerError::InvalidRequest("PPTP destinations must be IPv4 addresses; DNS is not routed through PPTP yet.".into()));
         }
@@ -198,7 +226,11 @@ impl TelnetManager {
                 credential_id = Some(id.to_string());
             }
         }
-        let login = TelnetLogin::new(username, password);
+        let mut login = TelnetLogin::new(username, password);
+        login.startup = startup;
+        login.startup_delay = std::time::Duration::from_millis(
+            request.startup_command_delay_ms.unwrap_or(DEFAULT_SESSION_STARTUP_DELAY_MS),
+        );
         let terminal_id = Uuid::new_v4().to_string();
         let (sender, receiver) = mpsc::channel(COMMAND_CAPACITY);
         self.sessions
@@ -359,6 +391,7 @@ async fn run_telnet_session(
     let mut output_decoder = Utf8OutputDecoder::default();
     let mut buffer = vec![0_u8; 16 * 1024];
     let reason = 'session: loop {
+        let startup_deadline = login.next_startup_at;
         tokio::select! {
             read = connection.read(&mut buffer), if connection.state() == ConnectionState::Connected => {
                 match read {
@@ -382,7 +415,7 @@ async fn run_telnet_session(
                             if let Some(answer) = answer {
                                 if connection.write_text(answer.as_str()).await.is_err() {
                                     let _ = connection.mark_connection_lost();
-                                    manager.emit_state(&app, &terminal_id, TelnetSessionState::Reconnecting, Some("Telnet login write failed".into()));
+                                    manager.emit_state(&app, &terminal_id, TelnetSessionState::Reconnecting, Some("Telnet login or startup write failed".into()));
                                 }
                             }
                         }
@@ -397,6 +430,20 @@ async fn run_telnet_session(
                             Some(reason),
                         );
                         continue 'session;
+                    }
+                }
+            }
+            _ = async {
+                if let Some(deadline) = startup_deadline {
+                    tokio::time::sleep_until(deadline).await;
+                }
+            }, if startup_deadline.is_some() && connection.state() == ConnectionState::Connected => {
+                if let Some(line) = login.take_startup_line() {
+                    if let Err(error) = connection.write_text(line).await {
+                        let _ = connection.mark_connection_lost();
+                        manager.emit_state(&app, &terminal_id, TelnetSessionState::Reconnecting, Some(error.to_string()));
+                    } else {
+                        login.schedule_startup_line();
                     }
                 }
             }
@@ -542,6 +589,51 @@ mod tests {
     }
 
     #[test]
+    fn telnet_startup_waits_for_the_configured_prompt() {
+        let mut login = super::TelnetLogin::new(
+            "fixture-user".into(),
+            Some(super::SecretMaterial::new("fixture-password")),
+        );
+        login.startup = Some(("router#".into(), vec!["configure terminal\r\n".into(), "end\r\n".into()]));
+        assert!(login.observe("Username:").is_some());
+        assert!(login.observe("\r\nPassword:").is_some());
+        assert!(login.observe("\r\nLogin incorrect\r\nUsername:").is_none());
+        assert!(login.observe("\r\nPassword:").is_none());
+        assert!(login.observe("\r\nother-router#").is_none());
+        assert!(login.observe("\r\n\x1b[32mrou").is_none());
+        assert!(login.next_startup_at.is_none());
+        assert!(login.observe("ter#\x1b[0m ").is_none());
+        assert!(login.next_startup_at.is_some());
+        assert_eq!(login.take_startup_line(), Some("configure terminal\r\n"));
+        let sent_at = tokio::time::Instant::now();
+        login.schedule_startup_line();
+        assert!(login.next_startup_at.unwrap() >= sent_at + std::time::Duration::from_millis(300));
+        assert_eq!(login.take_startup_line(), Some("end\r\n"));
+        assert!(login.observe("\r\nrouter#").is_none());
+        login.schedule_startup_line();
+        assert!(login.next_startup_at.is_none());
+
+        login.reset();
+        assert!(login.observe(&format!("{}router#", "x".repeat(1025))).is_none());
+        assert!(login.next_startup_at.is_none());
+        login.observe("\r\nrouter#");
+        assert!(login.next_startup_at.is_some());
+        assert_eq!(login.take_startup_line(), Some("configure terminal\r\n"));
+    }
+
+    #[test]
+    fn telnet_startup_works_after_manual_login() {
+        let mut login = super::TelnetLogin::new(String::new(), None);
+        login.startup = Some(("switch>".into(), vec!["show version\r\n".into()]));
+        assert!(login.observe("Username:").is_none());
+        assert!(login.observe("\r\nPassword:").is_none());
+        assert!(login.next_startup_at.is_none());
+        login.observe("\r\nswitch> ");
+        assert!(login.next_startup_at.is_some());
+        assert_eq!(login.take_startup_line(), Some("show version\r\n"));
+    }
+
+    #[test]
     fn telnet_encoding_accepts_frontend_and_legacy_names() {
         for (canonical, legacy, expected) in [
             ("utf-8", "utf8", conxol_telnet::TelnetEncoding::Utf8),
@@ -643,10 +735,17 @@ struct TelnetLogin {
     username: String,
     password: Option<SecretMaterial>,
     line: String,
+    line_overflow: bool,
     escape: u8,
     sent_username: bool,
     sent_password: bool,
     started: std::time::Instant,
+    // Exact visible prompt and terminal input, retained for explicit reconnects.
+    startup: Option<(String, Vec<String>)>,
+    startup_delay: std::time::Duration,
+    next_startup_at: Option<tokio::time::Instant>,
+    next_startup_line: usize,
+    sent_startup: bool,
 }
 impl TelnetLogin {
     fn new(username: String, password: Option<SecretMaterial>) -> Self {
@@ -654,21 +753,49 @@ impl TelnetLogin {
             username,
             password,
             line: String::new(),
+            line_overflow: false,
             escape: 0,
             sent_username: false,
             sent_password: false,
             started: std::time::Instant::now(),
+            startup: None,
+            startup_delay: std::time::Duration::from_millis(DEFAULT_SESSION_STARTUP_DELAY_MS),
+            next_startup_at: None,
+            next_startup_line: 0,
+            sent_startup: false,
         }
     }
     fn reset(&mut self) {
         self.line.clear();
+        self.line_overflow = false;
         self.escape = 0;
         self.sent_username = false;
         self.sent_password = false;
+        self.sent_startup = false;
+        self.next_startup_at = None;
+        self.next_startup_line = 0;
         self.started = std::time::Instant::now();
     }
+
+    fn take_startup_line(&mut self) -> Option<&str> {
+        self.next_startup_at = None;
+        let line = self.startup.as_ref()?.1.get(self.next_startup_line)?;
+        self.next_startup_line += 1;
+        Some(line)
+    }
+
+    fn schedule_startup_line(&mut self) {
+        if self.startup.as_ref().is_some_and(|(_, lines)| self.next_startup_line < lines.len()) {
+            self.next_startup_at = Some(tokio::time::Instant::now() + self.startup_delay);
+        }
+    }
+
     fn observe(&mut self, text: &str) -> Option<Zeroizing<String>> {
-        if self.username.is_empty() || self.sent_password || self.started.elapsed().as_secs() > 60 {
+        let auto_login = !self.username.is_empty()
+            && !self.sent_password
+            && self.started.elapsed().as_secs() <= 60;
+        let startup_pending = self.startup.is_some() && !self.sent_startup;
+        if !auto_login && !startup_pending {
             return None;
         }
         for ch in text.chars() {
@@ -689,12 +816,28 @@ impl TelnetLogin {
                 self.escape = 1;
             } else if ch == '\r' || ch == '\n' {
                 self.line.clear();
-            } else if !ch.is_control() {
+                self.line_overflow = false;
+            } else if !ch.is_control() && !self.line_overflow {
                 self.line.push(ch);
                 if self.line.len() > 1024 {
                     self.line.clear();
+                    self.line_overflow = true;
                 }
             }
+        }
+        if self.line_overflow {
+            return None;
+        }
+        if let Some((prompt, _)) = &self.startup {
+            if startup_pending && self.line.trim() == prompt {
+                self.sent_startup = true;
+                self.sent_password = true;
+                self.next_startup_at = Some(tokio::time::Instant::now());
+                return None;
+            }
+        }
+        if !auto_login {
+            return None;
         }
         let prompt = self.line.trim().to_ascii_lowercase();
         if prompt.ends_with(['>', '#', '$']) {

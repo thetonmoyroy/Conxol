@@ -26,9 +26,11 @@ mod diagnostic_history;
 mod output_batch;
 mod serial;
 mod ssh;
+mod external_editor;
 mod ssh_trust;
 mod telnet;
 mod terminal;
+mod terminal_windows;
 
 use conxol_core::{
     AppSettings, AuditEvent, AuditEventKind, AuthMethod, JumpHostRecord, Protocol, SerialProfile,
@@ -924,6 +926,7 @@ fn session_save_ssh(
         environment,
         startup_directory,
         startup_command,
+        startup_command_delay_ms,
         ..
     } = request;
     let auth = match request_auth {
@@ -970,6 +973,7 @@ fn session_save_ssh(
         favorite: false,
         startup_directory,
         startup_command,
+        startup_command_delay_ms,
         environment,
         pptp_profile_id,
         jump_hosts: jump_hosts.iter().map(|jump| jump.host.clone()).collect(),
@@ -1054,6 +1058,7 @@ fn session_save_serial(
         favorite: false,
         startup_directory: None,
         startup_command: None,
+        startup_command_delay_ms: None,
         environment: Vec::new(),
         pptp_profile_id: None,
         jump_hosts: Vec::new(),
@@ -1100,6 +1105,9 @@ fn session_save_telnet(
         rows,
         username,
         credential_id,
+        startup_command,
+        startup_command_delay_ms,
+        login_success_prompt,
         ..
     } = request;
     let encoding = match encoding {
@@ -1127,7 +1135,8 @@ fn session_save_telnet(
         tags: vec!["telnet".into(), "plaintext".into()],
         favorite: false,
         startup_directory: None,
-        startup_command: None,
+        startup_command,
+        startup_command_delay_ms,
         environment: Vec::new(),
         pptp_profile_id,
         jump_hosts: Vec::new(),
@@ -1139,6 +1148,7 @@ fn session_save_telnet(
             encoding: encoding.into(),
             columns,
             rows,
+            login_success_prompt,
         }),
         remote_desktop_profile: None,
     };
@@ -2166,6 +2176,7 @@ pub fn run() {
         });
     let desktop = builder
         .manage(TerminalManager::default())
+        .manage(terminal_windows::TerminalWindows::default())
         .manage(SshManager::default())
         .manage(SerialManager::default())
         .manage(NetworkManager::default())
@@ -2187,6 +2198,7 @@ pub fn run() {
             };
             let base_dir = data_dir;
             let data_dir = backup::resolve_workspace(&base_dir)?;
+            app.manage(external_editor::ExternalEditors::open(data_dir.join("external-editor.json"))?);
             app.manage(backup::BackupState::new(base_dir, data_dir.clone()));
             app.manage(Mutex::new(ssh_trust::SshTrustStore::new(
                 data_dir.join("ssh-trust.json"),
@@ -2240,6 +2252,12 @@ pub fn run() {
         })
         .invoke_handler(|invoke| {
             let caller = invoke.message.webview_ref().label();
+            if caller.starts_with("terminal-view-") && !matches!(invoke.message.command(),
+                "terminal_window_message" | "terminal_window_return" | "workspace_lock_status" |
+                "workspace_unlock" | "workspace_lock_now" | "workspace_activity" | "clipboard_write_text") {
+                invoke.resolver.reject("Detached terminals cannot access workspace commands.");
+                return true;
+            }
             if caller.starts_with("pptp-browser-")
                 && (caller.contains("-content")
                     || !matches!(
@@ -2275,6 +2293,9 @@ pub fn run() {
                 return true;
             }
             let handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+                terminal_windows::terminal_window_open,
+                terminal_windows::terminal_window_message,
+                terminal_windows::terminal_window_return,
                 workspace_lock_status,
                 workspace_unlock,
                 workspace_lock_now,
@@ -2373,6 +2394,9 @@ pub fn run() {
                 ssh_list_directory,
                 ssh_browse_directory,
                 ssh_open_remote_text_file,
+                external_editor::external_editor_open,
+                external_editor::external_editor_read,
+                external_editor::external_editor_close,
                 ssh_collect_remote_monitor,
                 ssh_save_remote_text_file,
                 ssh_save_remote_text_file_as,
@@ -2415,6 +2439,9 @@ pub fn run() {
     let exit_ready = Arc::new(AtomicBool::new(false));
     let mut exit_pending = false;
     desktop.run(move |app, event| match event {
+        RunEvent::WindowEvent { label, event: WindowEvent::Destroyed, .. } if label.starts_with("terminal-view-") => {
+            terminal_windows::returned(app, &label);
+        }
         RunEvent::WindowEvent {
             label,
             event: WindowEvent::CloseRequested { api, .. },

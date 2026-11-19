@@ -136,6 +136,7 @@ impl WorkspaceLock {
             || matches!(
                 command,
                 "workspace_lock_status"
+                    | "terminal_window_return"
                     | "workspace_unlock"
                     | "workspace_lock_now"
                     | "workspace_activity"

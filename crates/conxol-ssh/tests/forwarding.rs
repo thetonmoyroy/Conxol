@@ -151,6 +151,7 @@ async fn fixture(
         environment: Vec::new(),
         startup_directory: None,
         startup_command: None,
+        startup_command_delay_ms: None,
     })
     .await
     .unwrap();

@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "terminal-views",
+  "description": "Local detached terminal views and workspace lock screen",
+  "windows": ["terminal-view-*"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-set-title"]
+}

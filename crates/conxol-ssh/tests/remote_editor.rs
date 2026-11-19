@@ -478,6 +478,7 @@ impl Fixture {
             environment: Vec::new(),
             startup_directory: None,
             startup_command: None,
+            startup_command_delay_ms: None,
         };
         let connection = match SshConnection::connect(options).await {
             Ok(connection) => connection,
