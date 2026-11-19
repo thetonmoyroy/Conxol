@@ -106,6 +106,7 @@ pub async fn terminal_window_open(
     Ok(label)
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn drop_position(window: &WebviewWindow) -> Option<PhysicalPosition<i32>> {
     // Native screen coordinates stay in physical pixels across mixed-DPI monitors.
     let cursor = window.cursor_position().ok()?;
@@ -120,6 +121,11 @@ fn drop_position(window: &WebviewWindow) -> Option<PhysicalPosition<i32>> {
         (cursor.x as i32).clamp(left, max_x),
         (cursor.y as i32).clamp(top, max_y),
     ))
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn drop_position(_window: &WebviewWindow) -> Option<PhysicalPosition<i32>> {
+    None
 }
 
 fn valid_message(message: &Value, from_main: bool) -> bool {
