@@ -12,6 +12,28 @@
   font-weight: 700;
   font-display: block;
 }
+@font-face {
+  font-family: "Conxol Mono Slim";
+  src: url("./assets/fonts/ConxolMonoSlim-Regular.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+0020-007E;
+}
+@font-face {
+  font-family: "DejaVu Sans Mono";
+  src: url("./assets/fonts/DejaVuSansMono.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+}
+@font-face {
+  font-family: "DejaVu Sans Mono";
+  src: url("./assets/fonts/DejaVuSansMono-Bold.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+}
 :root {
   color: #dce8dc;
   background: #0b100f;
@@ -542,7 +564,32 @@ button:not(:disabled) { cursor: pointer; }
 .desktop-session-tabs > button:focus-visible { outline: 1px solid var(--amber); outline-offset: -2px; }
 .app-shell .desktop-session-tabs .terminal-tab-strip { flex: 0 1 auto; min-width: 0; scrollbar-width: thin; }
 .app-shell .terminal-tab { min-width: 100px; max-width: 240px; margin-top: 3px; padding: 0 7px; border: 1px solid transparent; border-bottom: 0; border-radius: 6px 6px 0 0; font-size: 12px; gap: 5px; }
-.app-shell .terminal-tab.selected { border-color: var(--line-strong); background: var(--bg); color: var(--text); }
+.app-shell .terminal-tab.selected {
+  position: relative;
+  border-color: color-mix(in srgb, var(--mint) 40%, var(--line-strong));
+  background: linear-gradient(180deg, color-mix(in srgb, var(--mint) 10%, transparent), transparent 85%), var(--bg);
+  color: var(--text);
+}
+.app-shell .terminal-tab.selected::before {
+  content: "";
+  position: absolute;
+  inset: 0 5px auto;
+  height: 2px;
+  pointer-events: none;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--mint) 18% 82%, transparent);
+  opacity: .85;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell .terminal-tab.selected::before {
+    animation: terminal-tab-activate 360ms cubic-bezier(.2, .8, .2, 1) both;
+  }
+}
+@keyframes terminal-tab-activate {
+  from { transform: scaleX(.15); opacity: .2; }
+  65% { opacity: 1; }
+  to { transform: scaleX(1); opacity: .85; }
+}
 .app-shell .terminal-tab-meta { display: none; }
 .app-shell .terminal-tab-close { width: 16px; flex-basis: 16px; }
 .app-shell .terminal-tab-select { gap: 5px; }
@@ -1037,7 +1084,7 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .session-folder-heading:hover .session-folder-edit, .session-folder-heading:focus-within .session-folder-edit { visibility: visible; }
 .session-folder-edit:hover { color: var(--amber); }
 
-.terminal-appearance-preview { padding: 16px; border: 1px solid var(--line-strong); font-family: "Conxol Terminal", monospace; line-height: 1.2; overflow: auto; }
+.terminal-appearance-preview { padding: 16px; border: 1px solid var(--line-strong); overflow: auto; }
 .app-shell .terminal-frame, .app-shell.theme-light .terminal-frame { background: var(--terminal-surface, #101514); }
 .app-shell .terminal-layout-pane, .app-shell.theme-light .terminal-layout-pane, .app-shell.theme-light .terminal-pane.active { background: transparent; }
 

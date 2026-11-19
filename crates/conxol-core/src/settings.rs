@@ -61,17 +61,29 @@ impl Default for GeneralSettings {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalFont {
+    #[default]
+    Default,
+    Original,
+    Slim,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AppearanceSettings {
     #[serde(default = "default_font_size")]
     pub font_size: u16,
+    #[serde(default)]
+    pub terminal_font: TerminalFont,
 }
 
 impl Default for AppearanceSettings {
     fn default() -> Self {
         Self {
             font_size: default_font_size(),
+            terminal_font: TerminalFont::default(),
         }
     }
 }
@@ -308,7 +320,11 @@ fn default_true() -> bool {
 }
 
 fn default_font_size() -> u16 {
-    13
+    if cfg!(target_os = "windows") {
+        14
+    } else {
+        13
+    }
 }
 
 fn default_scrollback() -> u32 {
@@ -535,6 +551,30 @@ mod tests {
         assert!(settings.general.confirm_multiline_paste);
         assert_eq!(settings.terminal.scrollback_lines, 5_000);
         assert_eq!(settings.keyboard.command_palette, "Mod+Shift+P");
+    }
+
+    #[test]
+    fn terminal_font_defaults_and_round_trips() {
+        use super::TerminalFont;
+
+        let old: AppSettings =
+            serde_json::from_value(serde_json::json!({ "appearance": { "fontSize": 14 } }))
+                .unwrap();
+        assert_eq!(old.appearance.terminal_font, TerminalFont::Default);
+
+        let mut updated = old;
+        for (font, serialized) in [
+            (TerminalFont::Original, "original"),
+            (TerminalFont::Slim, "slim"),
+        ] {
+            updated.appearance.terminal_font = font;
+            let saved = serde_json::to_value(&updated).unwrap();
+            assert_eq!(saved["appearance"]["terminalFont"], serialized);
+            assert_eq!(
+                serde_json::from_value::<AppSettings>(saved).unwrap(),
+                updated
+            );
+        }
     }
 
     #[test]

@@ -15,7 +15,14 @@ assert.equal(selection, 'copy me');
 calls.length = 0; allowed = false;
 handle(event()); assert.deepEqual(calls, ['prevent', 'stop'], 'locked, hidden or disposed terminals cannot receive interrupt');
 allowed = true;
-for (const patch of [{ type: 'keyup' }, { altKey: true }, { metaKey: true }, { ctrlKey: false }, { key: 'v' }]) {
+for (const patch of [{ type: 'keyup' }, { altKey: true }, { metaKey: true }, { ctrlKey: false }, { key: 'x' }]) {
   calls.length = 0; assert.equal(handle(event(patch)), false); assert.deepEqual(calls, []);
 }
-console.log('Terminal Ctrl+C interruption and Ctrl+Shift+C copy checks passed');
+for (const shiftKey of [false, true]) {
+  assert.equal(handle(event({ key: 'v', shiftKey })), true);
+  assert.deepEqual(calls, [], 'the WebView can paste without xterm sending Ctrl+V');
+}
+allowed = false;
+assert.equal(handle(event({ key: 'v' })), true);
+assert.deepEqual(calls, ['prevent'], 'unavailable terminals cancel the WebView paste');
+console.log('Terminal interrupt, copy and paste shortcut checks passed');

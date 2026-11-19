@@ -4,6 +4,7 @@ import { SerializeAddon } from "@xterm/addon-serialize";
 import type { Terminal } from "@xterm/xterm";
 import { isWorkspaceLocked } from "./workspace-lock-state";
 import { prepareTerminalPaste } from "./terminal-input";
+import type { TerminalFont } from "./terminal-unicode-joining";
 
 type Message = { type: string; data?: string; cols?: number; rows?: number };
 type View = { terminal: Terminal; serializer: SerializeAddon; fit: () => unknown; input: (data: string) => void; resize: (cols: number, rows: number) => Promise<unknown> };
@@ -15,6 +16,10 @@ let reportError: (error: string) => void = () => {};
 
 export function isTerminalDetached(id: string) { return detached.has(id); }
 export function detachedTerminalIds() { return new Set(detached.keys()); }
+
+export function updateDetachedTerminalFont(id: string, font: TerminalFont) {
+  void send(id, { type: "font", data: font });
+}
 
 function send(id: string, message: object) {
   const owner = detached.get(id);
@@ -57,6 +62,7 @@ function snapshot(id: string) {
     }
     void send(id, { type: "snapshot", sequence, data, cols: view.terminal.cols, rows: view.terminal.rows, options: {
       fontSize: view.terminal.options.fontSize, fontFamily: view.terminal.options.fontFamily,
+      fontWeightBold: view.terminal.options.fontWeightBold,
       theme: view.terminal.options.theme, cursorBlink: view.terminal.options.cursorBlink,
       scrollback: view.terminal.options.scrollback, convertEol: view.terminal.options.convertEol,
     } });
@@ -87,13 +93,13 @@ export function registerTerminalWindowSource(id: string, terminal: Terminal, fit
   };
 }
 
-export async function detachTerminal(id: string, title: string) {
+export async function detachTerminal(id: string, title: string, atCursor = false) {
   if (isWorkspaceLocked() || detached.has(id) || !views.has(id)) return;
   const owner: Detached = { label: "", sequence: 0, ready: false, pending: 0, tail: Promise.resolve() };
   detached.set(id, owner);
   changed();
   try {
-    owner.label = await invoke<string>("terminal_window_open", { workspaceId: id, title });
+    owner.label = await invoke<string>("terminal_window_open", { workspaceId: id, title, atCursor });
     if (!views.has(id)) await returnTerminal(id);
   } catch (error) {
     detached.delete(id); changed(); views.get(id)?.fit();

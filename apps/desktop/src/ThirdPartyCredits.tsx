@@ -1,8 +1,12 @@
 import { useState } from "react";
 import { writeClipboardText } from "./clipboard-access";
+import dejavuLicense from "./assets/fonts/DejaVu-LICENSE.txt?url";
 
 type Credit = { name: string; author: string; use: string; license: string; url: string };
 const groups: { title: string; entries: Credit[] }[] = [
+  { title: "Terminal fonts", entries: [
+    { name: "DejaVu Sans Mono", author: "The DejaVu Fonts contributors and Bitstream", use: "Bundled Windows terminal font and the basis for Conxol Mono Slim, a modified face with thinner ASCII strokes.", license: "DejaVu Fonts license", url: dejavuLicense },
+  ] },
   { title: "Native DNS diagnostics", entries: [
     { name: "Hickory DNS", author: "The Hickory DNS contributors", use: "DNS packet encoding, parsing and record formatting for Conxol’s built-in DNS diagnostics. No external dig executable is required.", license: "MIT OR Apache-2.0", url: "https://github.com/hickory-dns/hickory-dns" },
   ] },

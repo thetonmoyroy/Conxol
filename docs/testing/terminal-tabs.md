@@ -5,7 +5,9 @@ strip edges, dragging scrolls the strip. Alt+Shift+Left/Right and the tab contex
 menu provide the same movement. Session identity, the selected tab and split
 ratios stay unchanged; keyboard cycling follows the displayed order.
 
-On native desktop, right-click a connected tab and choose **Move to new window**.
+On native desktop, drag a connected tab outside the app and release it to open
+the session on the monitor under the pointer. You can also right-click the tab
+and choose **Move to new window**.
 **Return to main window**, the tab context menu, or the detached window's close
 button returns the session. **Close session** closes the actual transport.
 Pending authentication, disconnected sessions, Android and browser preview do not
@@ -51,6 +53,9 @@ checks message direction and bounds without opening windows or connections.
    keyboard and context menu. Confirm no prompt restart or split-ratio change.
 2. Detach a connected local shell while it prints synthetic numbered lines.
    Confirm scrollback, ANSI styling, current prompt and subsequent line ordering.
+   Drop outside the app on the same monitor and then on a second monitor. Check
+   mixed display scaling and a monitor to the left of the primary. Dropping
+   inside the app away from the tab strip should leave the session attached.
 3. Resize, type, use Ctrl+C, copy text and approve/cancel a multiline paste.
    Verify input reaches only the intended session and the main placeholder cannot
    accept input. Check a terminal application using the alternate screen.

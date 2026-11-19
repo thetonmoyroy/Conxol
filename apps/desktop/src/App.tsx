@@ -1,8 +1,8 @@
 import { terminalOutputText, terminalOutputFilename } from "./terminal-output-export";
-import { attachTerminalUnicodeJoining, TERMINAL_FONT_FAMILY } from "./terminal-unicode-joining";
+import { attachTerminalUnicodeJoining, loadTerminalFont, terminalBoldWeight, terminalFontFamily, type TerminalFont } from "./terminal-unicode-joining";
 import { ReorderableTerminalTabs } from "./ReorderableTerminalTabs";
 import { moveTerminalTab } from "./terminal-tab-order";
-import { detachTerminal, detachedTerminalIds, isTerminalDetached, registerTerminalWindowSource, returnTerminal, startTerminalWindows } from "./terminal-window-owner";
+import { detachTerminal, detachedTerminalIds, isTerminalDetached, registerTerminalWindowSource, returnTerminal, startTerminalWindows, updateDetachedTerminalFont } from "./terminal-window-owner";
 import { createSavedWebSession } from "./saved-web-session";
 import { PptpAttachment } from "./PptpAttachment";
 import { DiagnosticHistory } from "./DiagnosticHistory";
@@ -68,7 +68,7 @@ import { formatSessionEnvironment, parseSessionEnvironment } from "./session-env
 import { createTerminalHttpLinkProvider } from "./terminal-links";
 import { approveTerminalPaste, prepareTerminalPaste, settleTerminalWrites, TerminalInputQueue } from "./terminal-input";
 import { sanitizeTerminalTitle } from "./terminal-title";
-import { terminalFontSizeAfterZoom } from "./terminal-zoom";
+import { IS_WINDOWS_TERMINAL, terminalFontSizeAfterZoom, WINDOWS_TERMINAL_LINE_HEIGHT } from "./terminal-zoom";
 import { focusConnectedTerminal } from "./terminal-focus";
 import { createSshAuthHandler, type SshAuthEvent } from "./ssh-authentication";
 import { parseTunnelPort } from "./tunnel-port";
@@ -165,6 +165,7 @@ export type AppSettings = {
   };
   appearance: {
     fontSize: number;
+    terminalFont: TerminalFont;
   };
   terminal: TerminalAppearance & {
     scrollbackLines: number;
@@ -202,7 +203,7 @@ export type AppSettings = {
 
 const defaultSettings: AppSettings = {
   general: { setupComplete: true, theme: "dark", confirmMultilinePaste: true, pastePreview: true, alwaysShowTerminalSearch: false, rightClickToPaste: false, tabPlusSavedSessions: false, singleClickToOpenSessions: false },
-  appearance: { fontSize: 14 },
+  appearance: { fontSize: 14, terminalFont: "default" },
   terminal: { ...defaultTerminalAppearance, scrollbackLines: 5000, cursorBlink: true, copyOnSelect: false },
   keyboard: {
     newTerminal: "Mod+N",
@@ -272,6 +273,7 @@ type TerminalViewportProps = {
   localTarget: LocalTerminalTarget;
   terminalAppearance: TerminalAppearance;
   fontSize: number;
+  font: TerminalFont;
   scrollbackLines: number;
   cursorBlink: boolean;
   copyOnSelect: boolean;
@@ -727,12 +729,14 @@ async function saveTerminalOutput(content: string, fileName: string): Promise<vo
     }
 }
 
-function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange }: TerminalViewportProps) {
+function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, workspaceId, instanceKey, remoteSessionId, remoteProtocol, localTarget, terminalAppearance, fontSize, font, scrollbackLines, cursorBlink, copyOnSelect, confirmMultilinePaste, rightClickToPaste, onStatusChange, onNativeTerminalId, onInput, onTerminalPaste, onSaveSelectionShortcut, onBranchSession, onTerminalReady, onTerminalDisposed, onSearchResults, onTitleChange }: TerminalViewportProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const terminalIdRef = useRef<string | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const terminalFitRef = useRef<ReturnType<typeof createTerminalFitScheduler> | null>(null);
-  const terminalOptionsRef = useRef({ fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance });
+  const family = terminalFontFamily(font);
+  const boldWeight = terminalBoldWeight(font);
+  const terminalOptionsRef = useRef({ fontSize, family, boldWeight, scrollbackLines, cursorBlink, colorTheme, terminalAppearance });
   const confirmMultilinePasteRef = useRef(confirmMultilinePaste);
   const copyOnSelectRef = useRef(copyOnSelect);
   useEffect(() => { copyOnSelectRef.current = copyOnSelect; }, [copyOnSelect]);
@@ -756,18 +760,31 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
 
 
   useEffect(() => {
-    terminalOptionsRef.current = { fontSize, scrollbackLines, cursorBlink, colorTheme, terminalAppearance };
-    if (terminalRef.current) {
-      const fontChanged = terminalRef.current.options.fontSize !== fontSize;
-      const atBottom = terminalRef.current.buffer.active.viewportY >= terminalRef.current.buffer.active.baseY;
-      terminalRef.current.options.fontSize = fontSize;
-      terminalRef.current.options.cursorBlink = cursorBlink;
-      terminalRef.current.options.theme = resolveTerminalTheme(colorTheme, terminalAppearance);
-      terminalRef.current.options.scrollback = scrollbackLines;
+    terminalOptionsRef.current = { fontSize, family, boldWeight, scrollbackLines, cursorBlink, colorTheme, terminalAppearance };
+    const terminal = terminalRef.current;
+    if (terminal) {
+      const familyChanged = terminal.options.fontFamily !== family;
+      const fontChanged = terminal.options.fontSize !== fontSize || familyChanged;
+      const atBottom = terminal.buffer.active.viewportY >= terminal.buffer.active.baseY;
+      terminal.options.fontSize = fontSize;
+      terminal.options.fontFamily = family;
+      terminal.options.fontWeightBold = boldWeight;
+      terminal.options.cursorBlink = cursorBlink;
+      terminal.options.theme = resolveTerminalTheme(colorTheme, terminalAppearance);
+      terminal.options.scrollback = scrollbackLines;
       if (fontChanged) terminalFitRef.current?.schedule(atBottom);
+      if (familyChanged) {
+        updateDetachedTerminalFont(workspaceId, font);
+        void loadTerminalFont(family, fontSize, boldWeight).then(() => {
+          if (terminalRef.current !== terminal || terminal.options.fontFamily !== family) return;
+          terminal.options.fontFamily = "monospace";
+          terminal.options.fontFamily = family;
+          terminalFitRef.current?.schedule(terminal.buffer.active.viewportY >= terminal.buffer.active.baseY);
+        }).catch(() => { /* Keep the platform font fallback. */ });
+      }
       networkHighlightingRef.current?.refresh();
     }
-  }, [colorTheme, cursorBlink, fontSize, scrollbackLines, terminalAppearance]);
+  }, [boldWeight, colorTheme, cursorBlink, family, font, fontSize, scrollbackLines, terminalAppearance, workspaceId]);
 
   useEffect(() => {
     confirmMultilinePasteRef.current = confirmMultilinePaste;
@@ -801,12 +818,13 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
       convertEol: remoteProtocol === "serial",
       cursorBlink: terminalOptionsRef.current.cursorBlink,
       cursorStyle: "bar",
-      fontFamily: TERMINAL_FONT_FAMILY,
+      fontFamily: terminalOptionsRef.current.family,
       fontWeight: "normal",
-      fontWeightBold: "bold",
+      fontWeightBold: terminalOptionsRef.current.boldWeight,
+      drawBoldTextInBrightColors: true,
       minimumContrastRatio: 4.5,
       fontSize: terminalOptionsRef.current.fontSize,
-      lineHeight: 1.2,
+      lineHeight: IS_WINDOWS_TERMINAL ? WINDOWS_TERMINAL_LINE_HEIGHT : 1.2,
       scrollback: terminalOptionsRef.current.scrollbackLines,
       theme: resolveTerminalTheme(terminalOptionsRef.current.colorTheme, terminalOptionsRef.current.terminalAppearance),
     });
@@ -887,15 +905,13 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
     const initialFitFrame = window.requestAnimationFrame(fit);
     // A fallback font has different cell metrics. Re-measure after the bundled
     // faces load so glyphs and terminal columns stay aligned on first launch.
-    void Promise.all([
-      document.fonts.load(`400 ${terminalOptionsRef.current.fontSize}px "Conxol Terminal"`),
-      document.fonts.load(`700 ${terminalOptionsRef.current.fontSize}px "Conxol Terminal"`),
-    ]).then(() => {
-      if (disposed) return;
+    const initialFamily = terminalOptionsRef.current.family;
+    void loadTerminalFont(initialFamily, terminalOptionsRef.current.fontSize, terminalOptionsRef.current.boldWeight).then(() => {
+      if (disposed || terminal.options.fontFamily !== initialFamily) return;
       // Toggle the family to invalidate fallback measurements even when the
       // configured family string has not changed.
       terminal.options.fontFamily = "monospace";
-      terminal.options.fontFamily = TERMINAL_FONT_FAMILY;
+      terminal.options.fontFamily = initialFamily;
       fit();
       terminal.refresh(0, terminal.rows - 1);
     }).catch(() => { /* The platform monospace fallback remains usable. */ });
@@ -2400,9 +2416,9 @@ function App() {
         try {
           request = structuredClone(request);
           const sshSettings = { ...settingsRef.current.ssh };
-          const macroAtApproval = macroRunRef.current;
-          const stillAllowed = () => !macroAtApproval || (!macroCancelRef.current && macroRunRef.current === macroAtApproval);
-          if (!await confirmSessionStartup(request.startupCommand, `SSH ${request.username}@${request.host}:${request.port}`, sshSettings.reconnectEnabled && sshSettings.reconnectAttempts > 0, stillAllowed) || !stillAllowed()) return;
+          const owningMacro = macroRunRef.current;
+          const stillAllowed = () => !isWorkspaceLocked() && (!owningMacro || (!macroCancelRef.current && macroRunRef.current === owningMacro));
+          if (!stillAllowed()) return;
           const trustServices = {
             lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
             inspect: (target: { host: string; port: number; legacyRsa?: boolean }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs, pptpProfileId: request.pptpProfileId, legacyRsa: target.legacyRsa ?? false } }),
@@ -2413,7 +2429,7 @@ function App() {
           for (const [index, jump] of (request.jumpHosts ?? []).entries()) {
             if (!await approveUnknownHost(jump, trustServices, stillAllowed, index === 0)) return;
           }
-          if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length)) return;
+          if (!await approveUnknownHost(request, trustServices, stillAllowed, !request.jumpHosts?.length) || !stillAllowed()) return;
           const authentication = new TerminalAuthentication();
           const pendingTerminal = createWorkspaceTerminal({
             label: `${displayName ?? request.username}@${request.host}`,
@@ -2508,9 +2524,7 @@ function App() {
       return;
     }
     try {
-      const macroAtApproval = macroRunRef.current;
-      const stillAllowed = () => !isWorkspaceLocked() && (!macroAtApproval || (!macroCancelRef.current && macroRunRef.current === macroAtApproval));
-      if (!await confirmSessionStartup(request.startupCommand, `Telnet ${request.host}:${request.port}`, "telnet", stillAllowed)) {
+      if (isWorkspaceLocked() || (macroRunRef.current && macroCancelRef.current)) {
         request.password = undefined;
         return;
       }
@@ -4052,7 +4066,7 @@ function App() {
   const activeTunnelCount = tunnels.filter((tunnel) => !["stopped", "failed"].includes(tunnel.state)).length;
 
   const renderTerminalPane = useCallback((terminal: WorkspaceTerminal) => {
-    const viewport = terminal.connecting ? null : <TerminalViewport exportHost={terminal.remoteHost} exportBookmark={savedSessions.find(item => item.id === terminal.shortcutDeviceId)?.name ?? terminal.customName ?? null} label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
+    const viewport = terminal.connecting ? null : <TerminalViewport exportHost={terminal.remoteHost} exportBookmark={savedSessions.find(item => item.id === terminal.shortcutDeviceId)?.name ?? terminal.customName ?? null} label={terminal.label} colorTheme={colorTheme} workspaceId={terminal.id} instanceKey={terminal.instanceKey} remoteSessionId={terminal.remoteSessionId} remoteProtocol={terminal.remoteProtocol} localTarget={terminal.localTarget} terminalAppearance={settings.terminal} fontSize={settings.appearance.fontSize} font={settings.appearance.terminalFont} scrollbackLines={settings.terminal.scrollbackLines} cursorBlink={settings.terminal.cursorBlink} copyOnSelect={settings.terminal.copyOnSelect} confirmMultilinePaste={settings.general.confirmMultilinePaste} rightClickToPaste={settings.general.rightClickToPaste} onStatusChange={handleTerminalStatus} onNativeTerminalId={handleNativeTerminalId} onInput={handleTerminalInput} onTerminalPaste={handleTerminalPaste} onSaveSelectionShortcut={saveSelectionShortcut} onBranchSession={branchSession} onTerminalReady={handleTerminalReady} onTerminalDisposed={handleTerminalDisposed} onSearchResults={handleSearchResults} onTitleChange={handleTerminalTitle} />;
     return <div className="terminal-login-container">
       <div hidden={detachedIds.has(terminal.id)} style={{ height: "100%" }}>{viewport}</div>
       {detachedIds.has(terminal.id) && <div className="terminal-detached-notice"><span>This session is open in another window.</span><button type="button" className="outline-button" onClick={() => void returnTerminal(terminal.id)}>Return to main window</button></div>}
@@ -4064,7 +4078,7 @@ function App() {
         </button>
       </div>}
     </div>;
-  }, [colorTheme, detachedIds, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, reconnectBusy, reconnectSelectedTerminal, settings.appearance.fontSize, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
+  }, [colorTheme, detachedIds, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, reconnectBusy, reconnectSelectedTerminal, settings.appearance.fontSize, settings.appearance.terminalFont, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
 
   if (closing) return <main className={`app-shell shutdown-state theme-${themeMode(colorTheme)}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
@@ -4266,7 +4280,7 @@ function App() {
                     <ReorderableTerminalTabs ids={terminalTabs.map(tab => tab.id)} detachedIds={detachedIds}
                       onMove={(source, target, after) => setTerminalTabs(current => moveTerminalTab(current, source, target, after))}
                       canDetach={id => IS_TAURI && !IS_ANDROID && !broadcastEnabled && !macroRun && !macroRecording && terminalTabs.some(tab => tab.id === id && tab.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot())}
-                      onDetach={id => { const tab = terminalTabsRef.current.find(tab => tab.id === id); if (tab?.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot() && !broadcastEnabledRef.current && !macroRecordingRef.current && !macroRun) void detachTerminal(id, tab.label).catch(() => setConnectionError("Could not detach the terminal. The session remains in the main window.")); }}
+                      onDetach={(id, atCursor) => { const tab = terminalTabsRef.current.find(tab => tab.id === id); if (tab?.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot() && !broadcastEnabledRef.current && !macroRecordingRef.current && !macroRun) void detachTerminal(id, tab.label, atCursor).catch(() => setConnectionError("Could not detach the terminal. The session remains in the main window.")); }}
                       onReturn={id => { void returnTerminal(id); }}>{terminalTabs.map((terminal) => {
                       const selected = terminal.id === selectedTerminalId;
                       const bookmark = savedSessions.find(session => session.id === terminal.shortcutDeviceId);
@@ -5555,7 +5569,7 @@ function SnippetForm({ snippet, isNew, onSave, onDelete, onCopy }: { snippet: Sn
   </form>;
 }
 
-function AppearanceFields({ theme, setTheme, terminalAppearance, setTerminalAppearance, systemDark, fontSize }: { theme: ThemePreference; setTheme: (theme: ThemePreference) => void; terminalAppearance: TerminalAppearance; setTerminalAppearance: React.Dispatch<React.SetStateAction<TerminalAppearance>>; systemDark: boolean; fontSize: number }) {
+function AppearanceFields({ theme, setTheme, terminalAppearance, setTerminalAppearance, systemDark, fontSize, font }: { theme: ThemePreference; setTheme: (theme: ThemePreference) => void; terminalAppearance: TerminalAppearance; setTerminalAppearance: React.Dispatch<React.SetStateAction<TerminalAppearance>>; systemDark: boolean; fontSize: number; font: TerminalFont }) {
   const previewTheme: ColorTheme = theme === "system" ? (systemDark ? "dark" : "light") : theme;
   return <div className="appearance-fields">
         <section className="settings-section"><span className="settings-section-label">App theme</span><div className="settings-grid">
@@ -5574,7 +5588,13 @@ function AppearanceFields({ theme, setTheme, terminalAppearance, setTerminalAppe
                 <label>Text color<input type="color" value={resolveTerminalTheme(previewTheme, { ...terminalAppearance, colorTheme: "" }).foreground} onChange={event => setTerminalAppearance(current => ({ ...current, foreground: event.target.value }))} /><small>Device ANSI colors and syntax highlights keep their own colors.</small></label>
                 <div className="terminal-color-reset"><button type="button" className="outline-button" onClick={() => setTerminalAppearance(current => ({ ...current, background: "", foreground: "" }))}>Reset colors to theme</button></div>
         </div></section>
-            <pre className="terminal-appearance-preview" style={{ background: resolveTerminalTheme(previewTheme, { ...terminalAppearance, colorTheme: "" }).background, color: resolveTerminalTheme(previewTheme, { ...terminalAppearance, colorTheme: "" }).foreground, fontSize: `${Math.max(8, Math.min(32, fontSize || 14))}px` }}>router&gt; show interfaces brief{"\n"}GigabitEthernet0/0/1  192.0.2.1  UP</pre>
+            <pre className="terminal-appearance-preview" style={{
+              background: resolveTerminalTheme(previewTheme, { ...terminalAppearance, colorTheme: "" }).background,
+              color: resolveTerminalTheme(previewTheme, { ...terminalAppearance, colorTheme: "" }).foreground,
+              fontFamily: terminalFontFamily(font),
+              fontSize: Math.max(8, Math.min(32, fontSize || 14)),
+              lineHeight: IS_WINDOWS_TERMINAL ? WINDOWS_TERMINAL_LINE_HEIGHT : 1.2,
+            }}>router&gt; show interfaces brief{"\n"}GigabitEthernet0/0/1  192.0.2.1  UP</pre>
   </div>;
 }
 
@@ -5603,6 +5623,7 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
   const [alwaysShowTerminalSearch, setAlwaysShowTerminalSearch] = useState(settings.general.alwaysShowTerminalSearch);
   const [copyOnSelect, setCopyOnSelect] = useState(settings.terminal.copyOnSelect);
   const [fontSize, setFontSize] = useState(String(settings.appearance.fontSize));
+  const [font, setFont] = useState(settings.appearance.terminalFont);
   const [scrollbackLines, setScrollbackLines] = useState(String(settings.terminal.scrollbackLines));
   const [cursorBlink, setCursorBlink] = useState(settings.terminal.cursorBlink);
   const [keyboard, setKeyboard] = useState(settings.keyboard);
@@ -5623,7 +5644,7 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
     catch (error) { setHighlightError(String(error)); setActiveSettingsTab("terminal"); return; }
     onSave({
       general: { ...settings.general, theme, confirmMultilinePaste, pastePreview, alwaysShowTerminalSearch, rightClickToPaste, tabPlusSavedSessions, singleClickToOpenSessions },
-      appearance: { fontSize: Number(fontSize) },
+      appearance: { fontSize: Number(fontSize), terminalFont: font },
       terminal: { ...settings.terminal, ...terminalAppearance, colorTheme: "", scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
       keyboard,
       ssh: { reconnectEnabled, reconnectAttempts: Number(reconnectAttempts), connectTimeoutMs: Number(connectTimeoutMs) },
@@ -5708,6 +5729,11 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
               <span className="settings-section-label">Terminal appearance</span>
               <div className="settings-grid">
             <label>Font size<input type="number" min="8" max="32" value={fontSize} onChange={(event) => setFontSize(event.target.value)} /><small>8–32 px.</small></label>
+            {IS_WINDOWS_TERMINAL && <label>Terminal font<select value={font} onChange={event => setFont(event.target.value as TerminalFont)}>
+              <option value="default">JetBrains Mono (Default)</option>
+              <option value="original">DejaVu Sans Mono</option>
+              <option value="slim">Conxol Mono Slim</option>
+            </select></label>}
             <label>Scrollback lines<input type="number" min="100" max="100000" value={scrollbackLines} onChange={(event) => setScrollbackLines(event.target.value)} /><small>100–100,000 lines.</small></label>
 
 
@@ -5764,7 +5790,7 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
             <WorkspaceBackup canRestore={canRestore} />
           </section>
           <section id="settings-panel-appearance" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-appearance" data-settings-panel="appearance" hidden={activeSettingsTab !== "appearance"}>
-            <AppearanceFields theme={theme} setTheme={setTheme} terminalAppearance={terminalAppearance} setTerminalAppearance={setTerminalAppearance} systemDark={systemDark} fontSize={Number(fontSize)} />
+            <AppearanceFields theme={theme} setTheme={setTheme} terminalAppearance={terminalAppearance} setTerminalAppearance={setTerminalAppearance} systemDark={systemDark} fontSize={Number(fontSize)} font={font} />
           </section>
         </div>
 
@@ -6338,7 +6364,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           <label className="quick-connect-wide">
             Commands after login <span className="optional">optional</span>
             <textarea {...literalInputProps} value={startupCommand} onChange={event => setStartupCommand(event.target.value)} placeholder="configure terminal" autoComplete="off" rows={3} />
-            <small>Enter one command per line. Blank lines are skipped.</small>
+            <small>Runs automatically after login, including after a successful reconnect. Enter one command per line. Blank lines are skipped.</small>
           </label>
           {startupCommand.trim() && <label>
             Delay between commands (ms)

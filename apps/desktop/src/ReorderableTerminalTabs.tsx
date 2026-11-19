@@ -7,7 +7,7 @@ type Drop = { id: string; after: boolean };
 export function ReorderableTerminalTabs({ ids, onMove, onDetach, canDetach, detachedIds, onReturn, children }: {
   ids: string[];
   onMove: (source: string, target: string, after: boolean) => void;
-  onDetach: (id: string) => void;
+  onDetach: (id: string, atCursor?: boolean) => void;
   canDetach: (id: string) => boolean;
   detachedIds: Set<string>;
   onReturn: (id: string) => void;
@@ -32,7 +32,7 @@ export function ReorderableTerminalTabs({ ids, onMove, onDetach, canDetach, deta
     const current = drag.current, element = host.current;
     if (!current?.active || !element || isWorkspaceLocked()) return;
     const bounds = element.getBoundingClientRect();
-    if (current.y < bounds.top - 12 || current.y > bounds.bottom + 12) {
+    if (current.y < bounds.top - 12 || current.y > bounds.bottom + 12 || current.x < 0 || current.x >= window.innerWidth) {
       current.drop = null; setDrop(null); return;
     }
     if (current.x < bounds.left + 32) element.scrollLeft -= 12;
@@ -92,7 +92,14 @@ export function ReorderableTerminalTabs({ ids, onMove, onDetach, canDetach, deta
     onPointerUp={event => {
       const current = drag.current;
       if (!current || current.pointer !== event.pointerId) return;
-      if (current.active && current.drop && !isWorkspaceLocked()) onMove(current.id, current.drop.id, current.drop.after);
+      if (current.active && !isWorkspaceLocked() && ids.includes(current.id)) {
+        const outside = event.clientX < 0 || event.clientX >= window.innerWidth || event.clientY < 0 || event.clientY >= window.innerHeight;
+        if (outside) {
+          if (!detachedIds.has(current.id) && canDetach(current.id)) onDetach(current.id, true);
+        } else if (current.drop) {
+          onMove(current.id, current.drop.id, current.drop.after);
+        }
+      }
       cancel();
     }}
     onPointerCancel={cancel} onLostPointerCapture={cancel}

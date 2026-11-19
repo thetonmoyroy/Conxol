@@ -9,7 +9,10 @@ use std::{
         atomic::{AtomicU64, Ordering},
     },
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder,
+};
 
 #[derive(Default)]
 pub struct TerminalWindows(Mutex<HashMap<String, String>>);
@@ -37,6 +40,7 @@ pub async fn terminal_window_open(
     state: State<'_, TerminalWindows>,
     workspace_id: String,
     title: String,
+    at_cursor: Option<bool>,
 ) -> Result<String, String> {
     main_only(&window)?;
     if workspace_id.is_empty()
@@ -58,6 +62,11 @@ pub async fn terminal_window_open(
         }
         views.insert(label.clone(), workspace_id);
     }
+    let position = if at_cursor == Some(true) {
+        drop_position(&window)
+    } else {
+        None
+    };
     let result = WebviewWindowBuilder::new(
         &app,
         &label,
@@ -73,7 +82,19 @@ pub async fn terminal_window_open(
     ))
     .inner_size(960.0, 640.0)
     .min_inner_size(400.0, 240.0)
-    .build();
+    .visible(position.is_none())
+    .build()
+    .and_then(|view| {
+        if let Some(position) = position {
+            let _ = view.set_position(position);
+            if let Err(error) = view.show() {
+                let _ = view.destroy();
+                return Err(error);
+            }
+            let _ = view.set_focus();
+        }
+        Ok(view)
+    });
     if result.is_err() {
         state
             .0
@@ -83,6 +104,22 @@ pub async fn terminal_window_open(
         return Err("Could not open the terminal window.".into());
     }
     Ok(label)
+}
+
+fn drop_position(window: &WebviewWindow) -> Option<PhysicalPosition<i32>> {
+    // Native screen coordinates stay in physical pixels across mixed-DPI monitors.
+    let cursor = window.cursor_position().ok()?;
+    let monitor = window.monitor_from_point(cursor.x, cursor.y).ok()??;
+    let area = monitor.work_area();
+    let scale = monitor.scale_factor();
+    let left = area.position.x;
+    let top = area.position.y;
+    let max_x = left + (area.size.width as i32 - (960.0 * scale).ceil() as i32).max(0);
+    let max_y = top + (area.size.height as i32 - (640.0 * scale).ceil() as i32).max(0);
+    Some(PhysicalPosition::new(
+        (cursor.x as i32).clamp(left, max_x),
+        (cursor.y as i32).clamp(top, max_y),
+    ))
 }
 
 fn valid_message(message: &Value, from_main: bool) -> bool {
@@ -99,6 +136,12 @@ fn valid_message(message: &Value, from_main: bool) -> bool {
         .and_then(Value::as_str)
         .unwrap_or_default();
     if from_main {
+        if kind == "font" {
+            return matches!(
+                message.get("data").and_then(Value::as_str),
+                Some("default" | "original" | "slim")
+            );
+        }
         return matches!(kind, "snapshot" | "output" | "error");
     }
     match kind {
@@ -201,6 +244,18 @@ mod tests {
     use serde_json::json;
     #[test]
     fn messages_enforce_direction_and_bounds() {
+        assert!(valid_message(
+            &json!({"type":"font", "data":"original"}),
+            true
+        ));
+        assert!(!valid_message(
+            &json!({"type":"font", "data":"original"}),
+            false
+        ));
+        assert!(!valid_message(
+            &json!({"type":"font", "data":"arbitrary"}),
+            true
+        ));
         assert!(valid_message(
             &json!({"type":"input", "data":"hello"}),
             false

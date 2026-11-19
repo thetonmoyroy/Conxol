@@ -12,7 +12,8 @@ import { TerminalInputQueue } from "./terminal-input";
 import { TerminalWindowReplay } from "./terminal-window-replay";
 import { attachNetworkHighlighting } from "./network-highlighting";
 import { suppressMirroredTerminalReports } from "./terminal-window-reports";
-import { attachTerminalUnicodeJoining, TERMINAL_FONT_FAMILY } from "./terminal-unicode-joining";
+import { attachTerminalUnicodeJoining, loadTerminalFont, terminalBoldWeight, terminalFontFamily } from "./terminal-unicode-joining";
+import { IS_WINDOWS_TERMINAL, WINDOWS_TERMINAL_LINE_HEIGHT } from "./terminal-zoom";
 import "./terminal-tabs.css";
 
 type DisplayMessage = { type: string; sequence: number; data: string; cols: number; rows: number; options?: Partial<Terminal["options"]> };
@@ -35,8 +36,27 @@ export function DetachedTerminal() {
     const replay = new TerminalWindowReplay();
     const outgoing = new TerminalInputQueue();
     let generation = 0;
-    const terminal = new Terminal({ allowProposedApi: true, fontFamily: TERMINAL_FONT_FAMILY, cursorBlink: true, fontSize: 14, scrollback: 10000 });
+    const terminal = new Terminal({
+      allowProposedApi: true,
+      fontFamily: terminalFontFamily("default"),
+      fontWeightBold: terminalBoldWeight("default"),
+      drawBoldTextInBrightColors: true,
+      cursorBlink: true,
+      fontSize: 14,
+      lineHeight: IS_WINDOWS_TERMINAL ? WINDOWS_TERMINAL_LINE_HEIGHT : 1,
+      scrollback: 10000,
+    });
     const fit = new FitAddon(); terminal.loadAddon(fit); terminal.open(host.current);
+    const refreshFont = () => {
+      const family = terminal.options.fontFamily;
+      if (!family) return;
+      void loadTerminalFont(family, terminal.options.fontSize ?? 14, terminal.options.fontWeightBold).then(() => {
+        if (disposed || terminal.options.fontFamily !== family) return;
+        terminal.options.fontFamily = "monospace";
+        terminal.options.fontFamily = family;
+        resize();
+      }).catch(() => { /* Keep the platform font fallback. */ });
+    };
     const disposeUnicodeJoining = attachTerminalUnicodeJoining(terminal);
     const highlighting = attachNetworkHighlighting(terminal, false);
     const disposeReports = suppressMirroredTerminalReports(terminal);
@@ -71,12 +91,22 @@ export function DetachedTerminal() {
         terminal.write("", () => {
           if (disposed || failed || isWorkspaceLocked() || ticket !== generation) return;
           if (message.options) terminal.options = message.options;
+          refreshFont();
           terminal.reset();
           terminal.resize(message.cols, message.rows);
           terminal.write(message.data, () => {
             if (disposed || failed || isWorkspaceLocked() || ticket !== generation) return;
             ready.current = true; setError(null); drain(); resize(); terminal.focus();
           });
+        });
+      } else if (message.type === "font" && (message.data === "default" || message.data === "original" || message.data === "slim")) {
+        const family = terminalFontFamily(message.data);
+        const boldWeight = terminalBoldWeight(message.data);
+        terminal.write("", () => {
+          if (disposed || failed) return;
+          terminal.options.fontFamily = family;
+          terminal.options.fontWeightBold = boldWeight;
+          refreshFont();
         });
       } else if (message.type === "output") {
         if (!replay.push(message.sequence, message.data)) {

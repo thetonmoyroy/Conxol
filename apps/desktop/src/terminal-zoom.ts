@@ -1,6 +1,8 @@
 export const TERMINAL_MIN_FONT_SIZE = 8;
 export const TERMINAL_MAX_FONT_SIZE = 32;
-export const TERMINAL_DEFAULT_FONT_SIZE = 13;
+export const IS_WINDOWS_TERMINAL = typeof navigator !== "undefined" && /^Win/i.test(navigator.platform);
+export const TERMINAL_DEFAULT_FONT_SIZE = IS_WINDOWS_TERMINAL ? 14 : 13;
+export const WINDOWS_TERMINAL_LINE_HEIGHT = 1.05;
 
 export type TerminalZoomAction = "increase" | "decrease" | "reset";
 
