@@ -179,9 +179,9 @@ impl Default for TerminalSettings {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SshSettings {
-    #[serde(default = "default_true")]
+    #[serde(default)]
     pub reconnect_enabled: bool,
-    #[serde(default = "default_reconnect_attempts")]
+    #[serde(default)]
     pub reconnect_attempts: u8,
     #[serde(default = "default_connect_timeout")]
     pub connect_timeout_ms: u64,
@@ -190,8 +190,8 @@ pub struct SshSettings {
 impl Default for SshSettings {
     fn default() -> Self {
         Self {
-            reconnect_enabled: true,
-            reconnect_attempts: default_reconnect_attempts(),
+            reconnect_enabled: false,
+            reconnect_attempts: 0,
             connect_timeout_ms: default_connect_timeout(),
         }
     }
@@ -329,10 +329,6 @@ fn default_font_size() -> u16 {
 
 fn default_scrollback() -> u32 {
     5_000
-}
-
-fn default_reconnect_attempts() -> u8 {
-    3
 }
 
 fn default_connect_timeout() -> u64 {

@@ -1484,6 +1484,8 @@ async fn ssh_connect(
     mut request: SshConnectRequest,
     auth_events: tauri::ipc::Channel<ssh::SshAuthEvent>,
 ) -> Result<ssh::SshConnectResponse, String> {
+    // Desktop SSH sessions reconnect only when the user requests it.
+    request.reconnect_attempts = 0;
     {
         let trust = trust.lock().map_err(|_| "SSH trust store lock poisoned")?;
         if request.known_hosts_path.is_none() && request.pinned_fingerprint.is_none() {

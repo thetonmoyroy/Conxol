@@ -2547,7 +2547,7 @@ async fn run_remote_session_once(
                     request.reconnect_attempts,
                 ) else {
                     let reason = if request.reconnect_attempts == 0 {
-                        "SSH connection lost; reconnect is disabled"
+                        "SSH connection lost; reconnect manually"
                     } else {
                         "SSH shell closed repeatedly shortly after reconnecting"
                     };

@@ -544,9 +544,10 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .session-icon.local { color: var(--mint); }
 .app-shell .folder-heading, .app-shell .session-copy strong { color: var(--text); font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1.4; letter-spacing: normal; }
 .app-shell .session-copy small, .app-shell .session-type { display: none; }
-.app-shell .session-row-actions { display: flex; visibility: hidden; pointer-events: none; }
+.app-shell .session-row { position: relative; }
+.app-shell .session-row-actions { position: absolute; inset-inline-end: 2px; bottom: calc(100% - 3px); z-index: 1; visibility: hidden; pointer-events: none; }
 .app-shell .session-row:hover .session-row-actions, .app-shell .session-row:focus-within .session-row-actions { visibility: visible; pointer-events: auto; }
-.app-shell .session-row-actions button { width: 22px; height: 22px; min-height: 0; flex-basis: 22px; padding: 0; margin: 0; }
+.app-shell .session-row-actions button { width: 24px; height: 20px; min-height: 0; padding: 0; margin: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-raised); }
 .session-folder-controls { display: flex; gap: 10px; padding: 2px 4px 5px; }
 .session-folder-controls button { border: 0; padding: 2px 0; background: transparent; color: var(--muted); font: inherit; font-size: 10px; cursor: pointer; }
 .session-folder-controls button:hover { color: var(--amber); }
@@ -1051,11 +1052,6 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
   margin-top: 3px;
 }
 
-.settings-modal .settings-network-toggle {
-  grid-template-columns: minmax(0, 1fr);
-  margin-bottom: 12px;
-}
-
 /* Searchable vendor command notebook. */
 .notes-modal { display: flex; flex-direction: column; width: min(920px, calc(100vw - 40px)); height: min(640px, calc(100dvh - 64px)); background: var(--panel); border: 1px solid var(--line); overflow: hidden; }
 .notes-modal .session-editor-heading { padding: 16px 20px; flex: 0 0 auto; }
@@ -1501,9 +1497,7 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .diagnostics-add-instance { flex-shrink: 0; border: 1px dashed var(--line-strong); border-radius: 4px; }
 .diagnostics-instance-empty { padding: 16px; color: var(--muted); }
 
-/* Reserve one action button so compact session rows have room for host names. */
 .app-shell .session-row .session-copy { flex: 1; }
-.app-shell .session-row-actions { flex: 0 0 22px; }
 .app-shell .session-row-actions:has(button[aria-expanded="true"]) { visibility: visible; pointer-events: auto; }
 
 .settings-modal .settings-general-options { grid-template-columns: minmax(0, 1fr); gap: 14px; }

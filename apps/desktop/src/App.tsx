@@ -221,7 +221,7 @@ const defaultSettings: AppSettings = {
     openMacros: "Mod+Shift+M",
     emergencyBroadcastDisable: "Escape",
   },
-  ssh: { reconnectEnabled: true, reconnectAttempts: 3, connectTimeoutMs: 12000 },
+  ssh: { reconnectEnabled: false, reconnectAttempts: 0, connectTimeoutMs: 12000 },
   network: { diagnosticTimeoutMs: 1500, scanConcurrency: 32 },
 };
 
@@ -500,7 +500,6 @@ type SshConnectRequest = {
   startupDirectory?: string;
   startupCommand?: string;
   startupCommandDelayMs?: number;
-  reconnectAttempts?: number;
   connectTimeoutMs?: number;
   cols: number;
   rows: number;
@@ -2487,8 +2486,7 @@ function App() {
           setActiveView("terminal");
           setQuickConnectOpen(false);
           const authEvents = new Channel<SshAuthEvent>();
-          // Installed before IPC; this channel also owns this session's reconnect
-          // prompts. A closed request cannot deliver answers to another attempt.
+          // Install the authentication handler before IPC so it owns every prompt for this connection.
           authEvents.onmessage = createSshAuthHandler(setConnectionError, (message, signal) => {
             if (authentication.closed) return Promise.resolve(null);
             setActiveTerminalId(pendingTerminal.id);
@@ -2500,7 +2498,6 @@ function App() {
             authEvents,
             request: {
               ...request,
-              reconnectAttempts: sshSettings.reconnectEnabled ? sshSettings.reconnectAttempts : 0,
               connectTimeoutMs: sshSettings.connectTimeoutMs,
             },
           });
@@ -5688,7 +5685,6 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
     { id: "general", label: "General", icon: Settings2 },
     { id: "terminal", label: "Terminal", icon: TerminalIcon },
     { id: "shortcuts", label: "Shortcuts", icon: Command },
-    { id: "network", label: "Network", icon: Network },
     { id: "security", label: "Screen lock", icon: LockKeyhole },
     { id: "backup", label: "Backup", icon: Save },
     { id: "appearance", label: "Appearance", icon: Settings2 },
@@ -5712,11 +5708,6 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
   const [scrollbackLines, setScrollbackLines] = useState(String(settings.terminal.scrollbackLines));
   const [cursorBlink, setCursorBlink] = useState(settings.terminal.cursorBlink);
   const [keyboard, setKeyboard] = useState(settings.keyboard);
-  const [reconnectEnabled, setReconnectEnabled] = useState(settings.ssh.reconnectEnabled);
-  const [reconnectAttempts, setReconnectAttempts] = useState(String(settings.ssh.reconnectAttempts));
-  const [connectTimeoutMs, setConnectTimeoutMs] = useState(String(settings.ssh.connectTimeoutMs));
-  const [diagnosticTimeoutMs, setDiagnosticTimeoutMs] = useState(String(settings.network.diagnosticTimeoutMs));
-  const [scanConcurrency, setScanConcurrency] = useState(String(settings.network.scanConcurrency));
   const errorRef = useRef<HTMLDivElement>(null);
   useEffect(() => { errorRef.current?.focus(); }, [error]);
   const close = onClose;
@@ -5732,8 +5723,8 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
       appearance: { fontSize: Number(fontSize), terminalFont: font },
       terminal: { ...settings.terminal, ...terminalAppearance, colorTheme: "", scrollbackLines: Number(scrollbackLines), cursorBlink, copyOnSelect },
       keyboard,
-      ssh: { reconnectEnabled, reconnectAttempts: Number(reconnectAttempts), connectTimeoutMs: Number(connectTimeoutMs) },
-      network: { diagnosticTimeoutMs: Number(diagnosticTimeoutMs), scanConcurrency: Number(scanConcurrency) },
+      ssh: settings.ssh,
+      network: settings.network,
     });
   };
 
@@ -5847,25 +5838,6 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
             <label>Disable broadcast<input value={keyboard.emergencyBroadcastDisable} onChange={(event) => setKeyboard((current) => ({ ...current, emergencyBroadcastDisable: event.target.value }))} placeholder="Escape" /><small>Escape remains a universal safety cancel.</small></label>
           </div>
           <small className="settings-section-note">Separate keys with + (for example, Mod+Shift+K). Each shortcut must be unique.</small>
-        </div>
-          </section>
-          <section id="settings-panel-network" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-network" data-settings-panel="network" hidden={activeSettingsTab !== "network"}>
-        <div className="settings-section">
-          <span className="settings-section-label">SSH resilience</span>
-          <div className="settings-grid settings-toggle-grid settings-network-toggle">
-            <label className="settings-check"><input type="checkbox" checked={reconnectEnabled} onChange={(event) => setReconnectEnabled(event.target.checked)} /> Enable bounded reconnect</label>
-          </div>
-          <div className="settings-grid settings-appearance-grid">
-            <label>Reconnect attempts<input type="number" min="0" max="10" value={reconnectAttempts} onChange={(event) => setReconnectAttempts(event.target.value)} /><small>0–10 attempts.</small></label>
-            <label>Connect timeout ms<input type="number" min="100" max="60000" value={connectTimeoutMs} onChange={(event) => setConnectTimeoutMs(event.target.value)} /></label>
-          </div>
-        </div>
-        <div className="settings-section">
-          <span className="settings-section-label">Network diagnostics</span>
-          <div className="settings-grid settings-appearance-grid">
-            <label>Default timeout ms<input type="number" min="50" max="60000" value={diagnosticTimeoutMs} onChange={(event) => setDiagnosticTimeoutMs(event.target.value)} /></label>
-            <label>Default scan concurrency<input type="number" min="1" max="128" value={scanConcurrency} onChange={(event) => setScanConcurrency(event.target.value)} /><small>1–128 bounded checks.</small></label>
-          </div>
         </div>
           </section>
           <section id="settings-panel-security" className="workspace-settings-panel" role="tabpanel" aria-labelledby="settings-tab-security" data-settings-panel="security" hidden={activeSettingsTab !== "security"}>
