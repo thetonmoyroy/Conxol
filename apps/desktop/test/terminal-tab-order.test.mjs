@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { moveTerminalTab } from '../src/terminal-tab-order.ts';
+import { bulkCloseTerminalIds, moveTerminalTab } from '../src/terminal-tab-order.ts';
 
 test('moves in both directions while preserving session identity', () => {
   const tabs = ['a', 'b', 'c', 'd'].map(id => ({ id, connection: {} }));
@@ -16,4 +16,16 @@ test('stale, self and unchanged drops retain the original array', () => {
   for (const [source, target, after] of [['missing', 'b', true], ['a', 'missing', false], ['a', 'a', true], ['a', 'b', false], ['b', 'a', true]]) {
     assert.equal(moveTerminalTab(tabs, source, target, after), tabs);
   }
+});
+
+test('bulk close preserves pinned tabs and transports used by surviving SSH branches', () => {
+  const tabs = [
+    { id: 'pinned', pinned: true },
+    { id: 'parent' },
+    { id: 'branch', sharedSshParentId: 'parent' },
+    { id: 'nested', sharedSshParentId: 'branch' },
+    { id: 'local' },
+  ];
+  assert.deepEqual(bulkCloseTerminalIds(tabs, ['pinned', 'parent', 'branch', 'local']), ['local']);
+  assert.deepEqual(bulkCloseTerminalIds(tabs, ['pinned', 'parent', 'branch', 'nested']), ['parent', 'branch', 'nested']);
 });

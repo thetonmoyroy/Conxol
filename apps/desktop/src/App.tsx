@@ -38,7 +38,7 @@ import { DoubleShift, shortcutFromSelection, isCommandShortcut, shortcutDevice, 
 import { ConfigGenerator } from "./ConfigGenerator";
 import { terminalPresets, defaultTerminalAppearance, resolveTerminalTheme, terminalSurface, type TerminalAppearance } from "./terminal-appearance";
 import { FolderCustomization, SessionFolderIcon } from "./FolderCustomization";
-import { readFolderStyles, defaultFolderStyle, type FolderStyle } from "./folder-appearance";
+import { appearanceIcons, readFolderStyles, defaultFolderStyle, type FolderStyle } from "./folder-appearance";
 import { Save, ArrowRight, FolderInput, Globe } from "lucide-react";
 import { FileText } from "lucide-react";
 import { NotesModal } from "./NotesModal";
@@ -132,6 +132,7 @@ import {
   PanelLeftClose,
   PanelRight,
   Pencil,
+  Pin,
   Plus,
   Play,
   Radio,
@@ -292,9 +293,12 @@ type TerminalViewportProps = {
 };
 
 type WorkspaceTerminal = {
-  sharedSshBranch?: boolean;
+  sharedSshParentId?: string;
   shortcutDeviceId?: string;
   customName?: string;
+  tabName?: string;
+  tabColor?: string;
+  pinned?: boolean;
   authentication?: TerminalAuthentication;
   connecting?: boolean;
   id: string;
@@ -1519,7 +1523,7 @@ function App() {
   const selectedWindowTitle = workspaceSecurity.status?.locked ? "Conxol - Workspace locked" : activeView === "home"
     ? "Conxol - Your network, in command"
     : activeView === "terminal"
-      ? `${sanitizeTerminalTitle(activeTerminal?.label ?? "") || sanitizeTerminalTitle(remoteHost ?? "") || "Terminal"} - Conxol`
+      ? `${sanitizeTerminalTitle(activeTerminal?.tabName ?? activeTerminal?.label ?? "") || sanitizeTerminalTitle(remoteHost ?? "") || "Terminal"} - Conxol`
       : `${activeView === "files" ? "Remote files" : activeView[0].toUpperCase() + activeView.slice(1)} - Conxol`;
   const windowTitleUpdate = useRef<Promise<void>>(Promise.resolve());
   useEffect(() => {
@@ -2000,27 +2004,52 @@ function App() {
     if ((terminalSearchOpen || settings.general.alwaysShowTerminalSearch) && terminalSearchQuery.trim()) findTerminalMatch("next");
   }, [findTerminalMatch, selectedTerminalId, terminalSearchOpen, terminalSearchQuery, settings.general.alwaysShowTerminalSearch]);
 
-  const closeTerminal = useCallback((workspaceId: string) => {
-    terminalTabs.find(terminal => terminal.id === workspaceId)?.authentication?.cancel();
-    nativeTerminalIdsRef.current.delete(workspaceId);
-    terminalAuditStateRef.current.delete(workspaceId);
-    terminalGenerationsRef.current.delete(workspaceId);
-    setBroadcastTargetIds((current) => current.filter((id) => id !== workspaceId));
-    if (terminalTabs.length === 1) {
-      setTerminalTabs([]);
+  const closeTerminals = useCallback((ids: string[]) => {
+    const tabs = terminalTabsRef.current;
+    const closing = new Set(ids);
+    const remaining = tabs.filter(tab => !closing.has(tab.id));
+    if (remaining.length === tabs.length) return;
+
+    for (const tab of tabs) {
+      if (!closing.has(tab.id)) continue;
+      tab.authentication?.cancel();
+      nativeTerminalIdsRef.current.delete(tab.id);
+      terminalAuditStateRef.current.delete(tab.id);
+      terminalGenerationsRef.current.delete(tab.id);
+    }
+    setBroadcastTargetIds(current => current.filter(id => !closing.has(id)));
+    setTerminalTabs(current => current.filter(tab => !closing.has(tab.id)));
+    if (remaining.length === 0) {
       setActiveTerminalId("");
       setTerminalLayout({ kind: "pane", terminalId: "" });
       setActiveView("home");
       return;
     }
-    const closingIndex = terminalTabs.findIndex((terminal) => terminal.id === workspaceId);
-    const remaining = terminalTabs.filter((terminal) => terminal.id !== workspaceId);
-    setTerminalTabs(remaining);
-    setTerminalLayout((current) => removeLayoutNode(current, workspaceId) ?? { kind: "pane", terminalId: remaining[0].id });
-    if (activeTerminalId === workspaceId) {
-      setActiveTerminalId(remaining[Math.min(closingIndex, remaining.length - 1)].id);
-    }
-  }, [activeTerminalId, terminalTabs]);
+    const nextActive = (id: string) => {
+      const index = tabs.findIndex(tab => tab.id === id);
+      return tabs.slice(index + 1).find(tab => !closing.has(tab.id))?.id ?? remaining.at(-1)!.id;
+    };
+    const fallbackTerminalId = nextActive(selectedTerminalIdRef.current);
+    setTerminalLayout(current => {
+      let next: typeof current | null = current;
+      for (const id of closing) {
+        if (next) next = removeLayoutNode(next, id);
+      }
+      return next ?? { kind: "pane", terminalId: fallbackTerminalId };
+    });
+    setActiveTerminalId(current => closing.has(current) ? nextActive(current) : current);
+  }, []);
+
+  const closeTerminal = useCallback((id: string) => closeTerminals([id]), [closeTerminals]);
+
+  const renameTerminalTab = async (id: string) => {
+    const tab = terminalTabsRef.current.find(item => item.id === id);
+    if (!tab) return;
+    const name = await promptText("Tab name (leave blank to reset)", tab.tabName ?? tab.label);
+    if (name === null || isWorkspaceLocked()) return;
+    const tabName = sanitizeTerminalTitle(name) || undefined;
+    setTerminalTabs(current => current.map(item => item.id === id ? { ...item, tabName } : item));
+  };
 
   const closeTerminalForWindow = useRef(closeTerminal);
   useEffect(() => { closeTerminalForWindow.current = closeTerminal; }, [closeTerminal]);
@@ -2405,7 +2434,7 @@ function App() {
     }
   }, [setCredentialsOpen]);
 
-  const connectSsh = useCallback(async (request: SshConnectRequest, offerSave = true, displayName?: string, folder?: string, shortcutDeviceId?: string, branchParentId?: string) => {
+  const connectSsh = useCallback(async (request: SshConnectRequest, offerSave = true, displayName?: string, folder?: string, shortcutDeviceId?: string, branchParentId?: string, appearance?: FolderStyle) => {
     await sshConnectionAttempt.current.run(async () => {
       setSshConnecting(true);
       try {
@@ -2422,6 +2451,16 @@ function App() {
           const owningMacro = macroRunRef.current;
           const stillAllowed = () => !isWorkspaceLocked() && (!owningMacro || (!macroCancelRef.current && macroRunRef.current === owningMacro));
           if (!stillAllowed()) return;
+          for (const target of [...(request.jumpHosts ?? []), request]) {
+            if (target.username.trim()) continue;
+            const username = await promptText(`SSH username for ${target.host}`);
+            if (username === null || !stillAllowed()) return;
+            if (!username.trim()) {
+              setConnectionError("Enter the remote SSH username to connect.");
+              return;
+            }
+            target.username = username.trim();
+          }
           const trustServices = {
             lookup: (target: { host: string; port: number }) => invoke<string | null>("ssh_trust_lookup", { host: target.host, port: target.port }),
             inspect: (target: { host: string; port: number; legacyRsa?: boolean }) => invoke<{ host: string; port: number; fingerprint: string }>("ssh_inspect_host_key", { request: { host: target.host, port: target.port, timeoutMs: sshSettings.connectTimeoutMs, pptpProfileId: request.pptpProfileId, legacyRsa: target.legacyRsa ?? false } }),
@@ -2478,7 +2517,9 @@ function App() {
             remoteHost: response.host,
             connecting: false,
           };
-          setTerminalTabs((current) => current.map(item => item.id === terminal.id ? terminal : item));
+          setTerminalTabs(current => current.map(item => item.id === terminal.id
+            ? { ...terminal, tabName: item.tabName, tabColor: item.tabColor, pinned: item.pinned }
+            : item));
           setActiveTerminalId(terminal.id);
           setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
           setActiveView("terminal");
@@ -2490,6 +2531,7 @@ function App() {
             if (name?.trim()) {
               try {
                 const saved = await invoke<SavedSession>("session_save_ssh", { payload: { name: name.trim(), folder: folder?.trim() || null, request } });
+                if (appearance) setHostStyles(current => ({ ...current, [saved.id]: appearance }));
                 setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, label: `${name.trim()}@${response.host}`, customName: name.trim(), shortcutDeviceId: saved.id } : item));
                 refreshSavedSessions();
               } catch (error) {
@@ -2519,7 +2561,7 @@ function App() {
     });
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
-  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string, branchParentId?: string) => {
+  const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string, branchParentId?: string, bookmark?: SessionBookmark) => {
     setConnectionError(null);
     setSessionNotice(null);
     if (!IS_TAURI) {
@@ -2527,8 +2569,21 @@ function App() {
       return;
     }
     try {
-      if (isWorkspaceLocked() || (macroRunRef.current && macroCancelRef.current)) {
-        request.password = undefined;
+      const owningMacro = macroRunRef.current;
+      const stillAllowed = () => !isWorkspaceLocked() && (!owningMacro || (!macroCancelRef.current && macroRunRef.current === owningMacro));
+      if (!stillAllowed()) return;
+      if (!request.username?.trim()) {
+        const username = await promptText(`Telnet username for ${request.host} (leave blank for manual login)`);
+        if (username === null || !stillAllowed()) return;
+        request.username = username.trim() || undefined;
+      }
+      if (!request.password && !request.credentialId) {
+        const password = await promptText(`Telnet password for ${request.host} (sent unencrypted; leave blank for manual login)`, "", { secret: true, title: "Telnet authentication" });
+        if (password === null || !stillAllowed()) return;
+        request.password = password || undefined;
+      }
+      if (!request.username && (request.password || request.credentialId)) {
+        setConnectionError("Enter a username for Telnet auto login.");
         return;
       }
       const response = await invoke<TelnetConnectResponse>("telnet_connect", { request });
@@ -2552,8 +2607,14 @@ function App() {
         const name = await promptText("Save this Telnet session as", suggestedName);
         if (name?.trim()) {
           try {
-            const saved = await invoke<SavedSession>("session_save_telnet", { payload: { name: name.trim(), request: { ...request, password: undefined, credentialId: response.credentialId, savePassword: false } } });
+            const saved = await invoke<SavedSession>("session_save_telnet", { payload: { name: name.trim(), folder: bookmark?.folder, request: { ...request, password: undefined, credentialId: response.credentialId, savePassword: false } } });
+            const appearance = bookmark?.appearance;
+            if (appearance) setHostStyles(current => ({ ...current, [saved.id]: appearance }));
             setTerminalTabs(current => current.map(item => item.id === terminal.id ? { ...item, shortcutDeviceId: saved.id } : item));
+            if (saved.folder) {
+              const openFolders = sessionFolderOpenState(saved.folder);
+              setSessionFolderState(current => ({ ...current, ...openFolders }));
+            }
             refreshSavedSessions();
           } catch (error) {
             setConnectionError(`Connected, but the Telnet session could not be saved: ${String(error)}`);
@@ -2562,9 +2623,10 @@ function App() {
       }
       requestTerminalFocus(terminal.id);
     } catch (error) {
-      request.password = undefined;
       recordAudit("connectionFailed", "TELNET");
       setConnectionError(String(error));
+    } finally {
+      request.password = undefined;
     }
   }, [recordAudit, refreshSavedSessions, requestTerminalFocus, setQuickConnectOpen]);
 
@@ -2689,10 +2751,11 @@ function App() {
     }, session.name, session.id, branchParentId);
   }, [recordAudit, startNewTerminal, touchSavedSession]);
 
-  const saveEditedSession = useCallback(async (session: SavedSession) => {
+  const saveEditedSession = useCallback(async (session: SavedSession, appearance?: FolderStyle) => {
     if (!IS_TAURI) return;
     try {
       await invoke<SavedSession>("session_save", { session });
+      if (appearance) setHostStyles(current => ({ ...current, [session.id]: appearance }));
       setSessionFolderState(current => ({ ...current, ...(session.folder?.trim() ? sessionFolderOpenState(session.folder.trim()) : {}) }));
       setEditingSession(null);
       refreshSavedSessions();
@@ -2869,7 +2932,7 @@ function App() {
     if (isWorkspaceLocked() || !source || source.remoteProtocol !== "ssh" || !source.remoteSessionId || source.status !== "connected" || branchingSessions.current.has(workspaceId)) return;
     branchingSessions.current.add(workspaceId);
     const authentication = new TerminalAuthentication();
-    const pending = createWorkspaceTerminal({ label: `${source.customName ?? source.label} · branch`, customName: `${source.customName ?? source.label} · branch`, remoteProtocol: "ssh", remoteHost: source.remoteHost, shortcutDeviceId: source.shortcutDeviceId, authentication, connecting: true, sharedSshBranch: true });
+    const pending = createWorkspaceTerminal({ label: `${source.customName ?? source.label} · branch`, customName: `${source.customName ?? source.label} · branch`, remoteProtocol: "ssh", remoteHost: source.remoteHost, shortcutDeviceId: source.shortcutDeviceId, authentication, connecting: true, sharedSshParentId: source.id });
     const removePending = () => {
       authentication.cancel();
       setTerminalTabs(current => current.filter(item => item.id !== pending.id));
@@ -2929,7 +2992,7 @@ function App() {
     setReconnectBusy(true);
     setConnectionError(null);
     try {
-      if (terminal.remoteProtocol && terminal.remoteSessionId && !terminal.sharedSshBranch) {
+      if (terminal.remoteProtocol && terminal.remoteSessionId && !terminal.sharedSshParentId) {
         await invoke(`${terminal.remoteProtocol}_reconnect`, { terminalId: terminal.remoteSessionId });
       } else {
         const saved = savedSessions.find(item => item.id === terminal.shortcutDeviceId);
@@ -4233,7 +4296,7 @@ function App() {
                       const rect = event.currentTarget.getBoundingClientRect();
                       setFolderContextMenu({ folder, x: rect.left, y: rect.bottom });
                     }
-                  }}><ChevronDown size={11} /><SessionFolderIcon appearance={folderStyles[folder]} /> {folder.slice(folder.lastIndexOf("/") + 1)} <span>{filteredSessions.filter(session => sessionFolderWithin(session.folder.trim(), folder)).length}</span><button type="button" className="session-folder-edit" aria-label={`Customize folder ${folder}`} title="Customize folder" onClick={event => { event.preventDefault(); event.stopPropagation(); setCustomizingFolder(folder); }}><Pencil size={12} /></button>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
+                  }}><ChevronDown size={11} /><SessionFolderIcon appearance={folderStyles[folder]} /> {folder.slice(folder.lastIndexOf("/") + 1)} <button type="button" className="session-folder-edit" aria-label={`Customize folder ${folder}`} title="Customize folder" onClick={event => { event.preventDefault(); event.stopPropagation(); setCustomizingFolder(folder); }}><Pencil size={12} /></button>{!folderHasHosts && <button type="button" className="session-folder-delete" aria-label={`Delete folder ${folder}`} title="Delete folder (keep sessions)" disabled={deletingFolder !== null} onClick={event => { event.preventDefault(); event.stopPropagation(); void deleteSessionFolder(folder); }}><Trash2 size={12} /></button>}</summary>
                   {children.map(renderGroup)}
                   {rows}
                 </details>
@@ -4280,10 +4343,26 @@ function App() {
           </div>
           <div className="desktop-session-tabs" aria-label="Open workspace tabs">
             <button className={`desktop-home-tab ${activeView === "home" ? "selected" : ""}`} aria-label="Home" aria-pressed={activeView === "home"} title="Home" onClick={() => setActiveView("home")}><Home size={15} /></button>
-                    <ReorderableTerminalTabs ids={terminalTabs.map(tab => tab.id)} detachedIds={detachedIds}
-                      onMove={(source, target, after) => setTerminalTabs(current => moveTerminalTab(current, source, target, after))}
+                    <ReorderableTerminalTabs tabs={terminalTabs} detachedIds={detachedIds}
+                      activeId={activeView === "terminal" ? selectedTerminalId : undefined}
+                      onRename={id => { void renameTerminalTab(id); }}
+                      onColor={(id, tabColor) => setTerminalTabs(current => current.map(tab => tab.id === id ? { ...tab, tabColor } : tab))}
+                      onTogglePin={id => setTerminalTabs(current => {
+                        const tab = current.find(item => item.id === id);
+                        if (!tab) return current;
+                        const others = current.filter(item => item.id !== id);
+                        const firstUnpinned = others.findIndex(item => !item.pinned);
+                        others.splice(firstUnpinned < 0 ? others.length : firstUnpinned, 0, { ...tab, pinned: !tab.pinned });
+                        return others;
+                      })}
+                      onClose={closeTerminals}
+                      onMove={(source, target, after) => setTerminalTabs(current => {
+                        const sourceTab = current.find(tab => tab.id === source);
+                        const targetTab = current.find(tab => tab.id === target);
+                        return !!sourceTab?.pinned === !!targetTab?.pinned ? moveTerminalTab(current, source, target, after) : current;
+                      })}
                       canDetach={id => IS_TAURI && !IS_ANDROID && !broadcastEnabled && !macroRun && !macroRecording && terminalTabs.some(tab => tab.id === id && tab.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot())}
-                      onDetach={(id, atCursor) => { const tab = terminalTabsRef.current.find(tab => tab.id === id); if (tab?.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot() && !broadcastEnabledRef.current && !macroRecordingRef.current && !macroRun) void detachTerminal(id, tab.label, atCursor).catch(() => setConnectionError("Could not detach the terminal. The session remains in the main window.")); }}
+                      onDetach={(id, atCursor) => { const tab = terminalTabsRef.current.find(tab => tab.id === id); if (tab?.status === "connected" && !tab.connecting && !tab.authentication?.getSnapshot() && !broadcastEnabledRef.current && !macroRecordingRef.current && !macroRun) void detachTerminal(id, tab.tabName ?? tab.label, atCursor).catch(() => setConnectionError("Could not detach the terminal. The session remains in the main window.")); }}
                       onReturn={id => { void returnTerminal(id); }}>{terminalTabs.map((terminal) => {
                       const selected = terminal.id === selectedTerminalId;
                       const bookmark = savedSessions.find(session => session.id === terminal.shortcutDeviceId);
@@ -4291,15 +4370,17 @@ function App() {
                       const bookmarkName = (bookmark?.name ?? terminal.customName)?.trim();
                       const defaultNames = new Set(host ? [host, `Telnet · ${host}`, `SSH · ${host}`, ...(bookmark?.username ? [`${bookmark.username}@${host}`] : [])] : []);
                       const mobileTitle = host ? (bookmarkName && !defaultNames.has(bookmarkName) ? bookmarkName : host) : terminal.label;
+                      const tabTitle = terminal.tabName ?? (IS_ANDROID ? mobileTitle : terminal.label);
 
                       return (
                         <div key={terminal.id} data-terminal-tab-id={terminal.id} className={`terminal-tab ${selected && activeView === "terminal" ? "selected" : ""}`}>
                           <button type="button" className="terminal-tab-select" aria-pressed={selected && activeView === "terminal"} onClick={() => { setActiveTerminalId(terminal.id); setTerminalLayout(current => selectTerminalLayout(current, rememberedTerminalLayouts.current, terminal.id, new Set(terminalTabs.map(item => item.id)))); setActiveView("terminal"); requestTerminalFocus(terminal.id); }}>
                             <span className={`terminal-tab-dot terminal-tab-dot-${terminal.status}`} />
-                            <span>{IS_ANDROID ? mobileTitle : terminal.label}</span>
+                            <span title={terminal.pinned ? `Pinned: ${tabTitle}` : tabTitle}>{terminal.pinned && <Pin className="terminal-tab-pin" size={12} aria-label="Pinned" />}{tabTitle}</span>
                             <span className="terminal-tab-meta">{terminal.status === "connected" ? (terminal.remoteHost ? terminal.remoteProtocol : "local") : terminal.status}</span>
                           </button>
-                          <button type="button" className="terminal-tab-close" aria-label={`Close ${terminal.label}`} title={`Close ${terminal.label}`} onClick={() => { closeTerminal(terminal.id); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".terminal-tab.selected .terminal-tab-select")?.focus()); }}><X size={13} /></button>
+                          <button type="button" className="terminal-tab-close" aria-label={`Close ${tabTitle}`} title={`Close ${tabTitle}`} onClick={() => { closeTerminal(terminal.id); requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(".terminal-tab.selected .terminal-tab-select")?.focus()); }}><X size={13} /></button>
+                          {terminal.tabColor && <span className="terminal-tab-color" style={{ backgroundColor: terminal.tabColor }} />}
                         </div>
                       );
                     })}</ReorderableTerminalTabs>
@@ -4444,16 +4525,17 @@ function App() {
         setSavedSessionPickerOpen(false);
         if (!isWorkspaceLocked()) void connectSavedSession(session);
       }} />}
-      {quickConnectOpen && <QuickConnectDialog connecting={sshConnecting} error={connectionError} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder)} onConnectTelnet={connectTelnet} onConnectSerial={connectSerial} onSaveWeb={async session => {
+      {quickConnectOpen && <QuickConnectDialog connecting={sshConnecting} error={connectionError} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])]} onClose={() => { setQuickConnectOpen(false); setConnectionError(null); }} onConnectSsh={(request, bookmark) => connectSsh(request, true, bookmark?.name || undefined, bookmark?.folder, undefined, undefined, bookmark?.appearance)} onConnectTelnet={(request, bookmark) => connectTelnet(request, true, bookmark?.name || undefined, undefined, undefined, bookmark)} onConnectSerial={connectSerial} onSaveWeb={async (session, appearance) => {
         if (!IS_TAURI) throw new Error("Save Web sessions from Conxol desktop.");
         await invoke<SavedSession>("session_save", { session });
+        if (appearance) setHostStyles(current => ({ ...current, [session.id]: appearance }));
         setSessionFolderState(current => ({ ...current, ...(session.folder ? sessionFolderOpenState(session.folder) : {}) }));
         refreshSavedSessions(); setQuickConnectOpen(false); setConnectionError(null);
         setSessionNotice(`Saved ${session.name}. Open it from the sidebar to browse through PPTP.`);
       }} onShell={() => startNewTerminal()} onWsl={openWslTerminalPicker} />}
       {tunnelDraft && <TunnelDialog kind={tunnelDraft.kind} onClose={() => setTunnelDraft(null)} onStart={startTunnel} />}
       {wslTerminalOpen && <WslTerminalDialog onClose={() => setWslTerminalOpen(false)} onSelect={startWslTerminal} />}
-      {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
+      {editingSession && <QuickConnectDialog key={editingSession.id} initialSession={editingSession} initialAppearance={hostStyles[editingSession.id]} error={connectionError} onConnectSsh={() => {}} onConnectTelnet={() => {}} onConnectSerial={() => {}} onShell={() => {}} onWsl={() => {}} folders={[...new Set([...createdSessionFolders.flatMap(sessionFolderAncestors), ...savedSessions.flatMap(session => sessionFolderAncestors(session.folder?.trim() ?? ""))])].sort()} onClose={() => setEditingSession(null)} onSave={saveEditedSession} />}
       {settingsOpen && <SettingsModal key={settingsInitialTab} initialTab={settingsInitialTab} systemDark={systemDark} canRestore={terminalTabs.length === 0 && pendingSavedSession === null} settings={settings} error={settingsError} onClose={() => setSettingsOpen(false)} onSave={saveSettings} onReset={resetSettings} onExport={exportSettings} onImport={importSettings} />}
       {credentialsOpen && <CredentialVaultModal onClose={() => setCredentialsOpen(false)} onSave={saveCredential} onDelete={deleteCredential} />}
       {editingRemoteFile && <RemoteEditorModal key={`${editingRemoteFile.sessionId}:${editingRemoteFile.document.path}:${editingRemoteFile.document.revision}`} document={editingRemoteFile.document} onClose={() => setEditingRemoteFile(null)} onReload={reloadRemoteTextFile} onSave={saveRemoteTextFile} onSaveAs={saveRemoteTextFileAs} />}
@@ -4486,8 +4568,8 @@ const MAX_SSH_JUMP_HOSTS = 8;
 function requestFromSavedSession(session: SavedSession, catalog: SavedSession[], visited = new Set<string>(), remainingHops = MAX_SSH_JUMP_HOSTS): SshConnectRequest | null {
   if (session.protocol !== "SSH" || visited.has(session.id)) return null;
   if ((session.jump_host_profiles?.length ?? 0) > remainingHops || (!session.jump_host_profiles?.length && session.jump_hosts.length > remainingHops)) return null;
-  const username = session.username?.trim();
-  if (!username || session.port === 0) return null;
+  const username = session.username?.trim() ?? "";
+  if (session.port === 0) return null;
   const auth = requestFromSavedAuth(session.auth);
   if (!auth) return null;
   const nextVisited = new Set(visited);
@@ -5810,15 +5892,57 @@ function SettingsModal({ initialTab, systemDark, canRestore, settings, error, on
 
 const CONSOLE_BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 460800, 921600];
 
-function QuickConnectDialog({ connecting = false, initialSession, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onSaveWeb, onShell, onWsl }:  { connecting?: boolean; onSaveWeb?: (session: SavedSession) => Promise<void>; initialSession?: SavedSession; onSave?: (session: SavedSession) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: { name: string; folder: string }) => void; onConnectTelnet: (request: TelnetConnectRequest) => void; onConnectSerial: (request: SerialConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
+function bookmarkIconLabel(icon: FolderStyle["icon"]) {
+  return icon.charAt(0).toUpperCase() + icon.slice(1).replaceAll("-", " ");
+}
+
+type SessionBookmark = { name: string; folder: string; appearance?: FolderStyle };
+
+function QuickConnectDialog({ connecting = false, initialSession, initialAppearance, onSave, error, folders, onClose, onConnectSsh, onConnectTelnet, onConnectSerial, onSaveWeb, onShell, onWsl }:  { connecting?: boolean; onSaveWeb?: (session: SavedSession, appearance?: FolderStyle) => Promise<void>; initialSession?: SavedSession; initialAppearance?: FolderStyle; onSave?: (session: SavedSession, appearance?: FolderStyle) => void; error: string | null; folders: string[]; onClose: () => void; onConnectSsh: (request: SshConnectRequest, bookmark?: SessionBookmark) => void; onConnectTelnet: (request: TelnetConnectRequest, bookmark?: SessionBookmark) => void; onConnectSerial: (request: SerialConnectRequest) => void; onShell: () => void; onWsl: () => void }) {
   const [webBusy, setWebBusy] = useState(false);
   const [pptpProfileId, setPptpProfileId] = useState(initialSession?.pptp_profile_id ?? "");
-  const [sshTab, setSshTab] = useState<"advanced" | "terminal" | "network">("advanced");
+  const [sessionTab, setSessionTab] = useState<"bookmark" | "advanced" | "terminal" | "network" | "commands">("bookmark");
   const [bookmarkOpen, setBookmarkOpen] = useState(() => {
     try { return localStorage.getItem("conxol.sessionBookmarkOpen") === "true"; } catch { return false; }
   });
   const [sessionName, setSessionName] = useState(initialSession?.name ?? "");
   const [sessionFolder, setSessionFolder] = useState(initialSession?.folder ?? "");
+  const [bookmarkPicker, setBookmarkPicker] = useState<"folder" | "icon" | null>(null);
+  const folderOptionsOpen = bookmarkPicker === "folder";
+  const iconOptionsOpen = bookmarkPicker === "icon";
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const folderOptionsRef = useRef<HTMLDivElement>(null);
+  const iconTriggerRef = useRef<HTMLButtonElement>(null);
+  const iconOptionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!bookmarkPicker) return;
+    const options = bookmarkPicker === "folder" ? folderOptionsRef.current : iconOptionsRef.current;
+    const trigger = bookmarkPicker === "folder" ? folderInputRef.current?.parentElement : iconTriggerRef.current;
+    if (!options || !trigger) return;
+
+    const bounds = trigger.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - bounds.bottom - 8;
+    const spaceAbove = bounds.top - 8;
+    const openAbove = spaceBelow < 144 && spaceAbove > spaceBelow;
+    options.style.left = `${bounds.left}px`;
+    options.style.width = `${bounds.width}px`;
+    options.style.top = openAbove ? "auto" : `${bounds.bottom + 4}px`;
+    options.style.bottom = openAbove ? `${window.innerHeight - bounds.top + 4}px` : "auto";
+    options.style.maxHeight = `${Math.min(144, openAbove ? spaceAbove : spaceBelow)}px`;
+    options.showPopover();
+
+    const close = (event: Event) => {
+      if (event.target !== options) setBookmarkPicker(null);
+    };
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      options.hidePopover();
+    };
+  }, [bookmarkPicker]);
+  const [appearance, setAppearance] = useState(initialAppearance);
   const [startupDirectory, setStartupDirectory] = useState(initialSession?.startup_directory ?? "");
   const [startupCommand, setStartupCommand] = useState(initialSession?.startup_command ?? "");
   const [startupDelay, setStartupDelay] = useState(String(initialSession?.startup_command_delay_ms ?? 300));
@@ -5833,6 +5957,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const [port, setPort] = useState(String(initialSession?.port ?? 22));
   const [username, setUsername] = useState(initialSession?.username ?? "");
   const [protocol, setProtocol] = useState<"ssh" | "telnet" | "serial" | "local" | "web">((initialSession?.protocol.toLowerCase() as "ssh" | "telnet" | "serial" | "local" | "web") ?? "ssh");
+  const showNetworkTab = protocol === "ssh" || !IS_ANDROID;
   const [method, setMethod] = useState<"agent" | "privateKey" | "password" | "keyboardInteractive" | "keyboardInteractivePrompt">(initialSession?.auth.kind && initialSession.auth.kind !== "none" ? initialSession.auth.kind : "keyboardInteractivePrompt");
   const [keyPath, setKeyPath] = useState(initialSession?.auth.kind === "privateKey" ? initialSession.auth.keyRef : "");
   const [passphraseCredentialId, setPassphraseCredentialId] = useState(initialSession?.auth.kind === "privateKey" ? initialSession.auth.credentialRef ?? "" : "");
@@ -5867,6 +5992,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
   const applyUri = () => {
     try {
       const parsed = parseQuickConnectUri(uri);
+      if (parsed.protocol !== protocol) setSessionTab("bookmark");
       setProtocol(parsed.protocol);
       setHost(parsed.host);
       setPort(String(parsed.port));
@@ -5899,6 +6025,88 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
     }
   };
 
+  const defaultBookmarkIcon = protocol === "web" ? "globe" : protocol === "local" ? "terminal" : "server";
+  const bookmarkAppearance: FolderStyle = appearance ?? { icon: defaultBookmarkIcon, color: "" };
+  const bookmarkFields = <>
+    <label>Session name<input required={!!initialSession || protocol === "web"} value={sessionName} onChange={event => setSessionName(event.target.value)} placeholder={protocol === "web" ? "e.g. Office switch web interface" : username && host ? `${username}@${host}` : "My server"} /><small>{protocol === "web" ? "Saved in the sidebar for direct access through PPTP." : initialSession ? "Used for the saved session and terminal tab." : "Optional. Used for the saved session and terminal tab."}</small></label>
+    <div className="bookmark-folder-choice" onBlur={event => {
+      if (folderOptionsOpen && !event.currentTarget.contains(event.relatedTarget)) setBookmarkPicker(null);
+    }} onKeyDown={event => {
+      if (event.key !== "Escape" || !folderOptionsOpen) return;
+      event.stopPropagation();
+      setBookmarkPicker(null);
+      folderInputRef.current?.focus();
+    }}>
+      <label htmlFor="new-session-folder">Folder</label>
+      <div className="bookmark-folder-trigger">
+        <Folder size={16} aria-hidden="true" />
+        <input ref={folderInputRef} id="new-session-folder" value={sessionFolder} onChange={event => setSessionFolder(event.target.value)} placeholder="e.g. Production/Routers" autoComplete="off" />
+        <button type="button" aria-label="Choose a folder" aria-expanded={folderOptionsOpen} aria-controls="new-session-folders" onClick={() => setBookmarkPicker(folderOptionsOpen ? null : "folder")}>
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+      </div>
+      <div ref={folderOptionsRef} id="new-session-folders" className="bookmark-picker-options bookmark-folder-options" role="group" aria-label="Session folders" popover="manual">
+        {["", ...folders].map(folder => (
+          <button key={folder} type="button" aria-pressed={sessionFolder === folder} onClick={() => {
+            setSessionFolder(folder);
+            setBookmarkPicker(null);
+            folderInputRef.current?.focus();
+          }}>
+            <Folder size={16} aria-hidden="true" />
+            <span>{folder || "Unfiled"}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+    <div className="bookmark-appearance quick-connect-wide">
+      <div className="bookmark-icon-choice" onBlur={event => {
+        if (iconOptionsOpen && !event.currentTarget.contains(event.relatedTarget)) setBookmarkPicker(null);
+      }} onKeyDown={event => {
+        if (event.key !== "Escape" || !iconOptionsOpen) return;
+        event.stopPropagation();
+        setBookmarkPicker(null);
+        iconTriggerRef.current?.focus();
+      }}>
+        <label id="bookmark-icon-caption" htmlFor="bookmark-icon-trigger">Icon</label>
+        <button ref={iconTriggerRef} id="bookmark-icon-trigger" type="button" className="bookmark-icon-trigger" aria-labelledby="bookmark-icon-caption bookmark-icon-trigger" aria-expanded={iconOptionsOpen} aria-controls="bookmark-icon-options" onClick={() => setBookmarkPicker(iconOptionsOpen ? null : "icon")}>
+          <SessionFolderIcon appearance={bookmarkAppearance} />
+          {bookmarkIconLabel(bookmarkAppearance.icon)}
+          <ChevronDown size={14} aria-hidden="true" />
+        </button>
+        <div ref={iconOptionsRef} id="bookmark-icon-options" className="bookmark-picker-options" role="group" aria-label="Bookmark icons" popover="manual">
+          {appearanceIcons.map(icon => (
+            <button key={icon} type="button" aria-pressed={bookmarkAppearance.icon === icon} onClick={() => {
+              setAppearance({ ...bookmarkAppearance, icon });
+              setBookmarkPicker(null);
+              iconTriggerRef.current?.focus();
+            }}>
+              <SessionFolderIcon appearance={{ ...bookmarkAppearance, icon }} />
+              {bookmarkIconLabel(icon)}
+            </button>
+          ))}
+        </div>
+      </div>
+      <label>Icon color<input type="color" value={bookmarkAppearance.color || "#9bc48a"} onChange={event => setAppearance({ ...bookmarkAppearance, color: event.target.value })} /></label>
+    </div>
+    {initialSession && <>
+      <label>Tags<input value={tags} onChange={event => setTags(event.target.value)} placeholder="Separate with commas" /></label>
+      <label className="quick-connect-check-row"><input type="checkbox" checked={favorite} onChange={event => setFavorite(event.target.checked)} />Favorite</label>
+      <label className="quick-connect-wide">Notes<textarea value={notes} onChange={event => setNotes(event.target.value)} /></label>
+    </>}
+  </>;
+
+  const startupCommandFields = <>
+    <label className="quick-connect-wide">
+      Commands after login <span className="optional">optional</span>
+      <textarea {...literalInputProps} value={startupCommand} onChange={event => setStartupCommand(event.target.value)} placeholder="configure terminal" autoComplete="off" rows={3} />
+      <small>Runs automatically after login, including after a successful reconnect. Enter one command per line. Blank lines are skipped.</small>
+    </label>
+    {startupCommand.trim() && <label>
+      Delay between commands (ms)
+      <input type="number" min={0} max={5000} step={1} required value={startupDelay} onChange={event => setStartupDelay(event.target.value)} />
+    </label>}
+  </>;
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (connecting || webBusy) return;
@@ -5908,15 +6116,18 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
     if ((protocol === "ssh" || protocol === "telnet") && startup) {
       const lines = startup.split("\n");
       if (new TextEncoder().encode(startup).length > 16384 || lines.filter(line => line.trim()).length > 64 || lines.some(line => /\p{Cc}/u.test(line))) {
+        setSessionTab("commands");
         setValidationError("Enter up to 64 command lines (16 KiB total) without control characters.");
         return;
       }
       if (!startupDelay.trim() || !Number.isInteger(delayMs) || delayMs < 0 || delayMs > 5000) {
+        setSessionTab("commands");
         setValidationError("Enter a delay between 0 and 5000 ms.");
         return;
       }
     }
     if (protocol === "telnet" && startup && (!telnetPrompt || telnetPrompt.endsWith(":") || new TextEncoder().encode(telnetPrompt).length > 256 || /\p{Cc}/u.test(telnetPrompt))) {
+      setSessionTab("commands");
       setValidationError("Enter the exact prompt shown after Telnet login (up to 256 bytes, without a trailing colon).");
       return;
     }
@@ -5924,18 +6135,21 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       try {
         const record = createSavedWebSession({ id: initialSession?.id ?? crypto.randomUUID(), name: sessionName, folder: sessionFolder, url: host, pptpProfileId });
         const session: SavedSession = { ...initialSession, ...record, tags: tags.split(",").map(tag => tag.trim()).filter(Boolean), favorite, notes: notes.trim() || null };
-        if (initialSession && onSave) onSave(session);
+        if (initialSession && onSave) onSave(session, appearance);
         else {
           if (!onSaveWeb) throw new Error("Saving Web sessions is unavailable here.");
           setWebBusy(true);
-          void onSaveWeb(session).catch(error => setValidationError(String(error))).finally(() => setWebBusy(false));
+          void onSaveWeb(session, appearance).catch(error => setValidationError(String(error))).finally(() => setWebBusy(false));
         }
       } catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
       return;
     }
     if (initialSession && onSave) {
       try {
-        if (!sessionName.trim()) { throw new Error("Enter a session name."); }
+        if (!sessionName.trim()) {
+          if (protocol === "ssh" || protocol === "telnet") setSessionTab("bookmark");
+          throw new Error("Enter a session name.");
+        }
         let auth: SavedAuth = protocol === "ssh"
           ? method === "privateKey" ? { kind: "privateKey", keyRef: keyPath, credentialRef: passphraseCredentialId.trim() || null }
             : method === "password" || method === "keyboardInteractive" ? { kind: method, credentialRef: credentialId.trim() }
@@ -5952,7 +6166,10 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
         if (protocol === "telnet" && endpointChanged) auth = { kind: "none" };
         if (password) {
           if (!username.trim()) throw new Error("Enter a username for Telnet auto login.");
-          if (new TextEncoder().encode(password).length > 4096 || [...password].some(character => character.charCodeAt(0) < 32 || (character.charCodeAt(0) >= 127 && character.charCodeAt(0) <= 159))) throw new Error("Enter a single-line password (maximum 4096 bytes).");
+          if (new TextEncoder().encode(password).length > 4096 || [...password].some(character => character.charCodeAt(0) < 32 || (character.charCodeAt(0) >= 127 && character.charCodeAt(0) <= 159))) {
+            setSessionTab("advanced");
+            throw new Error("Enter a single-line password (maximum 4096 bytes).");
+          }
           setWebBusy(true);
           try {
             const reference = !endpointChanged && "credentialRef" in auth && auth.credentialRef ? auth.credentialRef : `telnet-${crypto.randomUUID()}`;
@@ -5981,7 +6198,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           } : {}),
           ...(protocol === "serial" ? { serial_profile: { device: serialDevice.trim(), baud_rate: Number(baudRate), data_bits: dataBits, stop_bits: stopBits, parity, flow_control: flowControl, line_ending: lineEnding } } : {}),
            ...(protocol === "telnet" ? { telnet_profile: { ...initialSession.telnet_profile, terminal: terminal.trim(), encoding, columns: initialSession.telnet_profile?.columns ?? 120, rows: initialSession.telnet_profile?.rows ?? 32, login_success_prompt: startup ? telnetPrompt : null } } : {}),
-        });
+        }, appearance);
       } catch (error) { setValidationError(error instanceof Error ? error.message : String(error)); }
       return;
     }
@@ -5989,7 +6206,6 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
     setValidationError(null);
     if (protocol === "telnet") {
       const password = telnetPassword.current?.value || undefined;
-      if (password && !username.trim()) { setValidationError("Enter a username for Telnet auto login."); return; }
       if (telnetPassword.current) telnetPassword.current.value = "";
       onConnectTelnet({
         pptpProfileId: pptpProfileId || undefined,
@@ -6003,7 +6219,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
         encoding,
         columns: 120,
         rows: 32,
-      });
+      }, { name: sessionName.trim(), folder: sessionFolder.trim(), appearance });
       return;
     }
     if (protocol === "serial") {
@@ -6060,7 +6276,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
       pptpProfileId: pptpProfileId || undefined,
       cols: 120,
       rows: 32,
-    }, { name: sessionName.trim(), folder: sessionFolder.trim() });
+    }, { name: sessionName.trim(), folder: sessionFolder.trim(), appearance });
   };
 
   return (
@@ -6075,9 +6291,9 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           const target = event.target as HTMLElement;
           const panel = target.closest<HTMLElement>("[data-session-tab]");
           if (panel) {
-            panel.hidden = false;
-            setSshTab(panel.dataset.sessionTab as typeof sshTab);
             event.preventDefault();
+            if (target !== event.currentTarget.querySelector("input:invalid, select:invalid, textarea:invalid")) return;
+            setSessionTab(panel.dataset.sessionTab as typeof sessionTab);
             requestAnimationFrame(() => target.focus());
           }
           let group = (event.target as HTMLElement).closest("details");
@@ -6094,15 +6310,6 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           </button>
         </div>
 
-        {!initialSession && <details className="quick-connect-link"><summary>Paste a connection link</summary>
-        <div className="quick-connect-uri">
-          <label htmlFor="quick-connect-uri-input">Connection link</label>
-          <div className="quick-connect-uri-row"><input id="quick-connect-uri-input" value={uri} onChange={(event) => { setUri(event.target.value); setUriError(null); }} placeholder="ssh://ops@example.com:22" autoComplete="off" /><button type="button" className="outline-button" onClick={applyUri} disabled={!uri.trim()}>Apply</button></div>
-          <small>Supported: ssh:// and telnet://. Passwords and query options are never accepted in a URI.</small>
-        </div>
-        </details>}
-        {uriError && <div className="connect-error-inline" role="alert">{uriError}</div>}
-
         <div className="session-protocols" role="group" aria-label="Session type">
           {[
             { value: "ssh", label: "SSH", icon: KeyRound },
@@ -6111,6 +6318,7 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
             { value: "web", label: "Web", icon: Globe },
           ].filter(item => !IS_ANDROID || item.value !== "web").map(item => <button key={item.value} type="button" disabled={!!initialSession && protocol !== item.value} aria-pressed={protocol === item.value} className={protocol === item.value ? "selected" : ""} onClick={() => {
             const next = item.value as typeof protocol;
+            if (next !== protocol) setSessionTab("bookmark");
             setProtocol(next);
             if (next === "web" && !host.trim()) setHost("https://www.google.com");
             setPort(next === "ssh" ? "22" : next === "telnet" ? "23" : "0");
@@ -6119,21 +6327,13 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
           <button type="button" disabled={!!initialSession} aria-pressed={protocol === "local"} onClick={() => { onClose(); onShell(); }}><TerminalIcon size={20} /><span>Shell</span></button>
           {navigator.platform.includes("Win") && <button type="button" disabled={!!initialSession} onClick={() => { onClose(); onWsl(); }}><TerminalIcon size={20} /><span>WSL</span></button>}
         </div>
-        {(initialSession || protocol === "ssh" || protocol === "web") && <details className="session-bookmark" open={protocol === "web" || bookmarkOpen} onToggle={event => {
+        {protocol !== "ssh" && protocol !== "telnet" && (initialSession || protocol === "web") && <details className="session-bookmark" open={protocol === "web" || bookmarkOpen} onToggle={event => {
           const open = event.currentTarget.open;
           setBookmarkOpen(open);
           try { localStorage.setItem("conxol.sessionBookmarkOpen", String(open)); } catch { /* Keep in-memory state when storage is unavailable. */ }
         }}>
           <summary className="session-basic-heading">Bookmark</summary>
-          <div className="quick-connect-grid session-bookmark-grid">
-                    <label>Session name<input required={!!initialSession || protocol === "web"} value={sessionName} onChange={event => setSessionName(event.target.value)} placeholder={protocol === "web" ? "e.g. Office switch web interface" : username && host ? `${username}@${host}` : "My server"} /><small>{protocol === "web" ? "Saved in the sidebar for direct access through PPTP." : initialSession ? "Used for the saved session and terminal tab." : "Optional. Used for the saved session and terminal tab."}</small></label>
-                    <label>Folder<input list="new-session-folders" value={sessionFolder} onChange={event => setSessionFolder(event.target.value)} placeholder="e.g. Production/Routers" /><datalist id="new-session-folders">{folders.map(folder => <option key={folder} value={folder} />)}</datalist></label>
-          {initialSession && <>
-          <label>Tags<input value={tags} onChange={event => setTags(event.target.value)} placeholder="Separate with commas" /></label>
-          <label className="quick-connect-check-row"><input type="checkbox" checked={favorite} onChange={event => setFavorite(event.target.checked)} />Favorite</label>
-          <label className="quick-connect-wide">Notes<textarea value={notes} onChange={event => setNotes(event.target.value)} /></label>
-          </>}
-          </div>
+          <div className="quick-connect-grid session-bookmark-grid">{bookmarkFields}</div>
         </details>}
         <div className="session-basic-heading">{protocol === "serial" ? "Console settings" : `Basic ${protocol.toUpperCase()} settings`}</div>
         <div className="quick-connect-grid">
@@ -6215,20 +6415,21 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                 <input required inputMode="numeric" pattern="[0-9]+" value={port} onChange={(event) => setPort(event.target.value)} />
               </label>
 
-              {protocol === "ssh" ? (
-                <>
-                  <label className="session-basic-username">
-                    Username
-                    <input {...literalInputProps} required value={username} onChange={(event) => setUsername(event.target.value)} placeholder="ops" />
-                  </label>
-                  <div className="session-settings-tabs quick-connect-wide" role="tablist" aria-label="SSH settings">
-                    {([
-                      ["advanced", "Advanced SSH"], ["terminal", "Terminal"], ["network", "Network"],
-                    ] as const).map(([tab, label]) => <button key={tab} id={`session-tab-${tab}`} type="button" role="tab" aria-selected={sshTab === tab} aria-controls={`session-panel-${tab}`} onClick={() => setSshTab(tab)}>{label}</button>)}
-                  </div>
-                  <section className="session-settings-panel quick-connect-wide" id="session-panel-advanced" role="tabpanel" aria-labelledby="session-tab-advanced" data-session-tab="advanced" hidden={sshTab !== "advanced"}>
-                  <details className="ssh-auth-override" open={method !== "keyboardInteractivePrompt"}>
-                    <summary>Authentication <span>{method === "keyboardInteractivePrompt" ? "Auto" : "Custom"}</span></summary>
+              <label className="session-basic-username">
+                Username
+                <input {...literalInputProps} value={username} maxLength={protocol === "telnet" ? 256 : undefined} onChange={event => setUsername(event.target.value)} placeholder="Ask when connecting" autoComplete="off" />
+              </label>
+              <div className="session-settings-tabs quick-connect-wide" role="tablist" aria-label={protocol === "ssh" ? "SSH settings" : "Telnet settings"}>
+                {([
+                  ["bookmark", "Bookmark"], ["advanced", protocol === "ssh" ? "Advanced SSH" : "Advanced Telnet"], ["terminal", "Terminal"],
+                  ["network", "Network"], ["commands", "Commands after login"],
+                ] as const).filter(([tab]) => tab !== "network" || showNetworkTab).map(([tab, label]) => <button key={tab} id={`session-tab-${tab}`} type="button" role="tab" aria-selected={sessionTab === tab} aria-controls={`session-panel-${tab}`} onClick={() => setSessionTab(tab)}>{label}</button>)}
+              </div>
+              <section className="session-settings-panel session-bookmark-grid quick-connect-wide" id="session-panel-bookmark" role="tabpanel" aria-labelledby="session-tab-bookmark" data-session-tab="bookmark" hidden={sessionTab !== "bookmark"}>
+                {bookmarkFields}
+              </section>
+              <section className="session-settings-panel quick-connect-wide" id="session-panel-advanced" role="tabpanel" aria-labelledby="session-tab-advanced" data-session-tab="advanced" hidden={sessionTab !== "advanced"}>
+                {protocol === "ssh" ? <>
                   <label className="quick-connect-wide">
                     Authentication
                     <select value={method} onChange={(event) => setMethod(event.target.value as "agent" | "privateKey" | "password" | "keyboardInteractive" | "keyboardInteractivePrompt")}>
@@ -6264,10 +6465,20 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                       <span>{method === "keyboardInteractivePrompt" ? "Detects the server’s login method and prompts when needed." : "Requires a loaded key in Windows OpenSSH agent or Pageant. For automatic login detection, choose Auto."}</span>
                     </div>
                   )}
-                  </details>
-                  </section>
-                  <section className="session-settings-panel quick-connect-wide" id="session-panel-network" role="tabpanel" aria-labelledby="session-tab-network" data-session-tab="network" hidden={sshTab !== "network"}>
-                  {!IS_ANDROID && <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />}
+                </> : <>
+                  <label className="quick-connect-wide">{initialSession ? "Replacement password (optional)" : "Password (optional)"}
+                    <input {...literalInputProps} ref={telnetPassword} type="password" maxLength={4096} autoComplete="new-password" />
+                  </label>
+                  {!initialSession && <label className="quick-connect-wide quick-connect-check-row">
+                    <input type="checkbox" checked={saveTelnetPassword} onChange={event => setSaveTelnetPassword(event.target.checked)} />
+                    <span>Save password in the workspace vault</span>
+                  </label>}
+                  <small className="quick-connect-wide">{initialSession ? "Leave blank to keep the saved password. A replacement is saved in the workspace vault." : "Conxol asks for blank credentials when you connect."} Telnet sends credentials unencrypted.</small>
+                </>}
+              </section>
+              {showNetworkTab && <section className="session-settings-panel quick-connect-wide" id="session-panel-network" role="tabpanel" aria-labelledby="session-tab-network" data-session-tab="network" hidden={sessionTab !== "network"}>
+                {!IS_ANDROID && <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />}
+                {protocol === "ssh" && <>
                   <label className="quick-connect-wide">
                     Jump host <span className="optional">optional · Auto login</span>
                     <input value={jumpHost} onChange={(event) => setJumpHost(event.target.value)} placeholder="bastion.internal.example" />
@@ -6298,17 +6509,14 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                     <input type="number" min="0" max={MAX_SERVER_ALIVE_INTERVAL_SECONDS} step="1" value={serverAliveInterval} onChange={(event) => setServerAliveInterval(event.target.value)} />
                     <small>0 disables SSH keepalives. The value is applied inside the native SSH layer.</small>
                   </label>
-                  </section>
-                  <section className="session-settings-panel quick-connect-wide" id="session-panel-terminal" role="tabpanel" aria-labelledby="session-tab-terminal" data-session-tab="terminal" hidden={sshTab !== "terminal"}>
+                </>}
+              </section>}
+              <section className="session-settings-panel session-terminal-panel quick-connect-wide" id="session-panel-terminal" role="tabpanel" aria-labelledby="session-tab-terminal" data-session-tab="terminal" hidden={sessionTab !== "terminal"}>
+                {protocol === "ssh" ? <>
                   <label>Startup directory<input value={startupDirectory} onChange={event => setStartupDirectory(event.target.value)} /></label>
-                  <label className="quick-connect-wide">
-                    Remote environment <span className="optional">optional · NAME=value per line</span>
-                    <textarea value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} placeholder={'TERM=xterm-256color\nLANG=C.UTF-8'} rows={4} />
-                    <small>Applied only to this SSH shell. These values are session configuration, not vault secrets; do not put passwords or tokens here.</small>
-                  </label>
-                  <label className="quick-connect-wide quick-connect-check-row">
+                  <label className="quick-connect-check-row session-x11-option">
                     <input type="checkbox" checked={x11Enabled} onChange={(event) => setX11Enabled(event.target.checked)} />
-                    <span>Enable SSH X11 forwarding <small>opt-in · external X server</small></span>
+                    <span>SSH X11 forwarding <small>Requires an external X server</small></span>
                   </label>
                   {x11Enabled && (
                     <>
@@ -6323,62 +6531,47 @@ function QuickConnectDialog({ connecting = false, initialSession, onSave, error,
                       </label>
                     </>
                   )}
-                  </section>
-
-
-                </>
-              ) : (
-                <>
-                  <label className="quick-connect-wide">Username (optional)
-                    <input {...literalInputProps} value={username} maxLength={256} onChange={event => setUsername(event.target.value)} autoComplete="off" />
-                  </label>
-                  {<>
-                    <label className="quick-connect-wide">{initialSession ? "Replacement password (optional)" : "Password (optional)"}
-                      <input {...literalInputProps} ref={telnetPassword} type="password" maxLength={4096} autoComplete="new-password" />
-                    </label>
-                    {!initialSession && <label className="quick-connect-wide quick-connect-check-row">
-                      <input type="checkbox" checked={saveTelnetPassword} onChange={event => setSaveTelnetPassword(event.target.checked)} />
-                      <span>Save password in the workspace vault</span>
-                    </label>}
-                    <small className="quick-connect-wide">{initialSession ? "Leave blank to keep the saved password. A replacement is saved in the workspace vault." : "Leave blank to log in manually."} Telnet sends credentials unencrypted.</small>
-                  </>}
-                  {!IS_ANDROID && <details className="quick-connect-wide session-network-options" open={!!pptpProfileId}>
-                    <summary>Network</summary>
-                    <PptpAttachment value={pptpProfileId} onChange={setPptpProfileId} />
-                  </details>}
                   <label className="quick-connect-wide">
+                    Remote environment
+                    <textarea value={environmentText} onChange={(event) => setEnvironmentText(event.target.value)} placeholder={'TERM=xterm-256color\nLANG=C.UTF-8'} rows={3} />
+                    <small>Enter one NAME=value pair per line for this SSH shell. Keep passwords and tokens out of this field.</small>
+                  </label>
+                </> : <>
+                  <label>
                     Terminal type
                     <input required value={terminal} onChange={(event) => setTerminal(event.target.value)} placeholder="xterm-256color" />
                   </label>
-                  <label className="quick-connect-wide">
+                  <label>
                     Encoding
                     <select value={encoding} onChange={(event) => setEncoding(event.target.value as "utf-8" | "windows-1252")}>
                       <option value="utf-8">UTF-8</option>
                       <option value="windows-1252">Windows-1252</option>
                     </select>
                   </label>
-                </>
-              )}
+                </>}
+                {!initialSession && (
+                  <div className="quick-connect-uri quick-connect-wide">
+                    <label htmlFor="quick-connect-uri-input">Connection link</label>
+                    <div className="quick-connect-uri-row">
+                      <input id="quick-connect-uri-input" value={uri} onChange={(event) => { setUri(event.target.value); setUriError(null); }} placeholder="ssh://ops@example.com:22" autoComplete="off" />
+                      <button type="button" className="outline-button" onClick={applyUri} disabled={!uri.trim()}>Apply</button>
+                    </div>
+                    <small>Use ssh:// or telnet:// without passwords or query options.</small>
+                    {uriError && <div className="connect-error-inline" role="alert">{uriError}</div>}
+                  </div>
+                )}
+              </section>
+              <section className="session-settings-panel quick-connect-wide" id="session-panel-commands" role="tabpanel" aria-labelledby="session-tab-commands" data-session-tab="commands" hidden={sessionTab !== "commands"}>
+                {startupCommandFields}
+                {protocol === "telnet" && startupCommand.trim() && <label className="quick-connect-wide">
+                  Post-login prompt
+                  <input {...literalInputProps} required value={telnetLoginPrompt} onChange={event => setTelnetLoginPrompt(event.target.value)} placeholder="router#" autoComplete="off" />
+                  <small>Enter the full prompt your device displays after login. Conxol sends the command when this line appears.</small>
+                </label>}
+              </section>
             </>
           )}
         </div>
-
-        {(protocol === "ssh" || protocol === "telnet") && <div className="quick-connect-grid">
-          <label className="quick-connect-wide">
-            Commands after login <span className="optional">optional</span>
-            <textarea {...literalInputProps} value={startupCommand} onChange={event => setStartupCommand(event.target.value)} placeholder="configure terminal" autoComplete="off" rows={3} />
-            <small>Runs automatically after login, including after a successful reconnect. Enter one command per line. Blank lines are skipped.</small>
-          </label>
-          {startupCommand.trim() && <label>
-            Delay between commands (ms)
-            <input type="number" min={0} max={5000} step={1} required value={startupDelay} onChange={event => setStartupDelay(event.target.value)} />
-          </label>}
-          {protocol === "telnet" && startupCommand.trim() && <label className="quick-connect-wide">
-            Post-login prompt
-            <input {...literalInputProps} required value={telnetLoginPrompt} onChange={event => setTelnetLoginPrompt(event.target.value)} placeholder="router#" autoComplete="off" />
-            <small>Enter the full prompt your device displays after login. Conxol sends the command when this line appears.</small>
-          </label>}
-        </div>}
 
         {initialSession && protocol === "local" && <div className="quick-connect-grid">
           {protocol === "local" && <>

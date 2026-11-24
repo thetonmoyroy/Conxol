@@ -45,3 +45,7 @@ tokio = { version = "1.47", features = ["fs", "io-util", "macros", "net", "proce
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 zeroize = "1.8"
+
+# Keep workspace PIN verification and vault unlock responsive in debug builds.
+[profile.dev.package.argon2]
+opt-level = 3

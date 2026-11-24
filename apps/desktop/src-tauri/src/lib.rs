@@ -152,6 +152,7 @@ struct SaveSerialSessionRequest {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct SaveTelnetSessionRequest {
     name: String,
+    folder: Option<String>,
     request: TelnetConnectRequest,
 }
 
@@ -1094,7 +1095,11 @@ fn session_save_telnet(
     store: State<'_, Mutex<SessionStore>>,
     payload: SaveTelnetSessionRequest,
 ) -> Result<SessionRecord, String> {
-    let SaveTelnetSessionRequest { name, request } = payload;
+    let SaveTelnetSessionRequest {
+        name,
+        folder,
+        request,
+    } = payload;
     let TelnetConnectRequest {
         pptp_profile_id,
         host,
@@ -1131,7 +1136,7 @@ fn session_save_telnet(
         x11_display: None,
         x11_single_connection: false,
         server_alive_interval: None,
-        folder: None,
+        folder: folder.filter(|value| !value.trim().is_empty()),
         tags: vec!["telnet".into(), "plaintext".into()],
         favorite: false,
         startup_directory: None,

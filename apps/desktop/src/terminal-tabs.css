@@ -1,8 +1,18 @@
 .terminal-tab-select { touch-action: pan-y; }
+.terminal-tab[data-terminal-tab-id] { position: relative; }
+.terminal-tab-pin { margin-inline-end: 4px; vertical-align: -2px; }
+.terminal-tab-color {
+  position: absolute;
+  inset: auto 4px 0;
+  height: 2px;
+  pointer-events: none;
+}
 .terminal-tab-actions {
   position: fixed;
   z-index: 10000;
-  min-width: 210px;
+  width: min(240px, calc(100vw - 8px));
+  max-height: calc(100vh - 8px);
+  overflow: auto;
   padding: 4px;
   border: 1px solid var(--border, #475569);
   border-radius: 6px;
@@ -24,6 +34,8 @@
 .terminal-tab-actions button:hover, .terminal-tab-actions button:focus-visible { background: #ffffff16; }
 .terminal-tab-actions button:disabled { opacity: .4; }
 .terminal-tab-actions small { opacity: .65; }
+.terminal-tab-actions [role="separator"] { border-top: 1px solid var(--line); margin: 3px 0; }
+.terminal-tab-swatch { width: 14px; height: 14px; border-radius: 3px; }
 body:has(.detached-terminal) {
   min-width: 0;
   min-height: 0;

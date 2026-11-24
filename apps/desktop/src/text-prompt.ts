@@ -2,7 +2,7 @@ let pending: HTMLDialogElement | null = null;
 
 // WebKit desktop runtimes do not implement window.prompt. HTML dialogs also
 // provide native focus containment, an inert background, and Escape cancellation.
-export function promptText(message: string, initialValue = "", options: { multiline?: boolean; readOnly?: boolean; secret?: boolean; signal?: AbortSignal } = {}): Promise<string | null> {
+export function promptText(message: string, initialValue = "", options: { multiline?: boolean; readOnly?: boolean; secret?: boolean; signal?: AbortSignal; title?: string } = {}): Promise<string | null> {
   return openDialogue(message, initialValue, options);
 }
 
@@ -96,6 +96,7 @@ function openDialogue(message: string, initialValue: string | undefined, options
     const cancel = () => finish(null);
     form.addEventListener("submit", (event) => { event.preventDefault(); finish(input?.value ?? "yes"); });
     const cancelButton = dialog.querySelector<HTMLButtonElement>('button[type="button"]')!;
+    const actionButtons = [cancelButton];
     cancelButton.addEventListener("click", cancel);
     if (options.createOnly) {
       const createOnly = document.createElement("button");
@@ -104,12 +105,24 @@ function openDialogue(message: string, initialValue: string | undefined, options
       createOnly.textContent = "Create only";
       createOnly.addEventListener("click", () => finish("no"));
       cancelButton.after(createOnly);
+      actionButtons.push(createOnly);
     }
+    actionButtons.push(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!);
     dialog.addEventListener("cancel", (event) => { event.preventDefault(); cancel(); });
     dialog.addEventListener("close", cancel);
     // Keep ordinary application shortcuts out of the input. Emergency keys
     // are handled in window capture; Escape still cancels the dialog normally.
-    dialog.addEventListener("keydown", (event) => { if (event.key !== "Escape") event.stopPropagation(); });
+    dialog.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") event.stopPropagation();
+      if (input || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      const direction = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1
+        : event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : 0;
+      if (!direction) return;
+      const index = actionButtons.findIndex(button => button === document.activeElement);
+      if (index < 0) return;
+      event.preventDefault();
+      actionButtons[index + direction]?.focus();
+    });
     window.addEventListener("pagehide", cancel);
     window.addEventListener("conxol:workspace-locked", cancel);
     options.signal?.addEventListener("abort", cancel, { once: true });

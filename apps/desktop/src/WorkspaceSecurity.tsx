@@ -67,9 +67,11 @@ export function WorkspaceSecurity({ children }: { children: ReactNode }) {
       {opened ? children : <div className="lock-cold-workspace"><div className="lock-cold-menu">Terminal Sessions View Tools Settings Help</div><div className="lock-cold-layout"><aside><span>User sessions</span><div>⌕ Find a session</div></aside><main><div className="lock-cold-tabs">⌂ ＋</div><div className="lock-cold-home"><strong>Conxol</strong><span>Your network, in command</span></div></main></div></div>}
     </div>
     {isLocked && <div className="workspace-lock-surface"><div className="workspace-lock-card" role="dialog" aria-modal="true" aria-labelledby="workspace-lock-heading">
-      <div className="workspace-lock-mark"><LockKeyhole size={25} strokeWidth={1.5} /></div>
-      <span className="workspace-lock-brand">CONXOL</span><h1 id="workspace-lock-heading">Workspace locked</h1>
-      {status ? <><p>Enter your PIN to continue.</p><UnlockWorkspace retry={status.retryAfterSeconds} onUnlocked={refresh} /></> : <><p>{error ?? "Checking workspace security…"}</p>{error ? <button type="button" className="primary-button" onClick={() => void refresh()}>Retry</button> : <LoaderCircle size={18} className="spin" />}</>}
+      <header className="workspace-lock-header">
+        <div className="workspace-lock-mark" aria-hidden="true"><LockKeyhole size={18} /></div>
+        <h1 id="workspace-lock-heading">Workspace locked</h1>
+      </header>
+      {status ? <UnlockWorkspace retry={status.retryAfterSeconds} onUnlocked={refresh} /> : <><p role="status">{error ?? "Checking workspace security…"}</p>{error ? <button type="button" className="primary-button" onClick={() => void refresh()}>Retry</button> : <LoaderCircle size={18} className="spin" />}</>}
     </div></div>}
   </WorkspaceLockContext.Provider>;
 }
@@ -88,10 +90,20 @@ function UnlockWorkspace({ retry, onUnlocked }: { retry: number; onUnlocked: () 
     void invoke("workspace_unlock", { pin }).then(onUnlocked).catch(error => { setError(String(error)); void onUnlocked(); }).finally(() => { inProgress.current = false; setBusy(false); pinRef.current?.focus(); });
     pin = "";
   }}>
-    <label htmlFor="workspace-unlock-pin" className="workspace-pin-label">PIN</label>
-    <input {...workspacePinInputProps} ref={pinRef} id="workspace-unlock-pin" type="password" inputMode="numeric" pattern="[0-9]{4,12}" minLength={4} maxLength={12} autoComplete="off" autoFocus required disabled={busy} aria-describedby="workspace-pin-feedback" placeholder="••••" />
+    <label htmlFor="workspace-unlock-pin" className="workspace-pin-label">PIN <span id="workspace-pin-range">4–12 digits</span></label>
+    <input
+      {...workspacePinInputProps}
+      ref={pinRef}
+      id="workspace-unlock-pin"
+      type="password"
+      autoComplete="off"
+      autoFocus
+      required
+      disabled={busy}
+      aria-describedby="workspace-pin-range workspace-pin-feedback"
+    />
     <div id="workspace-pin-feedback" aria-live="polite">{retry > 0 ? <span>Try again in {retry} seconds.</span> : error ? <span role="alert">{error}</span> : null}</div>
-    <button type="submit" className="primary-button" disabled={busy || retry > 0}>{busy ? <LoaderCircle size={14} className="spin" /> : <LockKeyhole size={14} />}{busy ? "Unlocking…" : "Unlock workspace"}</button>
+    <button type="submit" className="primary-button" disabled={busy || retry > 0}>{busy && <LoaderCircle size={14} className="spin" />}{busy ? "Unlocking…" : "Unlock workspace"}</button>
     <small>Your sessions stay open while the workspace is locked.</small>
   </form>;
 }

@@ -6,8 +6,8 @@ import { createSshAuthHandler } from "../src/ssh-authentication.ts";
 
 const { Event, EventTarget } = globalThis;
 
-// Minimal DOM boundary: exercise promise/cancellation ownership, not rendering.
-// Native focus, keyboard and file workflows require separate GUI checks.
+// Minimal DOM boundary for promise ownership and scripted focus changes.
+// Browser key activation and rendering require separate GUI checks.
 class Element extends EventTarget {
   children = [];
   attributes = {};
@@ -35,6 +35,11 @@ const window = globalThis.window = new EventTarget();
 setMaxListeners(34, window);
 const latest = () => body.children.at(-1);
 const input = dialog => dialog.querySelector("label").children[0];
+const pressArrow = (dialog, key) => {
+  const event = Object.assign(new Event("keydown", { cancelable: true }), { key });
+  dialog.dispatchEvent(event);
+  return event.defaultPrevented;
+};
 
 const accepted = promptText("Remote destination", "default.txt");
 const dialog = latest();
@@ -89,9 +94,22 @@ assert.equal(input(latest()), undefined, "confirmation must not invent a text fi
 assert.equal(latest().querySelector("label").tabIndex, 0, "long confirmations remain keyboard-scrollable");
 latest().dispatchEvent(new Event("cancel", { cancelable: true }));
 assert.equal(await denied, false);
-const approved = confirmAction("Explicit approval");
+const approved = confirmAction("Verify the fingerprint", { title: "Unknown SSH host key", acceptLabel: "Accept and save" });
+const approvalDialog = latest();
+const cancelButton = approvalDialog.querySelector('button[type="button"]');
+const acceptButton = approvalDialog.querySelector('button[type="submit"]');
+assert.equal(globalThis.document.activeElement, cancelButton);
+assert.equal(pressArrow(approvalDialog, "ArrowRight"), true);
+assert.equal(globalThis.document.activeElement, acceptButton);
+assert.equal(pressArrow(approvalDialog, "ArrowLeft"), true);
+assert.equal(globalThis.document.activeElement, cancelButton);
+approvalDialog.querySelector("label").focus();
+assert.equal(pressArrow(approvalDialog, "ArrowDown"), false, "the fingerprint text can still scroll");
+cancelButton.focus();
+assert.equal(pressArrow(approvalDialog, "ArrowDown"), true);
+assert.equal(globalThis.document.activeElement, acceptButton);
 assert.equal(await confirmAction("Concurrent approval"), false);
-latest().querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));
+approvalDialog.querySelector("form").dispatchEvent(new Event("submit", { cancelable: true }));
 assert.equal(await approved, true);
 
 const dialogsBeforeStartup = body.children.length;
