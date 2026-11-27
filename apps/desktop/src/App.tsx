@@ -23,7 +23,7 @@ import { branchTerminalLayout, findLayoutPath, layoutTerminalIds, rememberTermin
 import { FloatingDiagnostics } from "./FloatingDiagnostics";
 import { ThirdPartyCredits } from "./ThirdPartyCredits";
 import { registerTerminalPasteReveal, revealPastedTerminal } from "./terminal-paste-reveal";
-import { createTerminalFitScheduler } from "./terminal-fit";
+import { createTerminalFitScheduler, createTerminalResizeQueue } from "./terminal-fit";
 import { handleTerminalControlKey } from "./terminal-control-keys";
 import { FileTransferClient } from "./FileTransferClient";
 import { SyntaxHighlightSettings } from "./SyntaxHighlightSettings";
@@ -40,9 +40,9 @@ import { terminalPresets, defaultTerminalAppearance, resolveTerminalTheme, termi
 import { FolderCustomization, SessionFolderIcon } from "./FolderCustomization";
 import { appearanceIcons, readFolderStyles, defaultFolderStyle, type FolderStyle } from "./folder-appearance";
 import { Save, ArrowRight, FolderInput, Globe } from "lucide-react";
-import { FileText } from "lucide-react";
+import { Bell, FileText } from "lucide-react";
 import { NotesModal } from "./NotesModal";
-import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type UIEvent as ReactUIEvent } from "react";
 import { getHighlightRules, saveHighlightRules, MAX_GROUP_WORDS, MAX_HIGHLIGHT_TEXT, type HighlightRule, attachNetworkHighlighting } from "./network-highlighting";
 import { readClipboardText, writeClipboardText } from "./clipboard-access";
 import { TerminalContextMenu } from "./TerminalContextMenu";
@@ -430,6 +430,17 @@ type SessionImportReport = {
 };
 
 type SessionNotice = string | { message: string; details: string[]; total: number };
+type SessionNoticeHistory = { nextId: number; entries: { id: number; notice: SessionNotice }[] };
+
+function updateSessionNotices(history: SessionNoticeHistory, notice: SessionNotice | { dismiss: number }): SessionNoticeHistory {
+  if (typeof notice !== "string" && "dismiss" in notice) {
+    return { ...history, entries: history.entries.filter(entry => entry.id !== notice.dismiss) };
+  }
+  return {
+    nextId: history.nextId + 1,
+    entries: [{ id: history.nextId, notice }, ...history.entries].slice(0, 20),
+  };
+}
 
 type SnippetRecord = {
   id: string;
@@ -868,35 +879,33 @@ function TerminalViewport({ exportHost, exportBookmark, label, colorTheme, works
     ));
     onTerminalReady(workspaceId, terminal, searchAddon);
 
+    const resizeNative = createTerminalResizeQueue(async (cols, rows) => {
+      const terminalId = terminalIdRef.current;
+      if (disposed || !IS_TAURI || !terminalId || remoteProtocol === "serial") return;
+      const command = remoteProtocol === "ssh" ? "ssh_resize" : remoteProtocol === "telnet" ? "telnet_resize" : "terminal_resize";
+      await invoke(command, { terminalId, cols, rows });
+    });
     const fit = () => {
       if (disposed || isTerminalDetached(workspaceId) || host.clientWidth <= 0 || host.clientHeight <= 0) return false;
       if (IS_ANDROID) {
         if (!fitAndroidTerminal(terminal, fitAddon)) return false;
       } else { fitAddon.fit(); }
-      const terminalId = terminalIdRef.current;
-      if (IS_TAURI && terminalId && remoteProtocol !== "serial") {
-        const resizeCommand = remoteProtocol === "ssh" ? "ssh_resize" : remoteProtocol === "telnet" ? "telnet_resize" : "terminal_resize";
-        void invoke(resizeCommand, {
-          terminalId,
-          cols: terminal.cols,
-          rows: terminal.rows,
-        }).catch(() => undefined);
-      }
+      void resizeNative(terminal.cols, terminal.rows).catch(() => undefined);
       return true;
     };
     const disposeWindowSource = registerTerminalWindowSource(workspaceId, terminal, fit,
       data => { const nativeId = terminalIdRef.current; if (!disposed && !isWorkspaceLocked() && nativeId) onInput(workspaceId, nativeId, data); },
       async (cols, rows) => {
-        const terminalId = terminalIdRef.current;
-        if (disposed || !terminalId || isWorkspaceLocked() || remoteProtocol === "serial") return;
-        const command = remoteProtocol === "ssh" ? "ssh_resize" : remoteProtocol === "telnet" ? "telnet_resize" : "terminal_resize";
-        await invoke(command, { terminalId, cols, rows });
+        if (isWorkspaceLocked()) return;
+        await resizeNative(cols, rows);
       });
     const fitScheduler = createTerminalFitScheduler(fit, () => terminal.scrollToBottom(), callback => window.requestAnimationFrame(callback), id => window.cancelAnimationFrame(id));
     terminalFitRef.current = fitScheduler;
     const pasteReveal = registerTerminalPasteReveal(terminal, () => fitScheduler.schedule());
 
-    const resizeObserver = new ResizeObserver(fit);
+    const resizeObserver = new ResizeObserver(() => {
+      fitScheduler.schedule(terminal.buffer.active.viewportY >= terminal.buffer.active.baseY);
+    });
     resizeObserver.observe(host);
     if (IS_ANDROID && host.parentElement) resizeObserver.observe(host.parentElement);
     const disposeHorizontalPan = IS_ANDROID && host.parentElement
@@ -1363,14 +1372,9 @@ function App() {
   const sshConnectionAttempt = useRef(new ConnectionAttemptGate());
   const [sshConnecting, setSshConnecting] = useState(false);
   const [sessionListError, setSessionListError] = useState<string | null>(null);
-  const [sessionNotice, setSessionNotice] = useState<SessionNotice | null>(null);
-  useEffect(() => {
-    if (typeof sessionNotice !== "string") return;
-    const timer = window.setTimeout(() => {
-      setSessionNotice(current => current === sessionNotice ? null : current);
-    }, 5000);
-    return () => window.clearTimeout(timer);
-  }, [sessionNotice]);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const notificationButton = useRef<HTMLButtonElement>(null);
+  const [{ entries: sessionNotices }, setSessionNotice] = useReducer(updateSessionNotices, { nextId: 1, entries: [] });
   const [closing, setClosing] = useState(false);
   const [tftpServerRunning, setTftpServerRunning] = useState(false);
   const [fileTransferOpen, setFileTransferOpen] = useToolDialog("fileTransfer", activeToolDialog, setActiveToolDialog);
@@ -1579,7 +1583,6 @@ function App() {
     setActiveTerminalId(terminal.id);
     setTerminalLayout(current => branchParentId ? branchTerminalLayout(current, branchParentId, terminal.id) : { kind: "pane", terminalId: terminal.id });
     setConnectionError(null);
-    setSessionNotice(null);
     setActiveView("terminal");
   }, []);
 
@@ -1827,7 +1830,6 @@ function App() {
         setSessionNotice("Paste cancelled or its selected terminals changed. No input was sent.");
         return true;
       }
-      setSessionNotice(null);
       setConnectionError(null);
       recordTerminalInput(workspaceId, prepareTerminalPaste(data, source!.modes.bracketedPasteMode && source!.options.ignoreBracketedPasteMode !== true));
       await settleTerminalWrites([...targets].map(([id, target]) => {
@@ -1959,7 +1961,6 @@ function App() {
         await writeClipboardText(selection);
         setSessionNotice("Terminal selection copied explicitly.");
       } else {
-        setSessionNotice(null);
         await promptText("Copy this terminal selection", selection, { multiline: true, readOnly: true });
       }
       setConnectionError(null);
@@ -2259,7 +2260,6 @@ function App() {
         await writeClipboardText(command);
         setSessionNotice("Rendered snippet copied. Review it, then paste manually; Conxol does not auto-send it.");
       } else {
-        setSessionNotice(null);
         await promptText("Copy this rendered snippet and paste it manually", command, { multiline: true, readOnly: true });
       }
       setConnectionError(null);
@@ -2367,7 +2367,6 @@ function App() {
         await writeClipboardText(json);
         setSessionNotice("Secret-free settings copied. Credentials and session definitions are not included.");
       } else {
-        setSessionNotice(null);
         await promptText("Copy this secret-free Conxol settings export", json, { multiline: true, readOnly: true });
       }
       setConnectionError(null);
@@ -2438,7 +2437,6 @@ function App() {
       setSshConnecting(true);
       try {
         setConnectionError(null);
-        setSessionNotice(null);
         if (!IS_TAURI) {
           setConnectionError("SSH connections require the desktop runtime.");
           return;
@@ -2560,7 +2558,6 @@ function App() {
 
   const connectTelnet = useCallback(async (request: TelnetConnectRequest, offerSave = true, displayName?: string, shortcutDeviceId?: string, branchParentId?: string, bookmark?: SessionBookmark) => {
     setConnectionError(null);
-    setSessionNotice(null);
     if (!IS_TAURI) {
       setConnectionError("Telnet connections require the desktop runtime.");
       return;
@@ -2629,7 +2626,6 @@ function App() {
 
   const connectSerial = useCallback(async (request: SerialConnectRequest, shortcutDeviceId?: string, branchParentId?: string) => {
     setConnectionError(null);
-    setSessionNotice(null);
     if (!IS_TAURI) {
       setConnectionError("Serial connections require the desktop runtime.");
       return;
@@ -2678,7 +2674,6 @@ function App() {
       setSessionNotice(total > 0 ? { message, details, total } : message);
       setConnectionError(null);
     } catch (error) {
-      setSessionNotice(null);
       setConnectionError(String(error));
     }
   }, [refreshSavedSessions]);
@@ -3589,7 +3584,6 @@ function App() {
         await writeClipboardText(entry.path);
         setSessionNotice(`Copied remote path ${entry.path}.`);
       } else {
-        setSessionNotice(null);
         await promptText("Copy remote path", entry.path, { multiline: true, readOnly: true });
       }
     } catch (error) {
@@ -4143,6 +4137,16 @@ function App() {
     </div>;
   }, [colorTheme, detachedIds, savedSessions, saveSelectionShortcut, branchSession, handleTerminalPaste, handleNativeTerminalId, handleSearchResults, handleTerminalDisposed, handleTerminalInput, handleTerminalReady, handleTerminalStatus, handleTerminalTitle, reconnectBusy, reconnectSelectedTerminal, settings.appearance.fontSize, settings.appearance.terminalFont, settings.general.confirmMultilinePaste, settings.general.rightClickToPaste, settings.terminal]);
 
+  const pendingNotice = pendingSavedSession && !terminalTabs.some(terminal => terminal.connecting)
+    ? `Connecting to ${pendingSavedSession.name}…` : null;
+  const errorNotice = !quickConnectOpen && activeView !== "files" ? connectionError : null;
+  const notificationCount = sessionNotices.length + Number(!!storeUpdates.notice) + Number(!!pendingNotice) + Number(!!errorNotice);
+  const latestNotice = sessionNotices[0]?.notice;
+  const closeNotifications = () => {
+    setNotificationsOpen(false);
+    notificationButton.current?.focus();
+  };
+
   if (closing) return <main className={`app-shell shutdown-state theme-${themeMode(colorTheme)}`}><section role="status" aria-live="polite"><LoaderCircle className="spin" size={24} aria-hidden="true" /><h1>Closing Conxol</h1><p>Closing local terminals and finishing SSH file cleanup before exiting.</p></section></main>;
 
   return (
@@ -4151,6 +4155,10 @@ function App() {
 
       {!IS_ANDROID && pptpManagerOpen && <PptpManager onClose={() => setPptpManagerOpen(false)} />}
       <ApplicationMenuBar>
+        <button type="button" ref={notificationButton} className="notification-toggle" title="Notifications" aria-label={`Notifications (${notificationCount})`} aria-controls="notification-inbox" aria-expanded={notificationsOpen} onClick={() => setNotificationsOpen(open => !open)}>
+          <Bell size={15} aria-hidden="true" />
+          {notificationCount > 0 && <span aria-hidden="true">{notificationCount}</span>}
+        </button>
         <details name="desktop-menu"><summary>Sessions</summary><div className="desktop-menu">
           <button onClick={() => setQuickConnectOpen(true)}>New session…</button>
           <hr />
@@ -4189,7 +4197,7 @@ function App() {
         <div className="desktop-menu-end">{tftpServerRunning && <button className="tftp-server-indicator" onClick={() => setFileTransferOpen(true)} title="TFTP server is running. Open to stop sharing.">TFTP serving</button>}{workspaceSecurity.status?.enabled && <button aria-label="Lock workspace" title="Lock workspace" onClick={() => void workspaceSecurity.lock()}><LockKeyhole size={14} strokeWidth={1.5} /></button>}<span className="desktop-menu-status" title={IS_TAURI ? "Desktop runtime" : "Browser preview"}><span className="live-dot" /> Conxol</span></div>
       </ApplicationMenuBar>
 
-      <div className="app-body">
+      <div className={`app-body${notificationsOpen ? " notifications-open" : ""}`}>
         <nav className="session-activity-strip" aria-label="Sidebar tools">
           <button className="activity-sessions" title="User sessions" aria-label="User sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && !favoritesOnly && !recentOnly} aria-controls="session-sidebar" aria-expanded={sidebarOpen && sidebarMode === "sessions" && !favoritesOnly && !recentOnly} onClick={() => selectSessionSidebar("all")}><List size={16} strokeWidth={1.5} /></button>
           <button className="activity-favorites" title="Favorite sessions" aria-label="Favorite sessions" aria-pressed={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} aria-controls="session-sidebar" aria-expanded={sidebarOpen && sidebarMode === "sessions" && favoritesOnly && !recentOnly} onClick={() => selectSessionSidebar("favorites")}><Star size={16} strokeWidth={1.5} /></button>
@@ -4201,7 +4209,7 @@ function App() {
           <button className="activity-collapse" title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"} aria-expanded={sidebarOpen} aria-controls="session-sidebar" onClick={() => setSidebarOpen((open) => !open)}>{sidebarOpen ? <ChevronLeft size={16} strokeWidth={1.5} /> : <ChevronRight size={16} strokeWidth={1.5} />}</button>
           <button className="activity-settings" title="Settings" aria-label="Settings" aria-pressed={settingsOpen} onClick={openSettings}><Settings2 size={16} strokeWidth={1.5} /></button>
         </nav>
-        {IS_ANDROID && sidebarOpen && <button type="button" className="android-sidebar-backdrop" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} />}
+        {IS_ANDROID && sidebarOpen && !notificationsOpen && <button type="button" className="android-sidebar-backdrop" aria-label="Close sidebar" onClick={() => setSidebarOpen(false)} />}
         <aside className="sidebar" id="session-sidebar" style={{ flexBasis: sidebarOpen ? sidebarSize : 0 }}>
           <div className="sidebar-toolbar">
             <button className="sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Collapse sidebar">
@@ -4321,6 +4329,32 @@ function App() {
           onLostPointerCapture={() => { sidebarDrag.current = null; }} onPointerCancel={() => { sidebarDrag.current = null; }}
           onDoubleClick={() => setSidebarSize(DEFAULT_SIDEBAR_WIDTH)}
           onKeyDown={(event) => { if (event.key === "ArrowLeft" || event.key === "ArrowRight") { event.preventDefault(); setSidebarSize((width) => sidebarWidth(width + (event.key === "ArrowRight" ? 1 : -1) * (event.shiftKey ? 50 : 10), window.innerWidth)); } else if (event.key === "Home") { event.preventDefault(); setSidebarSize(DEFAULT_SIDEBAR_WIDTH); } }} />}
+        <aside id="notification-inbox" className="notification-inbox" hidden={!notificationsOpen} aria-labelledby="notification-heading" onKeyDown={event => {
+          if (event.key === "Escape") { event.stopPropagation(); closeNotifications(); }
+        }}>
+          <header>
+            <h2 id="notification-heading">Notifications</h2>
+            <button type="button" aria-label="Close notifications" title="Close notifications" onClick={closeNotifications}><X size={16} /></button>
+          </header>
+          <div className="notification-list">
+            {errorNotice && <div className="notification-item notification-error"><span>{errorNotice}</span><button type="button" className="outline-button" aria-label="Dismiss error" onClick={() => setConnectionError(null)}>Dismiss</button></div>}
+            {storeUpdates.notice}
+            {pendingNotice && <div className="notification-item"><LoaderCircle className="spin" size={15} aria-hidden="true" /><span>{pendingNotice}</span></div>}
+            {sessionNotices.map(({ id, notice }) => <div className="notification-item" key={id}>
+              {typeof notice === "string" ? <CheckCircle2 size={15} aria-hidden="true" /> : <CircleHelp size={15} aria-hidden="true" />}
+              <div>
+                <span>{typeof notice === "string" ? notice : notice.message}</span>
+                {typeof notice !== "string" && <details>
+                  <summary>Review import details ({notice.total})</summary>
+                  <ul>{notice.details.map((detail, index) => <li key={index}>{detail}</li>)}</ul>
+                  {notice.total > notice.details.length && <span>Showing first {notice.details.length} of {notice.total} details.</span>}
+                </details>}
+              </div>
+              <button type="button" className="notification-dismiss" aria-label="Dismiss notification" title="Dismiss notification" onClick={() => setSessionNotice({ dismiss: id })}><X size={14} /></button>
+            </div>)}
+            {notificationCount === 0 && <p className="notification-empty">No notifications</p>}
+          </div>
+        </aside>
         <section className="workspace" data-session-workspace="true">
           {splitDropTarget === "new-session" && <div className="session-new-drop-preview">Drop to start a new session</div>}
           {!sidebarOpen && <button className="floating-sidebar-button" onClick={() => setSidebarOpen(true)} aria-label="Expand sidebar"><PanelLeftClose size={16} /></button>}
@@ -4482,17 +4516,10 @@ function App() {
         </section>
       </div>
 
-      <div className="app-notifications">
-          {storeUpdates.notice}
-          {pendingSavedSession && !terminalTabs.some(terminal => terminal.connecting) && <div className="workspace-notice connection-pending" role="status" aria-live="polite"><LoaderCircle className="spin" size={15} aria-hidden="true" /><span>Connecting to {pendingSavedSession.name}…</span></div>}
-          {connectionError && !quickConnectOpen && activeView !== "files" && <div className="connect-error workspace-error" role="alert"><span>{connectionError}</span><button type="button" className="outline-button" aria-label="Dismiss error" onClick={() => setConnectionError(null)}>Dismiss</button></div>}
-          {sessionNotice && <div className={`workspace-notice${typeof sessionNotice === "string" ? "" : " workspace-notice-review"}`} role="status">
-            {typeof sessionNotice === "string" ? <CheckCircle2 size={14} /> : <CircleHelp size={14} />}
-            <div><span>{typeof sessionNotice === "string" ? sessionNotice : sessionNotice.message}</span>
-              {typeof sessionNotice !== "string" && <details><summary>Review import details ({sessionNotice.total})</summary><ul>{sessionNotice.details.map((detail, index) => <li key={`${index}:${detail}`}>{detail}</li>)}</ul>{sessionNotice.total > sessionNotice.details.length && <span>Showing first {sessionNotice.details.length} of {sessionNotice.total} details.</span>}</details>}
-            </div>
-          </div>}
-      </div>
+      <div className="notification-announcement" role="alert">{errorNotice}</div>
+      <div className="notification-announcement" role="status"><span key={sessionNotices[0]?.id}>{typeof latestNotice === "string" ? latestNotice : latestNotice?.message}</span></div>
+      <div className="notification-announcement" role="status">{pendingNotice}</div>
+      <div className="notification-announcement" role="status">{storeUpdates.noticeText}</div>
 
       <FloatingDiagnostics open={diagnosticsOpen} onMinimize={() => { setDiagnosticsOpen(false); requestTerminalFocus(selectedTerminalId); }} onClose={() => {
         void cancelNetworkScan();

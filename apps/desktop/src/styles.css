@@ -266,12 +266,6 @@ button:not(:disabled) { cursor: pointer; }
 .tunnel-row-copy small { display: block; margin-top: 5px; color: var(--faint); font-family: var(--mono); font-size: 8px; }
 .tunnel-row-copy .tunnel-error { color: var(--coral); white-space: normal; overflow-wrap: anywhere; }
 .tunnel-view-note { padding: 11px 16px; border-top: 1px solid var(--line); color: var(--faint); font-size: 9px; line-height: 1.45; }
-.workspace-notice { display: flex; align-items: center; gap: 8px; margin-top: 13px; padding: 9px 12px; border: 1px solid rgba(155, 196, 138, .25); background: rgba(155, 196, 138, .06); color: var(--mint); font-family: var(--mono); font-size: 9px; }
-.workspace-notice-review { align-items: flex-start; border-color: rgba(232, 180, 92, .32); color: var(--amber); }
-.workspace-notice-review > div { min-width: 0; }
-.workspace-notice-review details { margin-top: 6px; }
-.workspace-notice-review summary { cursor: pointer; }
-.workspace-notice-review ul { max-height: 160px; margin: 6px 0; padding-left: 18px; overflow: auto; overflow-wrap: anywhere; }
 .session-folder-group { margin-top: 2px; }
 .nested-folder { padding-left: 17px; color: var(--faint); font-size: 9px; font-weight: 600; }
 .nested-folder svg { color: var(--amber); }
@@ -544,10 +538,11 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .session-icon.local { color: var(--mint); }
 .app-shell .folder-heading, .app-shell .session-copy strong { color: var(--text); font-family: inherit; font-size: 12px; font-weight: 400; line-height: 1.4; letter-spacing: normal; }
 .app-shell .session-copy small, .app-shell .session-type { display: none; }
-.app-shell .session-row { position: relative; }
-.app-shell .session-row-actions { position: absolute; inset-inline-end: 2px; bottom: calc(100% - 3px); z-index: 1; visibility: hidden; pointer-events: none; }
-.app-shell .session-row:hover .session-row-actions, .app-shell .session-row:focus-within .session-row-actions { visibility: visible; pointer-events: auto; }
-.app-shell .session-row-actions button { width: 24px; height: 20px; min-height: 0; padding: 0; margin: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-raised); }
+.app-shell .session-row-actions { flex: 0 0 22px; margin-inline-end: 2px; opacity: 0; pointer-events: none; }
+.app-shell .session-row:hover .session-row-actions,
+.app-shell .session-row:focus-within .session-row-actions,
+.app-shell .session-row-actions:has(button[aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
+.app-shell .session-row-actions button { width: 22px; height: 20px; min-height: 0; padding: 0; margin: 0; border: 1px solid var(--line-strong); border-radius: 4px; background: var(--panel-raised); }
 .session-folder-controls { display: flex; gap: 10px; padding: 2px 4px 5px; }
 .session-folder-controls button { border: 0; padding: 2px 0; background: transparent; color: var(--muted); font: inherit; font-size: 10px; cursor: pointer; }
 .session-folder-controls button:hover { color: var(--amber); }
@@ -598,7 +593,6 @@ button:not(:disabled) { cursor: pointer; }
 .app-shell .terminal-frame-has-layout { padding: 0; }
 .app-shell .terminal-statusbar { flex-shrink: 0; min-height: 21px; }
 .app-shell .floating-sidebar-button { display: none; }
-.app-shell .workspace-error, .app-shell .workspace-notice { flex-shrink: 0; margin: 4px 8px; }
 .app-shell .main-column > .empty-protocol { flex: 1; min-height: 250px; margin-top: 0; }
 .desktop-home { display: grid; flex: 1; min-height: 0; overflow: auto; place-items: center; padding: 30px; }
 .desktop-home-content { width: min(600px, 100%); text-align: center; }
@@ -705,7 +699,6 @@ button:not(:disabled) { cursor: pointer; }
 .quick-connect-advanced .quick-connect-grid { padding: 14px 0 0; gap: 12px 10px; }
 .quick-connect-simple .quick-connect-footer { gap: 10px; padding-top: 12px; }
 .quick-connect-simple .quick-connect-footer > span { font-family: inherit; font-size: 10px; }
-.connection-pending { color: var(--amber); }
 .terminal-login-container { position: relative; width: 100%; height: 100%; min-height: 0; }
 .terminal-disconnect-banner { position: absolute; z-index: 2; inset: auto 12px 12px; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 16px; border: 1px solid var(--amber); border-radius: 6px; background: var(--panel); box-shadow: 0 4px 20px #0004; color: var(--text); font-size: 13px; }
 .terminal-disconnect-banner .primary-button { min-height: 38px; height: auto; padding: 8px 16px; font-size: 13px; cursor: pointer; }
@@ -1498,39 +1491,60 @@ body:has(.workspace-lock-surface) { overflow: hidden; }
 .diagnostics-instance-empty { padding: 16px; color: var(--muted); }
 
 .app-shell .session-row .session-copy { flex: 1; }
-.app-shell .session-row-actions:has(button[aria-expanded="true"]) { visibility: visible; pointer-events: auto; }
 
 .settings-modal .settings-general-options { grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .settings-modal .settings-general-option { min-width: 0; }
 .settings-modal .settings-general-option .settings-check { min-height: 20px; }
 .settings-modal .settings-general-option small { display: block; margin: 3px 0 0 22px; line-height: 1.5; }
 
-/* Keep app notifications at the left edge, independent of terminal layout. */
-.app-notifications {
-  position: fixed;
-  left: 36px;
-  bottom: 8px;
-  z-index: 8;
+/* The inbox occupies the sidebar space while open. */
+.desktop-menubar > .notification-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex-shrink: 0; }
+.notification-toggle > span { padding: 0 4px; border-radius: 8px; background: var(--amber-soft); color: var(--amber); font: 10px/14px var(--mono); }
+.desktop-menubar > .notification-toggle[aria-expanded="true"] { background: var(--panel-soft); color: var(--text); }
+.app-shell .notifications-open > :is(.sidebar, .sidebar-divider) { display: none; }
+.notification-inbox {
   display: flex;
+  flex: 0 0 min(300px, 40vw);
   flex-direction: column;
-  gap: 6px;
-  width: min(340px, calc(100vw - 44px));
-  max-height: min(50dvh, 420px);
-  overflow-y: auto;
-  pointer-events: none;
-}
-.app-shell .app-notifications > :is(.workspace-notice, .workspace-error) {
-  flex-shrink: 0;
   min-width: 0;
-  margin: 0;
-  padding: 9px 10px;
+  min-height: 0;
+  border-right: 1px solid var(--line-strong);
   background: var(--panel);
-  box-shadow: 0 3px 12px #0003;
-  overflow-wrap: anywhere;
-  pointer-events: auto;
 }
-.app-notifications > div > svg { flex-shrink: 0; }
-.app-notifications > div > :is(div, span) { min-width: 0; }
+.notification-inbox[hidden] { display: none; }
+.notification-inbox > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line-strong); }
+.notification-inbox h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.notification-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.notification-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.notification-item > svg { flex-shrink: 0; align-self: center; color: var(--mint); }
+.notification-item > div:not(.notification-actions) { flex: 1; min-width: 0; }
+.notification-item > span { flex: 1 0 100%; min-width: 0; }
+.notification-item > svg + span { flex: 1; }
+.notification-item :is(span, li) { overflow-wrap: anywhere; }
+.notification-item details { margin-top: 6px; }
+.notification-item summary { cursor: pointer; color: var(--mint); }
+.notification-item ul { padding-inline-start: 16px; }
+.notification-item .outline-button { min-height: 28px; padding: 3px 8px; }
+.notification-error { border-inline-start: 2px solid var(--coral); }
+.notification-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.notification-inbox > header > button, .notification-dismiss { display: grid; flex-shrink: 0; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; background: transparent; color: var(--muted); }
+.notification-dismiss { align-self: center; }
+.notification-inbox > header > button:hover, .notification-dismiss:hover { background: var(--panel-soft); color: var(--text); }
+.notification-empty { margin: 12px; color: var(--muted); font-size: 12px; }
+.notification-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.android .app-shell .notifications-open > :is(.sidebar, .workspace) { display: none; }
+.android .notification-inbox { flex: 1; border-right: 0; }
+.android .notification-inbox :is(header > button, .notification-dismiss) { width: 44px; height: 44px; }
 
 /* Fit terminal find into the existing menu row without reducing terminal height. */
 .desktop-menubar > .terminal-search-bar {

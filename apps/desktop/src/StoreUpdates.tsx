@@ -45,10 +45,15 @@ export function useStoreUpdates(unlocked: boolean) {
   const menuItem = supported ? <button type="button" disabled={busy || !unlocked} onClick={() => void run(false)}>
     {busy ? "Checking or updating…" : "Check for updates…"}
   </button> : null;
-  const notice = supported && unlocked && (available || message || error) ? <div className="workspace-notice" role="status">
-    <span>{error || message || "A Microsoft Store update is available. Installation may restart Conxol."}</span>
-    {available && <button type="button" className="outline-button" disabled={busy} onClick={() => void run(true)}>Update now…</button>}
-    <button type="button" className="outline-button" disabled={busy} onClick={() => { setAvailable(false); setMessage(""); setError(""); }}>{available ? "Later" : "Dismiss"}</button>
+  const noticeText = supported && unlocked
+    ? error || message || (available ? "A Microsoft Store update is available. Installation may restart Conxol." : "")
+    : "";
+  const notice = noticeText ? <div className={`notification-item${error ? " notification-error" : ""}`}>
+    <span>{noticeText}</span>
+    <div className="notification-actions">
+      {available && <button type="button" className="outline-button" disabled={busy} onClick={() => void run(true)}>Update now…</button>}
+      <button type="button" className="outline-button" disabled={busy} onClick={() => { setAvailable(false); setMessage(""); setError(""); }}>{available ? "Later" : "Dismiss"}</button>
+    </div>
   </div> : null;
-  return { menuItem, notice };
+  return { menuItem, notice, noticeText };
 }

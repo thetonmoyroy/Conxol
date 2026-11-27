@@ -23,3 +23,15 @@ export function createTerminalFitScheduler(fit: () => boolean, followBottom: () 
     },
   };
 }
+
+/** Apply the latest size after any update already in flight. */
+export function createTerminalResizeQueue(resize: (cols: number, rows: number) => Promise<void>) {
+  let pending = Promise.resolve();
+  return (cols: number, rows: number) => {
+    const update = pending.catch(() => undefined).then(() => {
+      if (pending === update) return resize(cols, rows);
+    });
+    pending = update;
+    return update;
+  };
+}

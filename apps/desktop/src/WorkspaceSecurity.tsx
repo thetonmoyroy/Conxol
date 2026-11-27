@@ -112,29 +112,29 @@ export function WorkspaceLockSettings({ initialSetup = false, onSetupComplete }:
   const { status, refresh, lock } = useWorkspaceLock();
   const currentRef = useRef<HTMLInputElement>(null), newRef = useRef<HTMLInputElement>(null), confirmRef = useRef<HTMLInputElement>(null);
   const [idle, setIdle] = useState(String(status?.idleMinutes ?? 5));
-  const [operation, setOperation] = useState<"change" | "disable" | "idle" | "enable" | null>(initialSetup && !status?.enabled ? "enable" : null);
+  const [operation, setOperation] = useState<"change" | "idle" | "enable" | null>(initialSetup && !status?.enabled ? "enable" : null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const gate = useRef(false);
   const clearPins = useCallback(() => { [currentRef, newRef, confirmRef].forEach(ref => { if (ref.current) ref.current.value = ""; }); }, []);
   useEffect(() => { if (status?.locked) { clearPins(); setMessage(null); } }, [status?.locked, clearPins]);
-  const apply = async (enabled: boolean) => {
+  const apply = async () => {
     if (gate.current || !native) return;
     let currentPin = currentRef.current?.value ?? "", newPin = newRef.current?.value ?? "", confirmation = confirmRef.current?.value ?? "";
-    if (enabled && (((!status?.enabled || operation === "change") && !validWorkspacePin(newPin)) || (newPin && !validWorkspacePin(newPin)))) { setMessage("Choose a PIN containing 4–12 digits."); return; }
-    if (enabled && newPin !== confirmation) { setMessage("The new PIN and confirmation do not match."); return; }
+    if (((!status?.enabled || operation === "change") && !validWorkspacePin(newPin)) || (newPin && !validWorkspacePin(newPin))) { setMessage("Choose a PIN containing 4–12 digits."); return; }
+    if (newPin !== confirmation) { setMessage("The new PIN and confirmation do not match."); return; }
     if (status?.enabled && !validWorkspacePin(currentPin)) { setMessage("Enter your existing workspace PIN in Current PIN above."); currentRef.current?.focus(); return; }
     clearPins();
     gate.current = true; setBusy(true); setMessage(null);
     try {
-      await invoke("workspace_lock_configure", { request: { enabled, currentPin, newPin: enabled ? newPin : "", idleMinutes: Number(idle) } });
-      await refresh(); setOperation(null); setMessage(enabled ? "PIN lock saved. Cold starts will require your PIN." : "Workspace PIN lock is off. Set it up before saving passwords.");
-      if (initialSetup && enabled) onSetupComplete?.();
+      await invoke("workspace_lock_configure", { request: { enabled: true, currentPin, newPin, idleMinutes: Number(idle) } });
+      await refresh(); setOperation(null); setMessage("PIN lock saved. Cold starts will require your PIN.");
+      if (initialSetup) onSetupComplete?.();
     } catch (error) { setMessage(String(error)); await refresh(); }
     finally { currentPin = ""; newPin = ""; confirmation = ""; gate.current = false; setBusy(false); }
   };
   if (!native) return <p className="settings-section-note">Workspace PIN locking is available in the desktop app.</p>;
-  if (initialSetup && !status?.enabled) return <form className="setup-pin-form" onSubmit={event => { event.preventDefault(); void apply(true); }}>
+  if (initialSetup && !status?.enabled) return <form className="setup-pin-form" onSubmit={event => { event.preventDefault(); void apply(); }}>
     <label htmlFor="setup-pin">PIN <span>4–12 digits</span></label>
     <input {...workspacePinInputProps} id="setup-pin" ref={newRef} type="password" inputMode="numeric" pattern="[0-9]{4,12}" minLength={4} maxLength={12} autoComplete="new-password" autoFocus required disabled={busy} aria-describedby={message ? "setup-pin-error" : undefined} />
     <label htmlFor="setup-pin-confirm">Confirm PIN</label>
@@ -151,13 +151,13 @@ export function WorkspaceLockSettings({ initialSetup = false, onSetupComplete }:
     <div className="workspace-pin-status"><ShieldCheck size={15} /><strong>{status?.enabled ? "PIN lock enabled" : "PIN lock is off"}</strong></div>
     <p className="settings-section-note">Protect your workspace and saved passwords with a 4–12 digit PIN. Longer PINs provide stronger protection. Changing the PIN re-encrypts saved passwords; locking clears the vault key from memory.</p>
     <div className="workspace-pin-actions">
-      {(status?.enabled ? [ ["change", "Change PIN"], ["idle", "Change idle timeout"], ["disable", "Turn off lock"] ] : [["enable", "Set up PIN lock"]]).map(([value, label]) => <button key={value} type="button" className="outline-button" disabled={busy} aria-pressed={operation === value} onClick={() => { clearPins(); setMessage(null); setIdle(String(status?.idleMinutes ?? 5)); setOperation(value as typeof operation); }}>{label}</button>)}
+      {(status?.enabled ? [ ["change", "Change PIN"], ["idle", "Change idle timeout"] ] : [["enable", "Set up PIN lock"]]).map(([value, label]) => <button key={value} type="button" className="outline-button" disabled={busy} aria-pressed={operation === value} onClick={() => { clearPins(); setMessage(null); setIdle(String(status?.idleMinutes ?? 5)); setOperation(value as typeof operation); }}>{label}</button>)}
       {status?.enabled && <button type="button" className="outline-button" disabled={busy} onClick={() => void lock()}>Lock now</button>}
     </div>
-    {operation && <section className="workspace-pin-operation" aria-label={operation === "disable" ? "Turn off PIN lock" : operation === "change" ? "Change PIN" : operation === "idle" ? "Change idle timeout" : "Set up PIN lock"}>
-      <h3>{operation === "disable" ? "Turn off PIN lock" : operation === "change" ? "Change PIN" : operation === "idle" ? "Change idle timeout" : "Set up PIN lock"}</h3>
+    {operation && <section className="workspace-pin-operation" aria-label={operation === "change" ? "Change PIN" : operation === "idle" ? "Change idle timeout" : "Set up PIN lock"}>
+      <h3>{operation === "change" ? "Change PIN" : operation === "idle" ? "Change idle timeout" : "Set up PIN lock"}</h3>
       {status?.enabled && <div className="workspace-pin-current">
-        <label htmlFor="settings-current-pin">Current PIN <span>{operation === "disable" ? "Enter your PIN to turn off workspace protection." : "Enter your PIN to authorize this change."}</span></label>
+        <label htmlFor="settings-current-pin">Current PIN <span>Enter your PIN to authorize this change.</span></label>
         <input {...workspacePinInputProps} key={operation} id="settings-current-pin" ref={currentRef} type="password" inputMode="numeric" maxLength={12} autoComplete="off" disabled={busy} placeholder="Enter your existing workspace PIN" autoFocus />
       </div>}
       {(operation === "change" || operation === "enable") && <div className="settings-grid">
@@ -173,7 +173,7 @@ export function WorkspaceLockSettings({ initialSetup = false, onSetupComplete }:
     </div>
       </>}
       <div className="workspace-pin-actions">
-        <button type="button" className="primary-button" disabled={busy} onClick={() => void apply(operation !== "disable")}>{busy ? "Saving…" : operation === "disable" ? "Confirm turn off" : operation === "change" ? "Save new PIN" : operation === "idle" ? "Save idle timeout" : "Enable PIN lock"}</button>
+        <button type="button" className="primary-button" disabled={busy} onClick={() => void apply()}>{busy ? "Saving…" : operation === "change" ? "Save new PIN" : operation === "idle" ? "Save idle timeout" : "Enable PIN lock"}</button>
         <button type="button" className="outline-button" disabled={busy} onClick={() => { clearPins(); setMessage(null); setOperation(null); setIdle(String(status?.idleMinutes ?? 5)); }}>Cancel</button>
       </div>
     </section>}
